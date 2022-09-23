@@ -1,0 +1,167 @@
+define(['jquery'], function ($) {
+
+  function getJSON(url, data) {
+    return $.getJSON(url, data);
+  }
+  
+  /**
+   * 获取链接中的参数值
+   * @param url
+   * @param par
+   * @returns {boolean|*}
+   */
+  function getParam(url, par) {
+    var urlsearch = url.split('?')
+    pstr = urlsearch[1].split('&')
+    for (var i = pstr.length - 1; i >= 0; i--) {
+      var tep = pstr[i].split('=')
+      if (tep[0] == par) {
+        return tep[1]
+      }
+    }
+    return (false)
+  }
+  
+  function getUrlParam(url, key) {
+    var search = url
+    if (search.length === 0) {
+      return ''
+    }
+    var kvArr = search.substring(1).split('&'), params = {}
+    for (var i = 0; i < kvArr.length; i++) {
+      var kv = kvArr[i].split('='), k = kv[0]
+      if (kv.length !== 2 || kv[1] === '') {
+        continue
+      }
+      if (k !== key) {
+        continue
+      }
+      var v = decodeURIComponent(kv[1])
+      if (params.hasOwnProperty(k)) {
+        if ($.isArray(params[k])) {
+          params[k].push(v)
+        } else {
+          params[k] = [params[k], v]
+        }
+      } else {
+        params[k] = v
+      }
+    }
+    return params[key]
+  }
+
+  /**
+   * 通过扫码获取用户puid,uname信息
+   */
+  function sweepCodeForUserInfo(AppUtils, callback) {
+    try {
+      AppUtils.openScanner('选人').then(function (json) {
+        if (json.message && json.message.indexOf('https://learn.chaoxing.com') !== -1) {
+          var params = JSON.parse(getUrlParam(json.message, 'params'));
+          getJSON('data/common/ppuser/info', {uid: params.uid}).then(function (res) {
+            if (!res.success) {
+              callback && callback({success: false, msg: '未找到用户信息'});
+              return;
+            }
+            if (res.data.userList && res.data.userList.length > 0) {
+              callback && callback({success: true, userInfo: res.data.userList[0]});
+            }
+          });
+        } else if (json.message && json.message.replace(/\\/g, '') && json.message.replace(/\\/g, '').indexOf('"sign":"1000000001"') !== -1) {
+          var params = JSON.parse(json.message.replace(/\\/g, ''));
+          if (params.sign && params.sign === '1000000001') {
+            getJSON('data/common/micro/sweep/verify/info', {enc: params.data}).then(function (res) {
+              if (!res.success) {
+                callback && callback({success: false, msg: '未找到用户信息'});
+                return;
+              }
+              callback && callback({success: true, userInfo: {puid: res.data.userInfo.uid, name: res.data.userInfo.realname}});
+            });
+          }
+        } else if (json.cancelFlag === '1') {
+          callback && callback({success: true, cancelFlag: true});
+        } else {
+          callback && callback({success: false, msg: '无效的二维码'});
+        }
+      });
+    } catch (e) {
+      callback && callback({success: false, msg: '无效的二维码'});
+    }
+  }
+
+  /**
+   * 创建直播服务
+   */
+  function createLiveVideoServer(AppUtils, url, param, callback) {
+    try {
+      getJSON(url, param).then(function (res) {
+        if (!res.success) {
+          callback && callback({success: false, msg: res.msg});
+          return;
+        }
+        if (res.data.result && res.data.result.result && res.data.result.result === 1 && res.data.result.data) {
+          callback && callback({success: true, data: res.data.result.data});
+          AppUtils.openLive({description: res.data.result.data});
+        }
+      });
+    } catch (e) {
+      callback && callback({success: false, msg: '创建直播服务失败！'});
+    }
+  }
+
+  /**
+   * 获取直播状态
+   */
+  function getLiveStatus(streamName, vdoid, callback) {
+    try {
+      getJSON('data/common/live/status', {streamName: streamName, vdoid: vdoid}).then(function (res) {
+        if (!res.success) {
+          callback && callback({success: false, msg: res.msg});
+          return;
+        }
+        if (res.data.liveVideoStatus) {
+          callback && callback({success: true, data: res.data.liveVideoStatus});
+        }
+      });
+    } catch (e) {
+      callback && callback({success: false, msg: '获取直播状态失败！'});
+    }
+  }
+
+  /**
+   * 获取直播信息
+   */
+  function getLiveInfo(streamName, vdoid, callback) {
+    try {
+      getJSON('data/common/live/info', {streamName: streamName, vdoid: vdoid}).then(function (res) {
+        if (!res.success) {
+          callback && callback({success: false, msg: res.msg});
+          return;
+        }
+        if (res.data.descriptionResult) {
+          callback && callback({success: true, data: res.data.descriptionResult});
+        }
+      });
+    } catch (e) {
+      callback && callback({success: false, msg: '获取直播信息失败！'});
+    }
+  }
+
+  function dropRefresh() {
+    $('body').dropload({
+      scrollArea: window,
+      loadUpFn: function (me) {
+        location.reload(true);
+      }
+    })
+  }
+
+  return {
+    sweepCodeForUserInfo: sweepCodeForUserInfo,
+    createLiveVideoServer: createLiveVideoServer,
+    getLiveStatus: getLiveStatus,
+    getLiveInfo: getLiveInfo,
+    dropRefresh: dropRefresh,
+    getParam: getParam
+  }
+});

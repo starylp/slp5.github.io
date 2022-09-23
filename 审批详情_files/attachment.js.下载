@@ -1,0 +1,145 @@
+define(['Vue', 'appUtils', 'publicUpload'], function (Vue, AppUtils, publicUpload) {
+  'use strict'
+  
+  return Vue.extend({
+    template: [
+      '<div class="uploadCon borderBtm">',
+      '<p class="uptit">',
+      '<span class="fr" v-if="!wx">',
+      '<img width="100%" height="100%" src="static/style/approve/flow/images/file.png"  @click="attachmentAdd"/>',
+      '</span>',
+      '<span class="fr"  v-else>',
+      '<img width="100%" height="100%" src="static/style/approve/flow/images/file.png"/>',
+      '<input type="file" name="file" class="file" id="file" @change.stop="uploadFile($event)"/>',
+      '</span>',
+      '</p>',
+      '<p class="Enclosure" v-for="file in value">',
+      '<i><img src="static/style/approve/flow/images/colose.png" @click="attachmentRemove(file.objectId)" /></i>',
+      '<span @click="attachmentOpen(file)">{{file.name}}</span>',
+      '</p>',
+      '</div>'
+    ].join(''),
+    props: {
+      'value': {
+        type: Array,
+        default: function () {
+          return []
+        }
+      },
+      'wx': {
+        type: Boolean,
+        default: function () {
+          return false
+        }
+      },
+      'readonly': {
+        type: Boolean,
+        default: function () {
+          return false
+        }
+      }
+    },
+    methods: {
+      /**
+       * 添加附件
+       */
+      attachmentAdd: function () {
+        if (this.readonly) {
+          return
+        }
+        var val = this.value
+        AppUtils.clientSelectCloudRes({maxSize: 9}).then(function (json) {
+          var files = []
+          if (json.selectInfo) {
+            files = eval(json.selectInfo)
+          } else if (json.typeflag == 'CX_SELECT_CLOUDRES' && json.info) {
+            files = eval(json.info)
+          }
+          if (files && files.length > 0) {
+            for (var i = 0, file; file = files[i++];) {
+              if (!file.objectId && file.objectIdStr) {// ios云盘没有返回objectId，而是返回了objectIdStr
+                file.objectId = file.objectIdStr
+              }
+              if (!file.objectId) {
+                AppUtils.clientMessageDisplay('附件上传出错:' + file.name)
+              }
+              var isExist = false
+              for (var j = 0; j < val.length; j++) {
+                if (val[j].objectId == file.objectId) {
+                  isExist = true
+                  break
+                }
+              }
+              if (!isExist) {
+                var valData = {
+                  'objectId': file.objectId,
+                  'isfile': file.isfile,
+                  'name': file.name,
+                  'puid': file.puid,
+                  'resid': file.resid,
+                  'suffix': file.suffix,
+                  'size': file.size
+                }
+                val.push(valData)
+              }
+            }
+          }
+        })
+      },
+      uploadFile: function (e) {
+        var _this = this
+        if (_this.readonly) {
+          return
+        }
+        var formData = new FormData()
+        if (2048 < e.target.files[0].size / 1024 / 1024) {
+          alert('文件大小超出最大限制')
+          return
+        }
+        formData.append('file', e.target.files[0])
+        publicUpload.commonUpload(_this, formData).then(function (response) {
+          if (response.success && response.data) {
+            _this.value.splice(_this.value.length, 0, response.data);
+            e.target.value = ''
+          } else {
+            alert(response.msg || '上传失败')
+          }
+        })
+      },
+      /**
+       * 删除附件
+       */
+      attachmentRemove: function (objectId) {
+        if (this.readonly) {
+          return
+        }
+        if (confirm('确定要删除吗？')) {
+          for (var i = 0; i < this.value.length; i++) {
+            if (this.value[i].objectId == objectId) {
+              this.value.splice(i, 1)
+            }
+          }
+          if (this.value.length == 0) {
+            this.value = []
+          }
+        }
+      },
+      /**
+       * 查看附件
+       */
+      attachmentOpen: function (file) {
+        if (file) {
+          AppUtils.clientOpenRes({
+            filename: file.name,
+            objectId: file.objectId,
+            suffix: file.suffix,
+            size: file.size
+          })
+        }
+      }
+    },
+    created: function () {
+    
+    }
+  })
+})

@@ -1,0 +1,165 @@
+define(['jquery', 'appUtils', 'moment', 'viewer', 'dropload'], function ($, AppUtils, moment, Viewer) {
+  'use strict'
+  
+  function roundTime(a, b) {
+    return Math.round(a / b * 10) / 10
+  }
+  
+  function lengthOfLeave(sdate, edate) {
+    var s = moment(sdate), e = moment(edate), oneHour = 60, oneDay = oneHour * 24,
+        rMinute = e.diff(s, 'minutes'),
+        rDay = parseInt(rMinute / oneDay),
+        rHour = parseInt(rMinute % oneDay / oneHour),
+        rMinute = parseInt(rMinute % oneDay % oneHour),
+        duration = ''
+    
+    if (rDay > 0) {
+      duration += rDay + '天'
+    }
+    if (rHour > 0 || rMinute > 0) {
+      duration += (rHour + roundTime(rMinute, oneHour)) + '小时'
+    }
+    
+    return {
+      rDay: rDay, rHour: rHour, rMinute: rMinute, duration: duration
+    }
+  }
+  
+  function dropRefresh() {
+    $('body').dropload({
+      scrollArea: window,
+      loadUpFn: function (me) {
+        location.reload(true)
+      }
+    })
+  }
+  
+  function getType(file) {
+    var imgTypeReg = '(jpg|jpeg|gif|xbm|pcd|tif|tiff|svg|pnz|ief|dib|jpe|png|bmp|ico)$'
+    var textTypeReg = '(pdf|doc|docx|xls|xlt|xlsm|xlsx|ppt|pptx)$'
+    var audioTypeReg = '(amr)$'
+    var imgReg = new RegExp(imgTypeReg)
+    var textReg = new RegExp(textTypeReg)
+    var audioReg = new RegExp(audioTypeReg)
+    if (audioReg.test(file.suffix)) {
+      return 'audio'
+    } else if (imgReg.test(file.suffix)) {
+      return 'image'
+    } else if (textReg.test(file.suffix)) {
+      return 'text'
+    } else {
+      return ''
+    }
+  }
+
+  function scanFiles(files, index, isImagePreview, currFile) {
+    if (!files || files.length <= 0) {
+      alert('未找到图片或附件信息')
+      return
+    }
+    var ua = navigator.userAgent
+    if (ua.indexOf('ChaoXingStudy') !== -1) {
+      //学习通客户端
+      if (isImagePreview) {
+        var imgSrcs = []
+        for (var i = 0, img; img = files[i++];) {
+          if (img.fileUrl) {
+            if (img.fileUrl.substr(0, 4) !== 'http') {
+              img.fileUrl = location.origin + img.fileUrl
+            }
+          } else {
+            img.fileUrl = panUrl + '/thumbnail/origin/' + img.objectId
+          }
+          imgSrcs.push({
+            imageUrl: img.fileUrl
+          })
+        }
+        AppUtils.clientPreviewImages(imgSrcs, index)
+      } else {
+        if (currFile.noteCid) {
+          return
+        }
+        if (currFile) {
+          AppUtils.clientOpenRes({
+            filename: currFile.name,
+            objectId: currFile.objectId,
+            suffix: currFile.suffix
+          })
+        }
+      }
+    } else {
+      //其它客户端或浏览器
+      var data = []
+      for (var j = 0, ele; ele = files[j++];) {
+        if (!ele.name) {
+          ele['name'] = '文件'
+        }
+        var type, src, isHtml = false
+        if (getType(ele) === 'text') {
+          src = 'https://officeonline.superlib.com/3rd/proxy.html?objectid=' + ele.objectId + '&suffix=' + ele.suffix
+          type = 'iframe'
+          isHtml = true
+        } else if (getType(ele) === 'image') {
+          src = panUrl + '/thumbnail/origin/' + ele.objectId
+          type = 'image'
+          isHtml = true
+        } else {
+          type = 'iframe'
+          src = location.origin + uniqueDomainPath + '/front/open/data/export/download?fileName=' + encodeURIComponent(ele.name) + '&objectid=' + ele.objectId + '&suffix=' + ele.suffix
+        }
+        data.push({
+          src: src,
+          type: type,
+          opts: {
+            caption: isHtml ? ('<p class="customDownload"><a href="front/open/data/export/download?fileName=' + encodeURIComponent(ele.name) + '&objectid=' + ele.objectId + '&suffix=' + ele.suffix + '" class="ml60" target="_blank" >下载查看</a></p>' +
+                '<p>' + ele.name + '</p>') : (ele.name)
+          }
+        })
+      }
+      var instance = $.fancybox.open(data, {
+        toolbar: false,
+        loop: true,
+        width: 800,
+        height: 600
+      })
+      
+      instance.jumpTo(index)
+    }
+  }
+  
+  //2020.1.15
+  function imageShow(data) {
+    if (data.picture && data.picture.length > 0) {
+      setTimeout(function () {
+        var image = new Viewer(document.getElementById('image'), {
+          url: 'data-original',
+          button: false,
+          title: false
+        })
+      }, 500)
+    }
+  }
+  
+  //2020.1.16
+  function imageShows(data) {
+    setTimeout(function () {
+      for (var i = 0; i < data.length; i++) {
+        if (data[i].picture && data[i].picture.length > 0) {
+          var image = new Viewer(document.getElementById('image' + i), {
+            url: 'data-original',
+            button: false,
+            title: false
+          })
+        }
+      }
+    }, 500)
+  }
+  
+  return {
+    lengthOfLeave: lengthOfLeave,
+    dropRefresh: dropRefresh,
+    scanFiles: scanFiles,
+    imageShow: imageShow,
+    imageShows: imageShows
+  }
+})

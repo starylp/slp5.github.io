@@ -1,0 +1,469 @@
+define(['jquery', 'util', 'publicUtils', 'VueUtils'], function ($, util, publicUtils, VueUtils) {
+  'use strict'
+  return function (widget) {
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: _this.value,
+        compose: 'row',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+
+    function getRegExp(_this) {
+      var regexp = ''
+      switch (_this.formatType) {
+        case '':
+          break
+        case 'email':
+          regexp = /^([a-zA-Z0-9_.-])+@([a-zA-Z0-9_-])+((\.[a-zA-Z0-9_-]{2,4}){1,4})$/
+          _this.formatName = '邮箱'
+          break
+        case 'mobile':
+          regexp = /^1[3456789]\d{9}$/
+          _this.formatName = '手机号码'
+          break
+        case 'postcode':
+          regexp = /^[0-9]{6}$/
+          _this.formatName = '邮政编码'
+          break
+        case 'idCard':
+          regexp = /(^[1-9]\d{5}(18|19|20)\d{2}((0[1-9])|(10|11|12))(([0-2][1-9])|10|20|30|31)\d{3}[0-9Xx]$)|(^[1-9]\d{5}\d{2}((0[1-9])|(10|11|12))(([0-2][1-9])|10|20|30|31)\d{3}$)/
+          _this.formatName = '身份证号码'
+          break
+        case 'customRegType':
+          if (_this.regularExpress) {
+            regexp = new RegExp(_this.regularExpress)
+            _this.formatName = _this.regularErrMsg
+          }
+          break
+      }
+      return regexp
+    }
+
+    return {
+      id: widget.id,
+      template: [
+        '<div>',
+        '<div class="cell_cont" v-show="isShow && hasAuthority">',
+        '<span :class="{cell_text: value, cell_nodata: !value}">{{valShow}}</span>',
+        '</div>',
+        '<div style="display:none;">{{relateFieldValueStatus}}{{buttonFieldValue}}{{isHaveUniqueError}}{{ocrFieldValue}}</div>',
+        '<event-trigger :widget="widget" :compose="\'row\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event="triggerValueEvent" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+        '<field-link-trigger :widget="widget" @set-loading-status="triggerLoadingEvent" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+        '<detail-combox-field-link-trigger :widget="widget" @set-loading-status="triggerLoadingEvent" @set-field-value="detailComboxLinkFieldValueStatus"></detail-combox-field-link-trigger>',
+        '<field-formula-trigger :widget="widget" @set-loading-status="triggerLoadingEvent" @set-formula-field-value="formulaFieldValueStatus"></field-formula-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: '',
+          errInfo: {
+            isError: false,
+            errMsg: ''
+          },
+          formatName: '',
+          loadStatus: false,
+          watchValue: ''//用于外部参数赋值时触发数据联动（目前为：第三方传入及按钮组件）
+        }
+      },
+      methods: {
+        $reloadValueFun: function (vueObj) {
+          //子表单横排时打开某行子组件后依次给对应子表彰表格显示字段赋值
+          this.value = vueObj.value
+          return this.verified
+        },
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEvent: function (val) {
+          this.value = val
+          this.loadStatus = false
+        },
+        triggerGetValueEvent:function (callback) {
+          callback([{val: this.value}])
+        },
+        isMust: function () {
+          if (this.readonly) {
+            return
+          }
+          if ($.trim(this.value) === '' && this.required) {
+            this.errInfo.isError = true
+            this.errInfo.errMsg = '为必填项'
+            return
+          }
+          if (this.charLimitStatus) {
+            this.errInfo.isError = true
+            this.errInfo.errMsg = '超过字符限制'
+            return
+          }
+          if ($.trim(this.value) !== '') {
+            var regexp = getRegExp(this)
+            if (regexp && (!regexp.test(this.value) || (this.formatType === 'idCard' && !publicUtils.idCardCodeValid(this.value)))) {
+              if (this.formatType === 'customRegType') {
+                this.errInfo.errMsg = this.regularErrMsg
+                this.errInfo.isError = true
+              } else {
+                this.errInfo.errMsg = this.formatName + '格式不合法'
+                this.errInfo.isError = true
+              }
+              return
+            }
+          }
+          this.errInfo.isError = false
+          dataLoadInit(this)
+          var formFormulaFields = this.$store.getters.getFormConditionFormulaFieldObj(this.widget.config.id)
+          if (formFormulaFields && formFormulaFields.length > 0) {
+            //存在当前字段被做为公式编辑条件字段
+            this.$store.dispatch('operateFormulaFiledData', {
+              id: this.widget.id,
+              configId: this.widget.config.id,
+              inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+              value: $.trim(this.value)
+            })
+          }
+        },
+        linkFieldValueStatus: function (result) {
+          this.loadStatus = false
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+  
+          if (hasNullCondVal && !this.isInit) {
+            this.value = ''
+            dataLoadInit(this)
+            this.$store.commit('removeCurrFormValueFieldVerify', {
+              id: this.widget.config.id,
+              type: 1,
+              inDetailGroupIndex: this.widget.config.inDetailGroupIndex
+            })
+            return
+          }
+
+          if (result && result.length > 0 && (!this.isPreview || !this.isInit)) {
+            this.value = result[0].val
+            dataLoadInit(this)
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {
+            id: this.widget.config.id,
+            type: 1,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex
+          })
+        },
+        detailComboxLinkFieldValueStatus: function (result) {
+          this.loadStatus = false
+          if (result && result.length > 0 && (!this.isPreview || !this.isInit)) {
+            this.value = result[0].val
+            dataLoadInit(this)
+          }
+        },
+        formulaFieldValueStatus: function (data) {
+          this.loadStatus = false
+          var refreshResult = data.result, formulaFieldType = data.type, formulaFieldCurrIndex = data.index
+          if (formulaFieldType === 0 && formulaFieldCurrIndex !== this.widget.config.inDetailGroupIndex && this.$store.state.formulaFieldCurrIndex > -1 && this.widget.config.inDetailGroupIndex > -1) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 2, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+          var key = (formulaFieldType > 0 && this.widget.pid > 0) ? this.widget.config.id + '_' + this.widget.config.inDetailGroupIndex : this.widget.config.id
+          var result = refreshResult[key]
+          if (result && result.length > 0) {
+            this.value = result[0].val
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 2, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        }
+      },
+      components: {
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue'),
+        detailComboxFieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/detailcombox/detailComboxFieldLinkTrigger.vue'),
+        fieldFormulaTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldFormula/fieldFormulaTrigger.vue')
+      },
+      watch: {
+        value: function () {
+          if (!this.verified) {
+            if ($.trim(this.value) === '') {
+              this.errInfo.errMsg = '为必填项'
+            } else {
+              var regexp = getRegExp(this)
+              if (regexp && (/^idCard|postcode|mobile|email$/.test(this.formatType))) {
+                this.value = this.value.replace(/\s/g, '')
+              }
+              if (regexp && (!regexp.test(this.value) || (this.formatType === 'idCard' && !publicUtils.idCardCodeValid(this.value)))) {
+                if (this.formatType === 'customRegType') {
+                  this.errInfo.errMsg = this.regularErrMsg
+                } else {
+                  this.errInfo.errMsg = this.formatName + '格式不合法'
+                }
+              }
+            }
+          }
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: $.trim(this.value)}]}
+            ],
+            errMsg: this.errInfo.errMsg,
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        },
+        watchValue: function () {
+          dataLoadInit(this)
+        }
+      },
+      computed: {
+        valShow: function () {
+          return this.value === ''? '':this.value
+        },
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          var verified = true
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if ($.trim(this.value) !== '') {
+            var regexp = getRegExp(this)
+            if (regexp && (!regexp.test(this.value) || (this.formatType === 'idCard' && !publicUtils.idCardCodeValid(this.value)))) {
+              verified = false
+            }
+          }
+          if (this.required && $.trim(this.value) === '') {
+            verified = false
+          }
+          if (this.charLimitStatus) {
+            verified = false
+          }
+          return verified
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          if (this.$store.getters.getCurrentType) {
+            return this.$store.getters.getReadonlyStatus
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === this.widget.config.inDetailGroupIndex) || !obj.hasOwnProperty('inDetailIndex')) && (!this.isPreview || !this.isInit)) {
+            this.value = obj.fields[0].values && obj.fields[0].values.length > 0 && obj.fields[0].values[0].val !== '' ? obj.fields[0].values[0].val : ''
+            delete resultFields[this.widget.config.id]
+          }
+          if (this.isClearRelatedData && obj && obj.id === this.widget.config.id) {
+            this.value = ''
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        isClearRelatedData: function () {
+          return this.$store.getters.getIsClearRelatedData
+        },
+        formatType: function () {
+          return this.widget.config.fields[0].verify.format ? this.widget.config.fields[0].verify.format.type : ''
+        },
+        regularExpress: function () {
+          if (!this.widget.config.fields[0].verify.regularExpress) {
+            return ''
+          }
+          return this.widget.config.fields[0].verify.express || ''
+        },
+        regularErrMsg: function () {
+          if (!this.widget.config.fields[0].verify.regularExpress) {
+            return '格式错误!'
+          }
+          return this.widget.config.fields[0].verify.regularExpress.errorTip || '格式错误!'
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+          
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类似web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = this.$store.state.reloadValSubField
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            if (this.widget.pid > 0 && !this.$store.state.verifieds[this.widget.pid].isShow) {
+              //明细内子组件时 如果明细组件是隐藏状态时 当前子组件也要改成隐藏状态
+              showStatus = false
+            } else {
+              showStatus = true
+            }
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: $.trim(this.value)}]}
+            ],
+            errMsg: this.errInfo.errMsg,
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        buttonFieldValue: function () {
+          var fieldValue = this.$store.getters.getButtonFieldValue(this.widget.config.alias)
+          if (fieldValue) {
+            this.watchValue = fieldValue
+            this.value = fieldValue.val[0] || ''
+          }
+          return fieldValue
+        },
+        ocrFieldValue: function () {
+          var fieldValue = this.$store.getters.getOcrFieldValue(this.widget.config.inDetailGroupIndex + '_' + this.widget.config.alias)
+          if (fieldValue) {
+            this.watchValue = fieldValue
+            this.value = fieldValue.val[0] || ''
+          }
+          return fieldValue
+        },
+        isHaveUniqueError: function () {
+          var status = false
+          var compt = this.widget.config
+          var uniqueErrorFields = this.$store.getters.getUniqueErrorFields
+          var unique = compt.fields[0].verify.unique
+          if (unique && unique.open && uniqueErrorFields.hasOwnProperty(compt.id + '-' + compt.inDetailGroupIndex)) {
+            this.errInfo.errMsg = unique.errMsg
+            status = true
+          }
+          return status
+        },
+        charLimitStatus: function () {
+          if (!this.value || !this.charLimit || !this.charLimit.open) {
+            return false
+          }
+          if (this.charLimit.maxSize && (!this.charLimit.minSize || parseInt(this.charLimit.minSize) === 0) && $.trim(this.value).length > parseInt(this.charLimit.maxSize)) {
+            this.errInfo.errMsg = '超过字符限制'
+            return true
+          }
+          if (this.charLimit.minSize && !this.charLimit.maxSize && $.trim(this.value).length < parseInt(this.charLimit.minSize)) {
+            this.errInfo.errMsg = '最少输入' + this.charLimit.minSize + '个字符'
+            return true
+          }
+          if (this.charLimit.minSize && this.charLimit.maxSize && $.trim(this.value).length < parseInt(this.charLimit.minSize) || $.trim(this.value).length > parseInt(this.charLimit.maxSize)) {
+            this.errInfo.errMsg = '限定字符个数' + this.charLimit.minSize + '-' + this.charLimit.maxSize
+            return true
+          }
+          return false
+        },
+        charLimit: function () {
+          var charLimit = this.widget.config.fields[0].verify.charLimit
+          if (charLimit && charLimit.open && charLimit.size) {
+            charLimit.maxSize = charLimit.size
+            delete this.widget.config.fields[0].verify.charLimit.size
+          }
+          return charLimit
+        }
+      },
+      mounted: function () {
+        var _this = this
+        //防止子组件中构造各组件实例未执行，导致默认值数据关联失效问题
+        _this.$nextTick(function () {
+          setTimeout(function () {
+            dataLoadInit(_this, _this.$store.getters.getComptDataType('init'))
+          }, 500)
+        })
+      },
+      created: function () {
+        var values = this.widget.config.fields[0].values
+        this.value = values ? (values[0] && values[0].val) || '' : ''
+        if (this.widget.config.fields[0].hasOwnProperty('unchangeable')) {
+          this.widget.config.fields[0].editable = !this.widget.config.fields[0].unchangeable
+          delete this.widget.config.fields[0].unchangeable
+        }
+        var rev = this.$store.getters.getRelevance
+        if (rev != null && rev.hasOwnProperty(this.widget.config.id) && rev[this.widget.config.id]) {
+          this.value = rev[this.widget.config.id]
+        }
+      }
+    }
+  }
+})

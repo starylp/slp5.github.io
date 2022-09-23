@@ -1,0 +1,27 @@
+define(['jquery'], function ($) {
+
+  /**
+   * 横排子表单内字段是否显示（用于三端detail.js中的rowsTitle方法）（不包含visible）
+   */
+  function isDetailComptsShow(_this, compt) {
+    var showStatus = false
+    var gatherMode = _this.$store.getters.getGatherModel
+    if (gatherMode) {
+      return !!_this.$store.getters.getFieldGatherShowStatusById(compt.id)
+    }
+    var approveModel = _this.$store.getters.getApproveModel
+    if (approveModel && !_this.$store.getters.getApproveFieldShowStatus(compt.id, compt.compt)) {
+      return showStatus
+    }
+    var permissionSetHideFields = _this.$store.getters.getPermissionSetHideFields
+    if (permissionSetHideFields && permissionSetHideFields.indexOf(compt.id) !== -1) {
+      showStatus = false
+      return showStatus
+    }
+    return true
+  }
+
+  return { //后续可将三端字段权限相关的方法提取至此文件
+    isDetailComptsShow: isDetailComptsShow //横排子表单内字段是否显示（用于三端detail.js中的rowsTitle方法）（不包含visible）
+  }
+})

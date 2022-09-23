@@ -1,0 +1,819 @@
+define(['util', 'moment', 'iosSelectCmp', 'jquery', 'VueUtils', 'publicUtils'], function (util, moment, IosSelectCmp, $, VueUtils, publicUtils) {
+  'use strict'
+  
+  function formatTimeValue(value, formatter) {
+    if (value === 'Invalid date' || value.length === 0) {
+      return ''
+    }
+    
+    if (formatter === 'yyyy-MM-dd') {
+      formatter = 'YYYY-MM-DD'
+    } else if (formatter === 'yyyy-MM-dd HH:mm') {
+      formatter = 'YYYY-MM-DD HH:mm'
+    } else if (formatter === 'YYYY-MM-DD HH:mm') {
+      formatter = ''
+    }
+    
+    return moment(value).format(formatter)
+  }
+  
+  function unitToType(fieldType) {
+    switch (fieldType.unit) {
+      case 'day':
+        return fieldType.isHalf ? 2 : 1
+      default:
+        return 3
+    }
+  }
+  
+  /**
+   * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+   */
+  function dataLoadInit(_this, dataType) {
+    _this.$store.dispatch('dataLoadInit', {
+      widget: _this.widget,
+      value: $.trim(_this.value),
+      compose: 'col',
+      dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+    })
+  }
+  
+  return function (widget) {
+    
+    return {
+      id: widget.id,
+      template: [
+        '<div v-show="isShow && hasAuthority">',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="time_range_forbid" v-if="readonly">',
+              '<!--开始时间-->',
+              '<div class="time_forbid_start">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{stitle}}</h2>',
+                '</div>',
+                '<div class="form_forbid_edit" :class="{form_forbid_nodata: !stip}">',
+                  '<p class="form_forbid_word">{{stip ? stip :\'暂无数据\'}}</p>',
+                '</div>',
+              '</div>',
+              '<!--结束时间-->',
+              '<div class="time_forbid_end mt20">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{etitle}}</h2>',
+                '</div>',
+                '<div class="form_forbid_edit" :class="{form_forbid_nodata: !etip}">',
+                  '<p class="form_forbid_word">{{etip ? etip :\'暂无数据\'}}</p>',
+                '</div>',
+              '</div>',
+              '<!--时长-->',
+              '<div class="time_forbid_length mt20" v-if="calculate">',
+              '<div class="form_widget_title">',
+              '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{rtitle}}</h2>',
+              '</div>',
+              '<div class="form_forbid_edit" :class="{form_forbid_nodata: !rinput}">',
+              '<p class="form_forbid_word">{{rinput}}</p>',
+              '</div>',
+              '</div>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<!--开始时间-->',
+              '<div class="widget_time_start mt20">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{stitle}}</h2>',
+                '</div>',
+                '<div class="temp_icon_input" @click.stop="selectTime(0)">',
+                  '<i class="input_icon icon-date"></i>{{stip}}',
+                '</div>',
+              '</div>',
+              '<!--结束时间-->',
+              '<div class="widget_time_end mt20">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{etitle}}</h2>',
+                '</div>',
+                '<div class="temp_icon_input" @click.stop="selectTime(1)">',
+                  '<i class="input_icon icon-date"></i>{{etip}}',
+                '</div>',
+              '</div>',
+              '<!--时长-->',
+              '<div class="time_forbid_length mt20" v-if="calculate">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{rtitle}}</h2>',
+                '</div>',
+                '<!--不可编辑-->',
+                '<div class="form_forbid_edit" v-show="rangeReadonly" :class="{form_forbid_nodata: !rinput}">',
+                  '<p class="form_forbid_word">{{rinput}}</p>',
+                '</div>',
+                '<!--可编辑-->',
+                '<input class="temp_text_input" v-show="!rangeReadonly" v-model="rinput" @blur="rangeChanged(rinput)">',
+              '</div>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" style="display:none;">',
+              '<p class="must_word">开始时间不能晚于结束时间</p>',
+            '</div>',
+          '</div>',
+        '<event-trigger :widget="widget" :compose="\'col\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event-type="triggerValueEventByType" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          svalue: '',
+          evalue: '',
+          sCalValue: '',
+          eCalValue: '',
+          startAmpmVal: 0,
+          endAmpmVal: 0,
+          rinput: '',
+          rvalue: '',
+          errMsg: '',
+          rangeReadonly: true,
+          userAttendGroup: {},
+          holidayList: [],
+          selOptionTimeType: 3,
+          timeType: 3,
+          maxRange: 0//对于没有考勤组的情况，自动计算的结果已经是最大值了，手动修改若大于这个范围，是不合理的
+        };
+      },
+      components: {
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEventByType: function (data) {
+          if (data && data.hasOwnProperty('val') && data.hasOwnProperty('type')) {
+            switch (data.type) {
+              case '0':
+                this.sCalValue = publicUtils.convertTimestampToFormatStr(data.val, this.format)
+                break
+              case '1':
+                this.eCalValue = publicUtils.convertTimestampToFormatStr(data.val, this.format)
+                break
+              default:
+                this.sCalValue = ''
+                this.eCalValue = ''
+            }
+          }
+          this.loadStatus = false
+        },
+        triggerGetValueEvent: function (callback) {
+          callback([{svalue: this.svalue, evalue: this.evalue}])
+        },
+        $verifyDatetimeRange: function (startValue, endValue) {
+          if(!(startValue && endValue) || !this.calculate || this.readonly){
+            return
+          }
+          var choiceSDate = moment(startValue);
+          var choiceEDate = moment(endValue);
+          if (choiceEDate.valueOf() < choiceSDate.valueOf()) {
+            //popup.alert("开始时间必须小于结束时间");
+            this.rvalue = ''
+            this.rinput = ''
+            return;
+          }
+          var timeType = this.timeType
+
+          var rangeObj
+          if (!this.rangeReadonly) {
+            rangeObj = util.lengthOfTimeByStr(startValue, endValue)
+          } else if (startValue === endValue && timeType !== 1) {
+            rangeObj = {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时', rangeObjDay: 0, rangeObjHour: 0}
+          } else {
+            var startDate = startValue.split(' ')[0], endDate = endValue.split(' ')[0]
+            //判断两个时间是否为一天
+            var dayArr
+            if (startDate === endDate) {
+              dayArr = [startDate]
+            } else {
+              dayArr = this.getAllDate(startDate, endDate)
+            }
+            rangeObj = {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时', rangeObjDay: 0, rangeObjHour: 0}
+            for (var i = 0; i < dayArr.length; i++) {
+              var userAttend = this.findTodayUserAttend(dayArr[i])
+              if (!userAttend) {
+                continue
+              }
+              //工作日和自然日区分
+              var range
+              if (timeType === 1) {
+                //按天计算时间为0
+                range = {rDay: 1, rHour: 0, rMinute: 0, duration: '1天0小时', rangeObjDay: 1}
+                var obj = this.computeLeaveTime(this.toDate(dayArr[i] + ' 00:00:00'), this.toDate(dayArr[i] + ' 23:59:59'), dayArr[i])
+                range.rangeObjHour = obj.rangeObjHour
+              } else if (timeType === 2) {//特殊处理半天
+                //当天开始
+                var st, dt
+                if (dayArr[i] === startDate && startValue === dayArr[i] + ' 12:00:00') {
+                  range = {rDay: 0.5, rHour: 0, rMinute: 0, duration: '0.5天0小时', rangeObjDay: 0.5}
+                  st = this.toDate(dayArr[i] + ' 12:00:00')
+                  dt = this.toDate(dayArr[i] + ' 23:59:59')
+                } else if (dayArr[i] === endDate && endValue === dayArr[i] + ' 12:00:00') {//当天结束
+                  range = {rDay: 0.5, rHour: 0, rMinute: 0, duration: '0.5天0小时', rangeObjDay: 0.5}
+                  st = this.toDate(dayArr[i] + ' 00:00:00')
+                  dt = this.toDate(dayArr[i] + ' 12:00:00')
+                } else {
+                  range = {rDay: 1, rHour: 0, rMinute: 0, duration: '1天0小时', rangeObjDay: 1}
+                  st = this.toDate(dayArr[i] + ' 00:00:00')
+                  dt = this.toDate(dayArr[i] + ' 23:59:59')
+                }
+                var obj = this.computeLeaveTime(st, dt, dayArr[i])
+                range.rangeObjHour = obj.rangeObjHour
+              } else if (timeType === 3) {
+                //计算当天班次总时间,请假时间
+                var st = this.toDate(startValue), dt = this.toDate(endValue)
+                if (dayArr[i] !== startDate) {
+                  st = this.toDate(dayArr[i] + ' 00:00:00')
+                }
+                if (dayArr[i] !== endDate) {
+                  dt = this.toDate(dayArr[i] + ' 23:59:59')
+                }
+                range = this.computeLeaveTime(st, dt, dayArr[i])
+                range.rangeObjHour = range.rangeObjHour
+              }
+              rangeObj.rDay += range.rDay
+              rangeObj.rHour += range.rHour
+              rangeObj.rMinute += range.rMinute
+              rangeObj.rangeObjDay += range.rangeObjDay
+              rangeObj.rangeObjHour += range.rangeObjHour
+            }
+            rangeObj.duration = rangeObj.rDay + '天' + rangeObj.rHour + '小时'
+          }
+          var result = (timeType === 3 ? rangeObj.rangeObjHour : rangeObj.rangeObjDay)
+          this.rinput = parseFloat(result.toFixed(1))
+          this.rvalue = this.rinput
+          this.maxRange = this.rinput
+          this.lday = parseFloat(rangeObj.rangeObjDay.toFixed(1))
+          this.lhour = parseFloat(rangeObj.rangeObjHour.toFixed(1))
+        },
+        $calculateTime: function (startDate, endDate) {
+          var sTime = this.toDate(startDate).getTime()
+          var eTime = this.toDate(endDate).getTime()
+          return eTime - sTime
+          //return util.lengthOfTimeByStr(startDate, endDate)
+        },
+        selectTime: function (type) {
+          if(this.readonly){
+            return
+          }
+          var _this = this;
+          var date = moment(), formatter = 'yyyy-MM-dd';
+          switch (_this.selOptionTimeType) {
+            case 1:
+              //按天计算
+              formatter = 'yyyy-MM-dd';
+              break;
+            case 2:
+              //按半天
+              formatter = 'yyyy-MM-dd pm-am';
+              break;
+            case 3:
+              //按小时
+              formatter = 'yyyy-MM-dd HH:mm';
+              break;
+          }
+          if (type === 0) {
+            if (this.sCalValue) {
+              date = moment(this.sCalValue);
+            }
+          } else {
+            if (this.eCalValue) {
+              date = moment(this.eCalValue)
+            } else if (this.sCalValue) {
+              date = moment(this.sCalValue)
+            }
+          }
+          var year = parseInt(date.format('YYYY')),
+              month = parseInt(date.format('MM')),
+              day = parseInt(date.format('DD')),
+              hour = parseInt(date.format('HH')),
+              minute = parseInt(date.format('mm'));
+          IosSelectCmp.datePickerByFormat(year - 100, parseInt(year) + 100, {
+            title: '',
+            oneLevelId: year,
+            twoLevelId: month,
+            threeLevelId: day,
+            fourLevelId: hour,
+            fiveLevelId: minute,
+            itemHeight: 35,
+            format: formatter,
+            relation: [1, 1, 1, 0],
+            callback: function (selectOneObj, selectTwoObj, selectThreeObj, selectFourObj, selectFiveObj) {
+              var dateStr, dateStrTip;
+              switch (formatter) {
+                case 'yyyy-MM-dd' :
+                  dateStr = selectOneObj.id + '-' + selectTwoObj.id + '-' + selectThreeObj.id;
+                  dateStrTip = dateStr;
+                  _this.startAmpmVal = 0;
+                  _this.endAmpmVal = 0;
+                  break;
+                case 'yyyy-MM-dd HH:mm' :
+                  dateStr = selectOneObj.id + '-' + selectTwoObj.id + '-' + selectThreeObj.id + ' ' + selectFourObj.id + ':' + selectFiveObj.id;
+                  dateStrTip = dateStr;
+                  _this.startAmpmVal = 0;
+                  _this.endAmpmVal = 0;
+                  break;
+                case 'yyyy-MM-dd pm-am':
+                  dateStr = selectOneObj.id + '-' + selectTwoObj.id + '-' + selectThreeObj.id;
+                  dateStrTip = dateStr + ' ' + selectFourObj.id;
+                  if (type === 0) {
+                    _this.startAmpmVal = 1;
+                    if (selectFourObj.id === '下午') {
+                      _this.startAmpmVal = 2
+                    }
+                  } else {
+                    _this.endAmpmVal = 1;
+                    if (selectFourObj.id === '下午') {
+                      _this.endAmpmVal = 2
+                    }
+                  }
+
+                  break;
+              }
+              if (type === 0) {
+                var startHour = '';
+                if (selectFourObj.id === '下午') {
+                  startHour = ' 12:00:00'
+                }else if(selectFourObj.id === '上午'){
+                  startHour = ' 00:00:00';
+                }
+                dateStr += startHour;
+                _this.svalue = dateStrTip;
+                _this.sCalValue = dateStr;
+              } else {
+                var startHour = '';
+                if (selectFourObj.id === '下午') {
+                  startHour = ' 23:59:59'
+                }else if (selectFourObj.id === '上午') {
+                  startHour = ' 12:00:00'
+                }
+                dateStr += startHour;
+                _this.evalue = dateStrTip;
+                _this.eCalValue = dateStr;
+              }
+
+            }
+          });
+        },
+        getAllDate: function (begin, end) {
+          var arr = []
+          var ab = begin.split('-')
+          var ae = end.split('-')
+          var db = new Date()
+          db.setUTCFullYear(ab[0], ab[1] - 1, ab[2])
+          var de = new Date()
+          de.setUTCFullYear(ae[0], ae[1] - 1, ae[2])
+          var unixDb = db.getTime() - 24 * 60 * 60 * 1000
+          var unixDe = de.getTime() - 24 * 60 * 60 * 1000
+          for (var k = unixDb; k <= unixDe;) {
+            k = k + 24 * 60 * 60 * 1000
+            arr.push(moment(new Date(parseInt(k))).format('YYYY-MM-DD'))
+          }
+          return arr
+        },
+        findCurDateIndex: function (date) {
+          var date = this.toDate(date)
+          var day = date.getDay()
+          var weeks = ['6', '0', '1', '2', '3', '4', '5']
+          var week = weeks[day]
+          return week
+        },
+        findTodayUserAttend: function (dateStr) {
+          if (this.userAttendGroup[dateStr]) {
+            return this.userAttendGroup[dateStr];
+          }
+          if (this.holidayList.indexOf(dateStr) !== -1) {
+            return null
+          }
+          return this.userAttendGroup[this.findCurDateIndex(dateStr)]
+        },
+        toDate: function (date) {
+          if (!date) {
+            return ''
+          }
+          date = date.replace(/-/g, '/')
+          return new Date(date)
+        },
+        computeLeaveTime: function (startTime, endTime, dateStr) {
+          var userAttend = this.findTodayUserAttend(dateStr)
+          if (!userAttend) {
+            return {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时', rangeObjDay: 0, rangeObjHour: 0}
+          }
+          var time = 0, rDay = 0, rHour = 0, rMinute = 0, duration = '', rangeObjDay = 0, end, rangeObjHour = 0
+          var scheduleDuration = 0
+          if (userAttend.hasNoonBreak === 1) {
+            time += this.computeTimeRange(startTime, endTime, userAttend.startTime, userAttend.breakStartTime, dateStr)
+            time += this.computeTimeRange(startTime, endTime, userAttend.breakEndTime, userAttend.endTime, dateStr)
+            scheduleDuration += this.$calculateTime(dateStr+' '+userAttend.startTime, dateStr+' '+userAttend.breakStartTime)
+            scheduleDuration += this.$calculateTime(dateStr+' '+userAttend.breakEndTime, dateStr+' '+userAttend.endTime)
+          } else {
+            time += this.computeTimeRange(startTime, endTime, userAttend.startTime, userAttend.endTime, dateStr)
+            scheduleDuration += this.$calculateTime(dateStr+' '+userAttend.startTime, dateStr+' '+userAttend.endTime)
+          }
+          end = userAttend.endTime
+          if (userAttend.scheduleNum > 1) {
+            time += this.computeTimeRange(startTime, endTime, userAttend.secondStartTime, userAttend.secondEndTime, dateStr)
+            end = userAttend.secondEndTime
+            scheduleDuration += this.$calculateTime(dateStr+' '+userAttend.secondStartTime, dateStr+' '+userAttend.secondEndTime)
+          }
+          if (userAttend.scheduleNum > 2) {
+            time += this.computeTimeRange(startTime, endTime, userAttend.thirdStartTime, userAttend.thirdEndTime, dateStr)
+            end = userAttend.thirdEndTime
+            scheduleDuration += this.$calculateTime(dateStr+' '+userAttend.thirdStartTime, dateStr+' '+userAttend.thirdEndTime)
+          }
+  
+          if (time < 60000) {
+            return {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时', rangeObjDay: 0, rangeObjHour: rangeObjHour}
+          }
+  
+          //如果请假开始时间在上班时间之后或者请假结束时间在班次开始时间之前
+          if (startTime.getTime() > this.toDate(dateStr + ' ' + end).getTime() || endTime.getTime() < this.toDate(dateStr + ' ' + userAttend.startTime).getTime()) {
+            return {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时', rangeObjDay: 0, rangeObjHour: rangeObjHour}
+          }
+  
+          time /= 60 * 1000 // convert time to minuts
+          scheduleDuration /= 60 * 1000
+  
+          rDay = Math.round(time / scheduleDuration)
+          rHour = Math.round(time % scheduleDuration / 60)
+          rMinute = Math.round(time % scheduleDuration % 60)
+  
+          rangeObjDay = parseFloat((time / scheduleDuration).toFixed(2))
+          rangeObjHour = parseFloat((time / 60).toFixed(2))
+          duration = rDay + '天' + rHour + '小时'
+          return {rDay: rDay, rHour: rHour, rMinute: rMinute, duration: duration, rangeObjDay: rangeObjDay, rangeObjHour: rangeObjHour}
+        },
+        computeTimeRange: function (startTime, endTime, sTime, eTime, dateStr) {
+          sTime = this.toDate(dateStr + ' ' + sTime).getTime()
+          eTime = this.toDate(dateStr + ' ' + eTime).getTime()
+          startTime = startTime.getTime()
+          endTime = endTime.getTime()
+          //
+          if (startTime < sTime) {
+            startTime = sTime
+          }
+          if (endTime > eTime) {
+            endTime = eTime
+          }
+          return endTime > startTime ? endTime - startTime : 0
+        },
+        rangeChanged: function (v) {
+          var value = Number(this.rinput)
+          if (value <= 0 || value > this.maxRange) {
+            this.rinput = this.maxRange
+            return
+          }
+          value = parseFloat(value.toFixed(2))
+
+          var lhour, lday
+          if (this.timeType === 3) {
+            lhour = value
+            lday = parseFloat((lhour / 24).toFixed(2))
+          } else {
+            lday = value
+            lhour = lday * 24
+          }
+          this.lday = lday
+          this.lhour = lhour
+          this.rinput = value;
+          this.rvalue = this.rinput;
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            configId: this.widget.config.id,
+            fvalues: this.fvalues,
+            errMsg: this.errMsg,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        },
+        formatTimeValue: function () {
+          var svalues = this.widget.config.fields[0].values
+          this.svalue = svalues ? (svalues[0] && svalues[0].val) || '' : ''
+          var evalues = this.widget.config.fields[1].values
+          this.evalue = evalues ? (evalues[0] && evalues[0].val) || '' : ''
+          var format = 'yyyy-MM-dd HH:mm'
+          this.svalue = formatTimeValue(this.svalue, format)
+          this.evalue = formatTimeValue(this.evalue, format)
+          this.sCalValue = this.svalue
+          this.eCalValue = this.evalue
+    
+          format = this.widget.config.fields[0].fieldType.format
+
+          if (this.widget.config.fields[2].fieldType.calculate) {
+            var rvalues = this.widget.config.fields[2].values
+            if (rvalues && rvalues.length > 2) {
+              if (rvalues[2].timeType === 1) {
+                this.rinput = rvalues[1].val
+              } else {
+                this.rinput = rvalues[0].val
+              }
+              this.lday = parseFloat(rvalues[0].val)
+              this.lhour = parseFloat(rvalues[1].val)
+            }
+      
+            if (this.readonly) {
+              if (rvalues && rvalues[2].timeType === 1) {
+                this.timeType = 3
+                format = 'yyyy-MM-dd HH:mm'
+              } else {
+                if (svalues && svalues[0].ampm) {
+                  this.timeType = 2
+                } else {
+                  this.timeType = 1
+                }
+                format = 'yyyy-MM-dd'
+              }
+            } else {
+              this.timeType = unitToType(this.widget.config.fields[2].fieldType)
+            }
+          }
+    
+          this.selOptionTimeType = this.timeType
+          var startAmpm = '', endAmpm = ''
+          if (this.timeType === 2) {
+            if (this.svalue.length > 0) {
+              if (this.svalue.indexOf(' 00:00') >= 0) {
+                this.startAmpmVal = 1
+                startAmpm = '上午'
+              } else if (this.svalue.indexOf(' 12:00') >= 0) {
+                this.startAmpmVal = 2
+                startAmpm = '下午'
+              }
+            }
+            if (this.evalue.length > 0) {
+              if (this.evalue.indexOf(' 12:00') >= 0) {
+                this.endAmpmVal = 1
+                endAmpm = '上午'
+              } else if (this.evalue.indexOf(' 23:59') >= 0) {
+                this.endAmpmVal = 2
+                endAmpm = '下午'
+              }
+            }
+          }
+  
+          this.svalue = formatTimeValue(this.svalue, format)
+          this.evalue = formatTimeValue(this.evalue, format)
+  
+          if (startAmpm.length > 0 && endAmpm.length > 0) {
+            this.svalue += ' ' + startAmpm
+            this.evalue += ' ' + endAmpm
+          }
+        }
+      },
+      watch: {
+        sCalValue: function () {
+          var errMsg = ''
+          if (!this.verified) {
+            if (this.sCalValue && this.eCalValue) {
+              var choiceSDate = moment(this.sCalValue)
+              var choiceEDate = moment(this.eCalValue)
+              var rangeVerify = this.isInclude ? choiceEDate.valueOf() >= choiceSDate.valueOf() : choiceEDate.valueOf() > choiceSDate.valueOf()
+              if (!rangeVerify) {
+                if (!this.isInclude && choiceEDate.valueOf() === choiceSDate.valueOf()) {
+                  errMsg = '开始时间不能等于结束时间'
+                } else {
+                  errMsg = this.widget.config.verify.dateRange.errMsg
+                }
+              }
+            }
+          }
+          this.$verifyDatetimeRange(this.sCalValue, this.eCalValue);
+          this.errMsg = errMsg
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            configId: this.widget.config.id,
+            fvalues: this.fvalues,
+            errMsg: errMsg,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          dataLoadInit(this)
+        },
+        eCalValue: function () {
+          var errMsg = ''
+          if (!this.verified) {
+            if (this.sCalValue && this.eCalValue) {
+              var choiceSDate = moment(this.sCalValue)
+              var choiceEDate = moment(this.eCalValue)
+              var rangeVerify = this.isInclude ? choiceEDate.valueOf() >= choiceSDate.valueOf() : choiceEDate.valueOf() > choiceSDate.valueOf()
+              if (!rangeVerify) {
+                if (!this.isInclude && choiceEDate.valueOf() === choiceSDate.valueOf()) {
+                  errMsg = '开始时间不能等于结束时间'
+                } else {
+                  errMsg = this.widget.config.verify.dateRange.errMsg
+                }
+              }
+            }
+          }
+          this.$verifyDatetimeRange(this.sCalValue, this.eCalValue);
+          this.errMsg = errMsg
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            configId: this.widget.config.id,
+            fvalues: this.fvalues,
+            errMsg: errMsg,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          dataLoadInit(this)
+        },
+        rinput: function () {
+          this.rvalue = this.rinput
+        }
+      },
+      computed: {
+        required: function () {
+          return this.widget.config.verify.required
+        },
+        readonly: function () {
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          return this.$store.getters.getReadonlyStatus
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          if (this.required) {
+            var choiceSDate = moment(this.sCalValue)
+            var choiceEDate = moment(this.eCalValue)
+            var rangeVerify = this.isInclude ? choiceEDate.valueOf() >= choiceSDate.valueOf() : choiceEDate.valueOf() > choiceSDate.valueOf()
+            return $.trim(this.sCalValue) !== '' && $.trim(this.eCalValue) !== '' && rangeVerify
+          }
+          return true
+        },
+        stitle: function () {
+          return this.widget.config.fields[0].label
+        },
+        sformat: function () {
+          return this.widget.config.fields[0].fieldType.format
+        },
+        etitle: function () {
+          return this.widget.config.fields[1].label
+        },
+        eformat: function () {
+          return this.widget.config.fields[1].fieldType.format
+        },
+        rtitle: function () {
+          var extra = ''
+          if (this.timeType === 3) {
+            extra = '(小时)'
+          } else {
+            extra = '(天)'
+          }
+          return this.widget.config.fields[2].label + extra
+        },
+        calculate: function () {
+          return true
+        },
+        isInclude: function () {
+          return this.widget.config.verify.dateRange.isInclude
+        },
+        stip: {
+          get: function () {
+            if (this.svalue) {
+              return this.svalue
+            }
+            if (!(this.widget.config.fields[0].tip instanceof Object)) {
+              return this.widget.config.fields[0].tip
+            }
+            return this.widget.config.fields[0].tip.text
+          },
+          set: function (val) {
+          }
+        },
+        etip: {
+          get: function () {
+            if (this.evalue) {
+              return this.evalue
+            }
+            if (!(this.widget.config.fields[1].tip instanceof Object)) {
+              return this.widget.config.fields[1].tip
+            }
+            return this.widget.config.fields[1].tip.text
+          },
+          set: function (val) {
+          }
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+    
+          if (!this.visible) {
+            return showStatus
+          }
+          return true
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            configId: this.widget.config.id,
+            fvalues: this.fvalues,
+            errMsg: this.errMsg,
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        timeType: function () {
+          var fieldType = this.widget.config.fields[2].fieldType
+          if (fieldType.unit === 'day') {
+            return fieldType.isHalf ? 2 : 1
+          } else {
+            return 3
+          }
+        },
+        fvalues: function () {
+          var formater = 'YYYY-MM-DD HH:mm:ss'
+          var timeType = (this.timeType === 3 ? 1 : 2)
+          if (!this.calculate) {
+            timeType = null
+            this.lday = null
+            this.lhour = null
+          }
+          return [
+            {fidx: 0, values: [{val: !!this.sCalValue ? moment(this.sCalValue).format(formater) : '', ampm: this.startAmpmVal}]},
+            {fidx: 1, values: [{val: !!this.eCalValue ? moment(this.eCalValue).format(formater) : '', ampm: this.endAmpmVal}]},
+            {fidx: 2, values: [{val: this.lday}, {val: this.lhour}, {timeType: timeType}]} // timeType和库中保持一致：小时为1，天为2
+          ]
+        }
+      },
+      created: function () {
+        this.formatTimeValue()
+        this.$store.commit('watchValues', {
+          id: this.widget.id,
+          configId: this.widget.config.id,
+          fvalues: this.fvalues,
+          verified: this.verified,
+          isShow: this.isShow,
+          hasAuthority: this.hasAuthority
+        })
+
+        var _this = this
+        $.get('data/find/attend', {uid: launchUserId, deptId: launchDeptId}).then(function (res) {
+          if (res.success) {
+            if(res.data.userAttendGroup){
+              res.data.userAttendGroup.forEach(function (value) {
+                if (value.index == -1) {
+                  _this.userAttendGroup[moment(value.punchDate).format('YYYY-MM-DD')] = value
+                } else {
+                  _this.userAttendGroup[value.index] = value
+                }
+              })
+            }
+            if (res.data.holiday) {
+              res.data.holiday.forEach(function(value){
+                if (value.type === 2) {
+                  _this.holidayList.push(moment(value.dates).format('YYYY-MM-DD'))
+                }
+              })
+            }
+          }
+        }).then(function () {
+          if ($.isEmptyObject(_this.userAttendGroup) || !_this.userAttendGroup) {
+            _this.rangeReadonly = false
+          }
+          _this.$verifyDatetimeRange(_this.sCalValue, _this.eCalValue)
+        })
+      }
+    }
+  }
+})

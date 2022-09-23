@@ -1,0 +1,77 @@
+define(['publicUtils', 'multieditor', 'webUploader', 'sortable', 'cropper', 'clipboard', 'imageviewer'],
+    function (publicUtils, multieditor, webUploader, sortable, cropper, clipboard, imageviewer) {
+  'use strict'
+  window['WebUploader'] = webUploader
+  window['Sortable'] = sortable
+  window['Cropper'] = cropper
+  window['clipboard'] = clipboard
+  window['Viewer'] = imageviewer;
+  return {
+    template: [
+      '<div class="form_widget_describe">',
+        '<!--文字-->',
+        '<div class="richtext" :id="\'captionText\' + id"></div>',
+        '<!--图片-->',
+        '<div class="form_des_pic" v-if="imgs.length > 0">',
+          '<div class="imgW" v-for="(img, index) in imgs">',
+            '<img class="img" :src="imgUrl+img.objectId" @click.stop="preview(index)">',
+          '</div>',
+        '</div>',
+        '<!--附件-->',
+        '<div class="form_des_file" v-if="files.length > 0">',
+          '<div class="up_file" v-for="(file, index) in files" @click.stop="scanFilesFun(index)">',
+            '<span class="show_file_icon icon-file"></span>',
+            '<label class="up_file_name">{{file.name}}</label>',
+            '<span class="up_file_size">({{file.size}})</span>',
+            // '<span class="up_flie_down">点击下载</span>',
+          '</div>',
+        '</div>',
+      '</div>'
+    ].join(''),
+    data: function () {
+      return {
+        imgs: [],
+        files: [],
+        imgUrl: panUrl + '/thumbnail/60,80,100/'
+      }
+    },
+    props: ['id', 'tipText', 'tipFileArr'],
+    computed: {
+      readonly: function () {
+        return this.$store.getters.getReadonlyStatus
+      },
+      formatTxt: function () {
+        return this.tipText.indexOf('\n') !== -1 ? this.tipText.replace(/\n/g, '<br/>') : this.tipText
+      }
+    },
+    methods: {
+      getType: function (file) {
+        if (publicUtils.getType(file) === 'image') {
+          return true
+        }
+        return false
+      },
+      preview: function (index) {
+        publicUtils.filePreview(this.imgs, index)
+      },
+      scanFilesFun: function (index) {
+        publicUtils.filePreview(this.files, index)
+      }
+    },
+    created: function () {
+      MultiEditor.init('detail')
+      var _this = this
+      _this.tipFileArr.forEach(function (value) {
+        if (_this.getType(value)) {//图片
+          _this.imgs.push(value)
+        } else {
+          _this.files.push(value)
+        }
+      })
+    },
+    mounted: function () {
+      var domId = "captionText" + this.id
+      MultiEditor.renderRichtext(domId, this.formatTxt)
+    }
+  }
+})

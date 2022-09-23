@@ -1,0 +1,193 @@
+define(['jquery', 'formulaUtil'], function ($, formulaUtil) {
+  
+  /**
+   * 计算当前表单数据是否可以通过提交验证
+   */
+  function calculateSubmitVerify(state) {
+    var submitVerifyResult = {errMsg: '', status: true}
+    if (state.submitVerifyConfig.length <= 0) {
+      return submitVerifyResult
+    }
+    
+    return validateSubmitValidateData(state, submitVerifyResult)
+    
+    /**
+     * 按公式计算结果值
+     */
+    function computeVerify(state, submitVerifyResult) {
+      for (var indexKey in state.submitVerifyObj) {
+        for (var fieldCompt in state.submitVerifyObj[indexKey].scoreFieldObj) {
+          if (state.submitVerifyObj[indexKey].scoreFieldObj[fieldCompt] === '%d') {
+            state.submitVerifyObj[indexKey].scoreFieldObj[fieldCompt] = 0
+          }
+        }
+        var expressionStr = state.submitVerifyObj[indexKey].expressionStr
+        if (!expressionStr) {
+          continue
+        }
+        var reg = /[\=\>\<\≥\≤\≠]/ig
+        var operatesObj = expressionStr.match(reg)
+        if (!operatesObj || operatesObj.length <= 0) {//不包含比较运算符，跳过
+          continue
+        }
+        for (var fieldComptKey in state.submitVerifyObj[indexKey].scoreFieldObj) {
+          expressionStr = expressionStr.replace(new RegExp('\\{' + fieldComptKey + '\\}', 'gm'), state.submitVerifyObj[indexKey].scoreFieldObj[fieldComptKey])
+        }
+        try {
+          if (expressionStr.indexOf('=') !== -1) {
+            expressionStr = expressionStr.replace(/=/g, '==')
+          }
+          if (expressionStr.indexOf('≥') !== -1) {
+            expressionStr = expressionStr.replace(/≥/g, '>=')
+          }
+          if (expressionStr.indexOf('≤') !== -1) {
+            expressionStr = expressionStr.replace(/≤/g, '<=')
+          }
+          if (expressionStr.indexOf('≠') !== -1) {
+            expressionStr = expressionStr.replace(/≠/g, '!=')
+          }
+          //var resultVal = eval(expressionStr)
+          var resultVal = formulaUtil.parse(expressionStr)
+          if (!resultVal) {
+            submitVerifyResult.errMsg = state.submitVerifyObj[indexKey].promptText
+            submitVerifyResult.status = false
+            return submitVerifyResult
+          }
+          
+        } catch (e) {
+          console.log('' + e)
+        }
+      }
+      return submitVerifyResult
+    }
+    
+    /**
+     * 计算当前表单验证结果
+     */
+    function computeSubmitValidateResult(state, detailCompts, normalCompts, submitVerifyResult) {
+      if (!detailCompts.length) {
+        for (var n = 0; n < normalCompts.length; n++) {
+          structureFormulaData(state, normalCompts[n])
+        }
+        return computeVerify(state, submitVerifyResult)
+      }
+      for (var i = 0; i < detailCompts.length; i++) {
+        for (var c = 0; c < detailCompts[i].length; c++) {
+          for (var n = 0; n < detailCompts[i][c].length; n++) {
+            structureFormulaData(state, detailCompts[i][c][n])
+          }
+          if (!computeVerify(state, submitVerifyResult).status) {
+            break
+          }
+        }
+      }
+      return submitVerifyResult
+    }
+    
+    function structureFormulaData(state, config) {
+      if ((['radiobutton', 'selectbox', 'checklist'].indexOf(config.compt) !== -1 && config.optionScoreUsed)
+          || ['numberinput', 'computeinput', 'slider'].indexOf(config.compt) !== -1) {
+        //给所有计算公式字段存储用户输入的值
+        for (var indexKey in state.submitVerifyObj) {
+          if ($.trim(indexKey) === '' || isNaN(indexKey)) {
+            continue
+          }
+          var currComputeInputObj = state.submitVerifyObj[indexKey]
+          if (currComputeInputObj.scoreFieldObj.hasOwnProperty(config.compt + config.id)
+              && $.trim(currComputeInputObj.scoreFieldObj[config.compt + config.id]) !== '') {
+            var configValue = getConfigValue(state, config)
+            var isValEmpty = $.trim(configValue) === ''
+            var val = isValEmpty ? '0' : $.trim(configValue)
+            if ($.trim(val) !== '' && !isNaN(val) && /^(\-|\+)?\d+(\.\d+)?$/.test(val)) {
+              currComputeInputObj.scoreFieldObj[config.compt + config.id] = parseFloat(val)
+            }
+          }
+        }
+      }
+    }
+    
+    /**
+     * 获取当前表单参与验证的所有数据，构造为可用数据
+     */
+    function validateSubmitValidateData(state, submitVerifyResult) {
+      //查看当前表单是否包含子表单
+      var detailCompts = [], normalCompts = []
+      for (var widgetId in state.widgets) {
+        if (widgetId <= 0) {
+          continue
+        }
+        var config = state.widgets[widgetId]
+        if (config.pid !== 0) {
+          continue
+        }
+        if (config.config.compt === 'detailcombox') {
+          detailCompts.push(findDetailComptData(config.children, []))
+          continue
+        }
+        normalCompts.push(config.config)
+      }
+      //计算验证是否通过
+      if (detailCompts.length) {
+        for (var i = 0; i < detailCompts.length; i++) {
+          for (var n = 0; n < detailCompts[i].length; n++) {
+            detailCompts[i][n] = detailCompts[i][n].concat(normalCompts)
+          }
+        }
+      }
+      return computeSubmitValidateResult(state, detailCompts, normalCompts, submitVerifyResult)
+    }
+    
+    /**
+     * 获取子表单的所有数据
+     */
+    function findDetailComptData(dataList, result) {
+      for (var i = 0; i < dataList.length; i++) {
+        var detailList = []
+        for (var n = 0; n < dataList[i].length; n++) {
+          var config = dataList[i][n].config
+          if (config.compt === 'detailcombox') {
+            findDetailComptData(config.children, result)
+          }
+          detailList.push(config)
+        }
+        result.push(detailList)
+      }
+      return result
+    }
+    
+    function getConfigValue(state, config) {
+      if (config.compt === 'numberinput' && config.fields[0].values && config.fields[0].values[0]) {
+        // 不显示的话当 0 来验证
+        return config.isShow === false ? '0' : config.fields[0].values[0].val
+      }
+      if ((config.compt === 'computeinput' || config.compt === 'slider') && config.fields[0].values && config.fields[0].values[0]) {
+        return config.fields[0].values[0].val
+      }
+      var configValue = 0
+      if (config.compt === 'radiobutton' || config.compt === 'selectbox') {
+        for (var i = 0; i < config.fields[0].options.length; i++) {
+          var option = config.fields[0].options[i]
+          if (option.checked) {
+            configValue = option.score
+            break
+          }
+        }
+        return configValue
+      }
+      if (config.compt === 'checklist') {
+        for (var i = 0; i < config.fields[0].options.length; i++) {
+          var option = config.fields[0].options[i]
+          if (option.checked) {
+            configValue += option.score
+            break
+          }
+        }
+      }
+      return configValue
+    }
+  }
+  
+  return {
+    calculateSubmitVerify: calculateSubmitVerify
+  }
+})

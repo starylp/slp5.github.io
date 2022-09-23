@@ -1,0 +1,91 @@
+define(['jquery'], function ($) {
+  'use strict';
+
+  var confirmHtml = '<div class="popbg pop1">' +
+      '<div class="popBox tips">' +
+      '<div class="contentWrap">' +
+      '<div class="title"></div>' +
+      '<div class="content ycenterbox"><p></p></div>' +
+      '</div>' +
+      '<div class="btn"></div>' +
+      '</div>' +
+      '</div>';
+
+  function _confirm(opt) {
+    var defaultOpt = {
+      title: '提示',
+      content: '',
+      btn: ['取消', '确定'],
+      btn1: function () {
+      }
+    };
+
+    if (typeof opt === 'string') {
+      opt = {content: opt}
+    }
+
+    var _opt = $.extend({}, defaultOpt, opt);
+
+    var jconfirm = $(confirmHtml);
+    jconfirm.find('.title').html(_opt.title);
+    jconfirm.find('.content').html('<p>' + _opt.content + '</p>');
+    var l = _opt.btn.length;
+    for (var i = 0; i < l; i++) {
+      var btn = jconfirm.find('.btn');
+      $('<p></p>').html(_opt.btn[i])
+                  .data('n', i + 1)
+                  .click(function () {
+                    var btnFun = _opt['btn' + $(this).data('n')];
+                    jconfirm.remove();
+                    btnFun && btnFun()
+                  }).appendTo(btn)
+    }
+
+    var body = $('body');
+    body.append(jconfirm);
+    jconfirm.show()
+  }
+
+  var alertHtml = '<div class="popbg pop2">' +
+      '<div class="popBox info">' +
+      '<div class="ycenterbox contentWrap">' +
+      '<div class="content"></div>' +
+      '</div>' +
+      '<div class="btn"></div>' +
+      '</div>' +
+      '</div>';
+
+  function _alert(opt, msg, callback) {
+    var defaultOpt = {
+      content: '',
+      btn: msg || '确定',
+      btnFn: function () {
+        callback && callback();
+      }
+    };
+
+    if (typeof opt === 'string') {
+      opt = {content: opt}
+    }
+
+    var _opt = $.extend({}, defaultOpt, opt);
+
+    var jalert = $(alertHtml);
+    jalert.find('.content').html(_opt.content);
+    var btn = jalert.find('.btn');
+    $('<p></p>').html(_opt.btn).click(function () {
+      var btnFun = _opt['btnFn'];
+      jalert.remove();
+      btnFun && btnFun();
+    }).appendTo(btn);
+
+    var body = $('body');
+    body.append(jalert);
+    jalert.show()
+  }
+
+  return {
+    'confirm': _confirm,
+    'alert': _alert
+  }
+});

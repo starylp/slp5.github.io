@@ -1,0 +1,295 @@
+define(['jquery', 'cookies'], function ($, Cookies) {
+  'use strict'
+  
+  /**
+   * 自动缓存表单、审批数据到本地
+   * @param formData 缓存结构
+   * @param type 应用类型：0.表单；1.审批
+   */
+  function addDataCache(formData, type) {
+    var dataMap = transformData(formData)//将formData转换为formValueData结构
+    var cacheKey = createCacheKey(formId, type)
+    window.localStorage.setItem(cacheKey, JSON.stringify(dataMap))
+  }
+  
+  /**
+   * 获取表单、审批缓存
+   * @param _this
+   * @param type 应用类型：0.表单；1.审批
+   */
+  function getDataCache(_this, type) {
+    var data = []
+    var cache = _this.$store.getters.getWhetherToCache
+    var dtd = $.Deferred()
+    if (cache === 1) {//本地获取缓存
+      var cacheData = JSON.parse(window.localStorage.getItem(createCacheKey(_this.forms.id, type)))
+      if (cacheData instanceof Array) {//若为老结构删除且直接返回[]
+        delDataCache(_this, _this.forms.id, type)
+      } else {
+        data = transformRenderData(_this, cacheData)
+      }
+      dtd.resolve({success: true, data: data})
+    } else if (cache === 2) {//服务端获取缓存
+      var param = type === 0 ? {formId: formId, type: type, enc: enc} : {formId: formId, aprvAppId: aprvAppId, type: type, pageEnc: pageEnc}
+      doRequest('data/form/apps/cache/data/get', param).then(function (res) {
+        if (res.success && res.data) {
+          dtd.resolve({success: true, data: transformRenderData(_this, JSON.parse(res.data))})
+        } else {
+          dtd.resolve({success: false})
+        }
+      })
+    }
+    return dtd.promise()
+  }
+  
+  
+  /**
+   * 判断表单、审批缓存是否存在
+   * @param formId
+   * @param type 应用类型：0.表单；1.审批
+   */
+  function existDataCache(formId, type) {
+    return window.localStorage.getItem(createCacheKey(formId, type))
+  }
+  
+  /**
+   * 删除表单、审批缓存
+   * @param _this
+   * @param formId 表单、审批ID
+   * @param type 应用类型：0.表单；1.审批
+   */
+  function delDataCache(_this, formId, type) {
+    if (_this.$store.getters.getWhetherToCache === 2) {
+      var param = type === 0 ? {formId: formId, type: type, enc: enc} : {
+        formId: formId, aprvAppId: formUserId > 0 ? '' : aprvAppId,//若formUserId不为空则为重新发起审批，此时列表数据中pageEnc加密为formId+formsUserId，aprvAppId不参与加密
+        formUserId: formUserId, type: type, pageEnc: pageEnc
+      }
+      doRequest('data/form/apps/cache/data/del', param)
+    } else if (_this.$store.getters.getWhetherToCache === 1) {
+      window.localStorage.removeItem(createCacheKey(formId, type))
+    }
+    window.localStorage.removeItem(createFormInNumKey(formId))
+  }
+  
+  
+  /**
+   * 手动添加缓存表单、审批数据到云端
+   * @param _this
+   * @param type 应用类型：0.表单；1.审批
+   */
+  function manualAddDataCache(_this, type) {
+    var cacheData = transformData(_this.$store.getters.getFormData())//将formData转换为formValueData结构
+    // 缓存数据至云盘
+    var param = type === 0 ? {formId: formId, type: type, enc: enc, cacheData: JSON.stringify(cacheData)} : {
+      formId: formId,
+      aprvAppId: formUserId > 0 ? '' : aprvAppId,//若formUserId不为空则为重新发起审批，此时列表数据中pageEnc加密为formId+formsUserId，aprvAppId不参与加密
+      formUserId: formUserId,
+      type: type,
+      pageEnc: pageEnc,
+      cacheData: JSON.stringify(cacheData)
+    }
+    return doRequest('data/form/apps/cache/data/add', param).then(function (res) {
+      return res
+    })
+  }
+  
+  /**
+   * 根据缓存中数据获取最大的子表单明细个数
+   * @param cacheData 缓存数据
+   * @param subCompts 子表单配置
+   */
+  function getMaxGroupValues(cacheData, subCompts) {
+    var maxNum = 1
+    for (var i = 0; i < subCompts.length; i++) {
+      if (cacheData[subCompts[i].id]) {
+        var curGroupCount = cacheData[subCompts[i].id].groupValues.length
+        maxNum = curGroupCount > maxNum ? curGroupCount : maxNum
+      }
+    }
+    return maxNum
+  }
+  
+  /**
+   * 获取表单、审批缓存key
+   * @param formId
+   * @param type
+   */
+  function createCacheKey(formId, type) {
+    var end = formId + '_' + Cookies.get('oa_uid')
+    var start = type === 0 ? 'custom_forms_apply_' : 'approve_forms_apply_'
+    return start + end
+  }
+  
+  
+  /**
+   * ajax请求
+   * @param url
+   * @param data
+   */
+  function doRequest(url, data) {
+    return $.ajax({
+      url: url,
+      type: 'post',
+      data: data,
+      dataType: 'json'
+    })
+  }
+  
+  /**
+   * 数据转换结构：构造缓存数据
+   * @param formData
+   */
+  function transformData(formData) {
+    var dataMap = {}//将formData转换为formValueData结构
+    realTransform(formData)
+    
+    function realTransform(formData) {
+      for (var i = 0; i < formData.length; i++) {
+        var data = formData[i]
+        if (['relateddata', 'captiontext', 'imageocr', 'autonumber'].includes(data.compt)) {//跳过组件
+          continue
+        }
+        var groupValues = !!dataMap[data.id] ? dataMap[data.id].groupValues : []//数据组
+        if (/^detailcombox|matrixradio|matrixcheckbox$/.test(data.compt)) {//子表单、矩阵处理
+          for (var j = 0; j < data.compts.length; j++) {
+            realTransform(data.compts[j])
+          }
+        } else if (/^leavekit|gooutkit|overtimekit|punchkit|datetimerange|leavecancellationkit$/.test(data.compt)) {//审批套件及日期区间组件处理
+          var values = []
+          for (var n = 0; n < data.fields.length; n++) {
+            values.push(data.fields[n].values)
+          }
+          groupValues.push({values: values})
+          dataMap[data.id] = {compt: data.compt, groupValues: groupValues, id: data.id}
+        } else {//普通组件处理
+          var values = []
+          values = data.fields[0].values
+          groupValues.push({values: [values]})
+          dataMap[data.id] = {compt: data.compt, groupValues: groupValues, id: data.id}
+        }
+      }
+    }
+    
+    return dataMap
+  }
+  
+  /**
+   * 数据转换结构：构造渲染数据
+   * @param cacheData
+   */
+  function transformRenderData(_this, cacheData) {
+    var resultData = []
+    try {
+      if (cacheData) {
+        // 获取用户在填写页操作表单数据后未提交表单时保存的表单结构数据
+        var configs = $.extend(true, [], _this.forms.formConfig)
+        for (var i = 0; i < configs.length; i++) {
+          var config = configs[i]
+          var subCompts = config.compts, groupDetailCompts = []
+          //如果页面缓存的明细结构数据在表单结构中可以找到对应的明细字段
+          if (/^detailcombox|matrixradio|matrixcheckbox$/.test(config.compt)) {
+            var childComptNum = 1//子表单明细个数
+            //如果表单结构由可以添加明细改为不可以添加 则缓存表单结构里当前明细只用到第一组明细结构组件的值
+            if ((!config.defaultCompts || config.defaultCompts.length <= 0) && (!config.addDetail || !config.addDetail.open)) {
+              childComptNum = 1
+            } else {
+              //获取到缓存中子表单最大个数
+              childComptNum = getMaxGroupValues(cacheData, subCompts)
+            }
+            //构造子表单结构
+            for (var k = 0; k < childComptNum; k++) {
+              groupDetailCompts.push($.extend(true, [], subCompts))
+            }
+            for (var j = 0; j < groupDetailCompts.length; j++) {
+              //将页面缓存的表单结构明细内组件数据值赋值给对应的表单结构里对应的明细内对应的组件
+              for (var k = 0; k < groupDetailCompts[j].length; k++) {
+                var subCompt = groupDetailCompts[j][k]
+                if (cacheData[subCompt.id]) {//存在缓存则赋值
+                  //判断是否为审批套件或日期区间：特殊处理
+                  if (/^leavekit|gooutkit|overtimekit|punchkit|datetimerange|leavecancellationkit$/.test(subCompt.compt)) {
+                    //将套件中values赋值给套件组件
+                    for (var n = 0; n < subCompt.fields.length; n++) {
+                      subCompt.fields[n]['values'] = cacheData[subCompt.id].groupValues[0].values[n]
+                    }
+                  } else {
+                    if (cacheData[subCompt.id].groupValues[j]) {
+                      subCompt.fields[0].values = cacheData[subCompt.id].groupValues[j].values[0]
+                    }
+                  }
+                }
+              }
+            }
+            config.compts = groupDetailCompts
+          } else {
+            if (cacheData[config.id]) {//存在缓存则赋值
+              //判断是否为审批套件或日期区间：特殊处理
+              if (/^leavekit|gooutkit|overtimekit|punchkit|datetimerange|leavecancellationkit$/.test(config.compt)) {
+                //将套件中values赋值给套件组件
+                for (var j = 0; j < config.fields.length; j++) {
+                  config.fields[j]['values'] = cacheData[config.id].groupValues[0].values[j]
+                }
+              } else {
+                config.fields[0].values = cacheData[config.id].groupValues[0].values[0]
+              }
+              
+            }
+          }
+        }
+        resultData = configs
+      }
+      return resultData
+    } catch (e) {
+      console.log(e)
+      return resultData//异常则返回[]
+    }
+  }
+  
+  /**
+   * 获取上一次提交前刷新表单的次数
+   */
+  function getFormInNum() {
+    return window.localStorage.getItem(createFormInNumKey(formId))
+  }
+  
+  /**
+   *  设置距离上次提交刷新页面的次数
+   */
+  function setFormInNum() {
+    var formInNum = getFormInNum()
+    if (formInNum) {
+      window.localStorage.setItem(createFormInNumKey(formId), parseInt(formInNum) + 1)
+    } else {
+      window.localStorage.setItem(createFormInNumKey(formId), 1)
+    }
+  }
+  
+  /**
+   * 获取表单、审批指定组件的缓存值
+   * @param type 应用类型：0.表单；1.审批
+   */
+  function getComptCache(type) {
+    return JSON.parse(window.localStorage.getItem(createCacheKey(parseInt(formId), type)))
+  }
+  
+  /**
+   *  获取进入表单的次数的key
+   */
+  function createFormInNumKey(formKeyId) {
+    if (!formKeyId) {
+      formKeyId = formId
+    }
+    return formKeyId + '_' +  Cookies.get('oa_uid') + '_' + 'formInNum'
+  }
+  
+  return {
+    addDataCache: addDataCache,
+    getDataCache: getDataCache,
+    delDataCache: delDataCache,
+    existDataCache: existDataCache,
+    manualAddDataCache: manualAddDataCache,
+    getFormInNum: getFormInNum, // 获取上一次提交前刷新表单的次数
+    setFormInNum: setFormInNum, // 设置距离上次提交刷新页面的次数
+    getComptCache: getComptCache, // 获取表单、审批指定组件的缓存值
+    createFormInNumKey: createFormInNumKey //获取进入表单的次数的key
+  }
+})

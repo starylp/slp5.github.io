@@ -1,0 +1,914 @@
+define(['Vue', 'jquery', 'util', 'popup', 'tipImgs', 'commonUtils', 'moment','cookies', 'VueUtils', 'publicUtils'], function (Vue, $, util, popup, tipImgs, commonUtils, moment, Cookies, VueUtils, publicUtils) {
+  'use strict'
+  return function (widget) {
+
+    function contactUids(contacts) {
+      var uids = []
+      for (var i = 0; i < contacts.length; i++) {
+        uids.push(contacts[i].id ? contacts[i].id : contacts[i].puid)
+      }
+      return uids
+    }
+  
+    /** 数据过滤支持部门 */
+    function deptmentIds(deptments) {
+      var ids = []
+      for (var i = 0; i < deptments.length; i++) {
+        ids.push(deptments[i].departmentId ? deptments[i].departmentId : deptments[i].id)
+      }
+      return ids
+    }
+  
+    function changeTime(type) {
+      var sstartTime = '', sendTime = ''
+      switch (type) {
+        case 0:
+          var dateStr = moment().format('YYYY-MM-DD')
+          sstartTime = dateStr + ' 00:00:00'
+          sendTime = dateStr + ' 23:59:59'
+          break
+        case 1:
+          sstartTime = moment().day('Monday').format('YYYY-MM-DD 00:00:00')
+          sendTime = moment().day(7).format('YYYY-MM-DD 23:59:59')
+          break
+        case 2:
+          sstartTime = moment().month(moment().month()).startOf('month').format('YYYY-MM-DD 00:00:00')
+          sendTime = moment().month(moment().month()).endOf('month').format('YYYY-MM-DD 23:59:59')
+          break
+        case 3:
+          sstartTime = moment().year(moment().year()).startOf('year').format('YYYY-MM-DD 00:00:00')
+          sendTime = moment().year(moment().year()).endOf('year').format('YYYY-MM-DD 23:59:59')
+          break
+        case 4:
+          var dateStr = moment().subtract(1, 'days').format('YYYY-MM-DD')
+          sstartTime = dateStr + ' 00:00:00'
+          sendTime = dateStr + ' 23:59:59'
+          break
+        case 5:
+          break
+      }
+      return {
+        sstartTime: sstartTime,
+        sendTime: sendTime
+      }
+    }
+    
+    /**
+     * 获取用户提交表单数据中某组件信息
+     * */
+    function acquireComptInfoFromFormData(formUserData, condFieldId) {
+      for (var i = 0; i < formUserData.length; i++) {
+        var ele = $.extend(true, {}, formUserData[i])
+        if (ele.compt === 'captiontext') {
+          continue
+        }
+        if (ele.compt === 'detailcombox') {
+          var groupDataArr = ele.compts
+          if (!groupDataArr || groupDataArr.length <= 0 || !groupDataArr[0] || groupDataArr[0].length <= 0) {
+            continue
+          }
+          var find = false
+          for (var j = 0; j < groupDataArr.length; j++) {
+            var groupData = groupDataArr[j]
+            for (var k = 0; k < groupData.length; k++) {
+              var subEle = groupData[k]
+              if (subEle.id === parseInt(condFieldId)) {
+                //找到条件组件id对应的值赋值给当前表单对应的组件值
+                find = true
+                break
+              }
+            }
+            if (find) {
+              break
+            }
+          }
+          if (find) {
+            return $.extend(true, {pid: ele.id, isFromDetail: true}, ele)
+          }
+          continue
+        }
+
+        if (ele.id === parseInt(condFieldId)) {
+          // 百分比数值先转化为真值
+          publicUtils.numValueAndPercentConvertForOne(ele, 'toNumValue')
+          //找到条件组件id对应的值赋值给当前表单对应的组件值
+          return $.extend(true, {pid: 0, isFromDetail: false}, ele)
+        }
+      }
+      return null
+    }
+
+    function addDataFun(_this, groupDataArr, index, condFieldId, relateFieldObj) {
+      if (!groupDataArr[index]) {
+        return
+      }
+      var groupData = groupDataArr[index]
+      for (var k = 0; k < groupData.length; k++) {
+        var ele = groupData[k]
+        if (ele.id === parseInt(condFieldId)) {
+          //找到条件组件id对应的值赋值给当前表单对应的组件值
+          _this.$store.commit('setRelateFieldValueStatus')
+          _this.$store.commit('setRelateFieldValue', {id: relateFieldObj[condFieldId], fields: ele.fields, inDetailIndex: index})
+          setTimeout(function () {
+            addDataFun(_this, groupDataArr, ++index, condFieldId, relateFieldObj)
+          }, 1000)
+          break
+        }
+      }
+    }
+  
+    /**
+     * 子表单选择数据多选判断
+     */
+    function forMultiSelect(_this) {
+      if (_this.widget.pid > 0) {
+        //多次打开选择弹窗重新初始化
+        _this.multiSelect = true
+        //通过当前子表单内的选择数据组件的pid的获取子表单的信息
+        var detailWidgets = _this.$store.state.widgets[_this.widget.pid].children
+        var currentChildren
+        var isBreak = false
+        for (var i = 0; i < detailWidgets.length; i++) {
+          var children = detailWidgets[i]
+          for (var j = 0; j < children.length; j++) {
+            var childrenObj = children[j]
+            //定位当前选择数据组件 在子表单的位置，记录子表单该条记录,用来对其他组件赋值
+            if (childrenObj.id == _this.widget.id) {
+              currentChildren = children
+              _this.detailGroupIndex = childrenObj.config.inDetailGroupIndex
+              isBreak = true
+              break
+            }
+          }
+          if(isBreak){
+            break
+          }
+        }
+        var lastValueIndexObj = {} //设置了上一次填写内容的 "widgetId" 和 "configId_子表单记录的下标" 对应关系的对象：{4:'4_0', 12:'4_1', 15:'5_0'}
+        for (var i = 0; i < detailWidgets.length; i++) {
+          var children = detailWidgets[i]
+          for (var j = 0; j < children.length; j++) {
+            var childrenObj = children[j]
+            if (childrenObj.config.latestValShow) {
+              lastValueIndexObj[childrenObj.id] = childrenObj.config.id + '_' + i
+            }
+          }
+        }
+        //弹多选框还是单选框
+        for (var i = 0; i < currentChildren.length; i++) {
+          if (currentChildren[i].config.fields[0].values && currentChildren[i].config.fields[0].values[0] && hasValueVerify(_this, currentChildren[i], lastValueIndexObj)) {
+            _this.multiSelect = false
+            break
+          }
+        }
+      }
+    }
+  
+    /**
+     * 子表单选择数据组件添加数据
+     */
+    function updateDataFunByIndex(_this, groupDataArr, index, condFieldId, relateFieldObj, groupDataArrIndex) {
+      _this.$nextTick(function () {
+        setTimeout(function () {
+          if (!groupDataArr.length) {
+            return
+          }
+          if (!groupDataArr[groupDataArrIndex]) {
+            return
+          }
+          var groupData = groupDataArr[groupDataArrIndex]
+          for (var k = 0; k < groupData.length; k++) {
+            var ele = groupData[k]
+            if (ele.id === parseInt(condFieldId)) {
+              //找到条件组件id对应的值赋值给当前表单对应的组件值
+              _this.$store.commit('setRelateFieldValueStatus')
+              _this.$store.commit('setRelateFieldValue', {id: relateFieldObj[condFieldId], fields: ele.fields, inDetailIndex: index})
+              break
+            }
+          }
+          _this.$store.commit('removeCurrFormValueFieldVerify', {id: _this.widget.pid + '_' + groupDataArrIndex, type: 3, inDetailGroupIndex: _this.detailGroupIndex})
+        }, 0)
+      })
+    }
+  
+    /**
+     * 子表单选择数据组件 选择被关联表单一行或几行数据值填充到当前表单关联的对应组件中
+     */
+    function childAddValueToField(_this, result) {
+      var groupDataLength = result.formDataArr.length
+      var hasValueNum = 0
+      var valueNumAfterCurrent = 0
+      //通过当前子表单内的选择数据组件的pid的获取子表单的信息
+      var detailWidgetsChildren = _this.$store.state.widgets[_this.widget.pid].children
+      //获取上一次填写内容
+      var lastValueIndexObj = {} //设置了上一次填写内容的 "widgetId" 和 "configId_子表单记录的下标" 对应关系的对象： {4:'4_0', 12:'4_1', 15:'5_0'}
+      for (var i = 0; i < detailWidgetsChildren.length; i++) {
+        var children = detailWidgetsChildren[i]
+        for (var j = 0; j < children.length; j++) {
+          var childrenObj = children[j]
+          if (childrenObj.config.latestValShow) {
+            lastValueIndexObj[childrenObj.id] = childrenObj.config.id + '_' + i
+          }
+        }
+      }
+      for (var i = 0; i < _this.$store.state.widgets[_this.widget.pid].children.length; i++) {
+        var children = _this.$store.state.widgets[_this.widget.pid].children[i]
+        //判断当前子表单组件是否有值
+        if (children[0].config.inDetailGroupIndex <= _this.detailGroupIndex) {
+          continue
+        }
+        valueNumAfterCurrent++
+        for (var m = 0; m < children.length; m++) {
+          if (children[m].config.fields[0].values && children[m].config.fields[0].values[0] && hasValueVerify(_this, children[m], lastValueIndexObj)) {
+            hasValueNum++
+            break
+          }
+        }
+      }
+      var detailNum = groupDataLength + hasValueNum - valueNumAfterCurrent
+      for (var i = 0; i < detailNum - 1; i++) {
+        _this.$parent.addMx()
+      }
+      if (_this.$parent.hasOwnProperty('recondTriggerRow')) {
+        _this.$parent.recondTriggerRow(detailNum)
+      }
+      //根据当前组件的pid获取当前子表单信息
+      var detailWidgets = JSON.parse(JSON.stringify(_this.$store.state.widgets[_this.widget.pid]))
+      //将勾选的数据放入config的compts下
+      detailWidgets.config.compts = result.formDataArr
+      publicUtils.childRelatedDataCache(_this, detailWidgets.children)
+      setChildRelateFieldValueVerify(_this, [detailWidgets.config], lastValueIndexObj)
+      setTimeout(function () {
+        setChildRelateFieldValue(_this, [detailWidgets.config], lastValueIndexObj)
+      }, 1000)
+      _this.$selFormUserDataAreaToggle(true)
+    }
+  
+    //填充明细内组件关联关系
+    function setChildRelateFieldValue(_this, formUserData, lastValueIndexObj) {
+      var relateFields = _this.widget.config.relateForm.relateFields, relateFieldObj = {}
+      for (var i = 0; i < relateFields.length; i++) {
+        //将匹配规则设置的字段列表转成对象
+        relateFieldObj[relateFields[i].condFieldId] = relateFields[i].currFieldId
+      }
+      for (var condFieldId in relateFieldObj) {
+        var compt = acquireComptInfoFromFormData(formUserData, condFieldId)
+        if (!compt) {
+          continue
+        }
+        if (compt.pid && compt.pid > 0) {
+          //当前组件在明细内
+          var groupDataArr = compt.compts
+          var detailIdx = publicUtils.getCurrentDetailIndex(_this)
+          if (groupDataArr) {
+            if (groupDataArr.length == 1) {
+              updateDataFunByIndex(_this, groupDataArr, detailIdx, condFieldId, relateFieldObj, 0)
+            } else {
+              var groupDataArrIndex = 0
+              //根据当前组件的pid获取子表单整体信息
+              var detailWidgets = _this.$store.state.widgets[_this.widget.pid].children
+              for (var i = 0; i < detailWidgets.length; i++) {
+                var children = detailWidgets[i]
+                var hasValue = false
+                //判断子表单下的当前子组件是否有值
+                var inGroupIndex
+                for (var m = 0; m < children.length; m++) {
+                  var childrenObj = children[m]
+                  inGroupIndex = childrenObj.config.inDetailGroupIndex
+                  if (childrenObj.config.fields[0].values && childrenObj.config.fields[0].values[0] && hasValueVerify(_this, childrenObj, lastValueIndexObj)) {
+                    hasValue = true
+                    break
+                  }
+                }
+                if (inGroupIndex < detailIdx) {
+                  continue
+                }
+                //判断是否当前选择的子表单下的组件 执行赋值
+                if (inGroupIndex == detailIdx) {
+                  updateDataFunByIndex(_this, groupDataArr, detailIdx, condFieldId, relateFieldObj, groupDataArrIndex)
+                  groupDataArrIndex++
+                  continue
+                }
+                if (!hasValue) {
+                  updateDataFunByIndex(_this, groupDataArr, inGroupIndex, condFieldId, relateFieldObj, groupDataArrIndex)
+                  groupDataArrIndex++
+                }
+              }
+            }
+          }
+          continue
+        }
+      }
+    }
+
+    /**
+     * 子表单选择数据组件添加数据的成功校验
+     */
+    function setDataVerifyByIndex(_this, groupDataArr, index, condFieldId, relateFieldObj, groupDataArrIndex) {
+      _this.$nextTick(function () {
+        if (!groupDataArr.length || !groupDataArr[groupDataArrIndex]) {
+          return
+        }
+        // 选择数据新增一行后，对子表单进行设置需要填充数据校验
+        var groupData = groupDataArr[groupDataArrIndex]
+        for (var k = 0; k < groupData.length; k++) {
+          var ele = groupData[k]
+          if (ele.id === parseInt(condFieldId) && _this.checkComptExist(relateFieldObj[condFieldId], parseInt(condFieldId))) {
+            var childIndex = ''
+            if (index > 0) {
+              childIndex = childIndex + '_' + index
+            }
+            // 新增数据数据联动的校验
+            _this.$store.commit('setCurrFormValueFieldVerify', {
+              id: relateFieldObj[condFieldId] + childIndex,
+              type: 6,
+              inDetailGroupIndex: index
+            })
+            break
+          }
+        }
+        _this.$forceUpdate()
+      })
+    }
+
+    /**
+     *  设置关联数据
+     */
+    function setChildRelateFieldValueVerify(_this, formUserData, lastValueIndexObj) {
+      var relateFields = _this.widget.config.relateForm.relateFields, relateFieldObj = {}
+      for (var i = 0; i < relateFields.length; i++) {
+        //将匹配规则设置的字段列表转成对象
+        relateFieldObj[relateFields[i].condFieldId] = relateFields[i].currFieldId
+      }
+      for (var condFieldId in relateFieldObj) {
+        var compt = acquireComptInfoFromFormData(formUserData, condFieldId)
+        if (!compt) {
+          continue
+        }
+        if (compt.pid && compt.pid > 0) {
+          //当前组件在明细内
+          var groupDataArr = compt.compts
+          var detailIdx = publicUtils.getCurrentDetailIndex(_this)
+          if (groupDataArr) {
+            if (groupDataArr.length === 1) {
+              setDataVerifyByIndex(_this, groupDataArr, detailIdx, condFieldId, relateFieldObj, 0)
+            } else {
+              var groupDataArrIndex = 0
+              //根据当前组件的pid获取子表单整体信息
+              var detailWidgets = _this.$store.state.widgets[_this.widget.pid].children
+              for (var i = 0; i < detailWidgets.length; i++) {
+                var children = detailWidgets[i]
+                var hasValue = false
+                //判断子表单下的当前子组件是否有值
+                var inGroupIndex
+                for (var m = 0; m < children.length; m++) {
+                  var childrenObj = children[m]
+                  inGroupIndex = childrenObj.config.inDetailGroupIndex
+                  if (childrenObj.config.fields[0].values && childrenObj.config.fields[0].values[0] && hasValueVerify(_this, childrenObj, lastValueIndexObj)) {
+                    hasValue = true
+                    break
+                  }
+                }
+                if (inGroupIndex < _this.detailGroupIndex) {
+                  continue
+                }
+                //判断是否当前选择的子表单下的组件 执行赋值
+                if (inGroupIndex === detailIdx) {
+                  setDataVerifyByIndex(_this, groupDataArr, detailIdx, condFieldId, relateFieldObj, groupDataArrIndex)
+                  groupDataArrIndex++
+                  continue
+                }
+                if (!hasValue) {
+                  setDataVerifyByIndex(_this, groupDataArr, inGroupIndex, condFieldId, relateFieldObj, groupDataArrIndex)
+                  groupDataArrIndex++
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    /**
+     * 判断子表单内字段是否有值，或为默认值（自定义默认值、上次填写内容）
+     * @param lastValueIndexObj 设置了上一次填写内容的 "widgetId" 和 "configId_子表单记录的下标" 对应关系的对象： {4:'4_0', 12:'4_1', 15:'5_0'}
+     */
+    function hasValueVerify(_this, currentChildren, lastValueIndexObj) {
+      //联系人、部门字段
+      if ((currentChildren.config.compt === 'contact' || currentChildren.config.compt === 'department')) {
+        if (currentChildren.config.fields[0].hasDefaultValue) {
+          //设置了自定义默认值
+          var defaultValue = JSON.parse(currentChildren.config.fields[0].defaultValueStr)
+          if (defaultValue.length !== currentChildren.config.fields[0].values.length) {
+            //默认数量和已填写数量不一致
+            return true
+          }
+          for (var j = 0; j < currentChildren.config.fields[0].values.length; j++) {
+            //联系人
+            if (currentChildren.config.compt === 'contact' && (!defaultValue[j] || currentChildren.config.fields[0].values[j].puid !== defaultValue[j].puid)) {
+              return true
+            }
+            //部门
+            if (currentChildren.config.compt === 'department' && (!defaultValue[j] || currentChildren.config.fields[0].values[j].departmentId !== defaultValue[j].departmentId)) {
+              return true
+            }
+          }
+        } else {
+          //没设置默认值
+          return true
+        }
+      }
+      //其他字段
+      if (currentChildren.config.fields[0].values[0].val) {
+        var index = lastValueIndexObj[currentChildren.id] //上次填写内容的下标
+        if (currentChildren.config.fields[0].hasDefaultValue) {
+          //设置了自定义默认值
+          var defaultValue = JSON.parse(currentChildren.config.fields[0].defaultValueStr)
+          if (currentChildren.config.fields[0].values[0].val !== defaultValue[0].val) {
+            return true
+          }
+        } else if (currentChildren.config.latestValShow && index) {
+          //设置了上次填写内容
+          var lastValue = _this.$store.state.latestValShowFields[index]
+          if (!lastValue || lastValue.length < 1 || currentChildren.config.fields[0].values[0].val !== lastValue[0].val) {
+            return true
+          }
+        } else {
+          //都没设置
+          return true
+        }
+      }
+      return false
+    }
+
+    return {
+      id: widget.id,
+      template: [
+        '<div v-show="isShow && hasAuthority">',
+        '<div class="cell_cont" v-show="isShow && hasAuthority">',
+        '<span class="cell_touch" v-if="value" @click.stop="$selFormUserDataAreaToggle(false)" v-if="!readonly">',
+        '</span>',
+        '<span class="cell_nodata" v-else></span>',
+        '</div>',
+        '<div v-show="dataListAreaShow" @click.stop="$selFormUserDataAreaToggle(false)">',
+        '<form-record-for-relate ref="formRecordForRelateRef" @selformuserdata="doSelFormUserData" :relate-form="widget.config.relateForm" :widget="widget" :condition-arr="conditionArr"></form-record-for-relate>',
+        '</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          dataListAreaShow: false,//数据列表区域显示状态
+          conditionArr: [],
+          multiSelect: false, //子表单选择数据组件 多选状态
+          detailGroupIndex: -1, //子表单选择数据组件 编辑时记录当前组件的inDetailGroupIndex
+          selectDataIndex: [],
+          currDataIndex: -1
+        }
+      },
+      methods: {
+        $reloadValueFun: function (vueObj) {
+          this.value = vueObj.value
+          return true
+        },
+        $selFormUserDataAreaToggle: function (flag) {
+          var _this = this
+          if (this.readonly) {
+            return
+          }
+          this.dataListAreaShow = !this.dataListAreaShow
+          var headerDom = $('.applypage')
+          headerDom.show()
+          if (this.dataListAreaShow) {
+            headerDom.hide()
+            this.conditionArr = []
+            //后台配置好的筛选条件集
+            for (var i = 0; i < this.widget.config.relateForm.conditions.length; i++) {
+              var flt = this.widget.config.relateForm.conditions[i]
+              if (flt.target.type === 0) {
+                //对于条件为空或者非空的字段单独处理
+                var expressFlag = false
+                if (flt.express.value === 'null' || flt.express.value === 'notNull' || flt.express.value === '><' || flt.express.value === 'dynamic') {
+                  expressFlag = true
+                }
+                //当前表单中对应组件的值
+                if (!expressFlag) {
+                  var id = flt.target.field.id
+                  if (!id || id <= 0) {
+                    continue
+                  }
+                  var contactCompt = this.$store.getters.getComptByConfigId(id)
+                  if (!contactCompt) {
+                    continue
+                  }
+                  var formValue = contactCompt.fields[0].values
+                }
+                if (flt.relField.compt === 'belonger' || flt.relField.compt === 'contact') {
+                  this.conditionArr.push([{
+                    id: flt.relField.id,
+                    compt: flt.relField.compt,
+                    uids: formValue && formValue.length > 0 ? contactUids(formValue) : [],
+                    val: formValue && formValue.length > 0 ? contactUids(formValue) : [],
+                    express: flt.express.value
+                  }])
+                } else if (flt.relField.compt === 'department') {
+                  this.conditionArr.push([{
+                    id: flt.relField.id,
+                    compt: flt.relField.compt,
+                    val: formValue && formValue.length > 0 ? deptmentIds(formValue) : [],
+                    express: flt.express.value
+                  }])
+                } else if (['checklist', 'multipleselect', 'radiobutton', 'selectbox'].indexOf(flt.relField.compt) !== -1) {
+                  this.conditionArr.push([{
+                    id: flt.relField.id,
+                    compt: flt.relField.compt,
+                    val: formValue && formValue.length > 0 ? formValue[0].val.split(',') : [],
+                    express: flt.express.value
+                  }])
+                } else if (flt.relField.compt === 'dateinput' && flt.express.value === '><') {
+                  this.conditionArr.push([{
+                    id: flt.relField.id,
+                    compt: flt.relField.compt,
+                    val: flt.relField.val,
+                    express: flt.express.value,
+                    range: flt.relField.range
+                  }])
+                } else if (flt.express.value === 'dynamic') {
+                  var dateRange = {}
+                  switch (flt.relField.valName) {
+                    case '昨日':
+                      dateRange = changeTime(4)
+                      break
+                    case '今日':
+                      dateRange = changeTime(0)
+                      break
+                    case '本周':
+                      dateRange = changeTime(1)
+                      break
+                    case '本月':
+                      dateRange = changeTime(2)
+                      break
+                    case '本年':
+                      dateRange = changeTime(3)
+                      break
+                  }
+                  flt.express.value = '><'
+                  flt.relField.range = [{'express': '>=', 'val': dateRange.sstartTime}, {'express': '<=', 'val': dateRange.sendTime}]
+                  this.conditionArr.push([{
+                    id: flt.relField.id,
+                    compt: flt.relField.compt,
+                    express: flt.express.value,
+                    range: flt.relField.range
+                  }])
+                } else {
+                  this.conditionArr.push([{
+                    id: flt.relField.id,
+                    compt: flt.relField.compt,
+                    val: formValue && formValue.length > 0 ? formValue[0].val : '',
+                    express: flt.express.value
+                  }])
+                }
+              } else {
+                //自定义值
+                if (flt.relField.compt === 'belonger' ||
+                    flt.relField.compt === 'contact') {
+                  this.conditionArr.push([{
+                    id: flt.relField.id,
+                    compt: flt.relField.compt,
+                    uids: flt.target.value && flt.target.value.length > 0 ? contactUids(flt.target.value) : [],
+                    val: flt.target.value && flt.target.value.length > 0 ? flt.target.value : [],
+                    express: flt.express.value
+                  }])
+                } else if (flt.relField.compt === 'department') {
+                  this.conditionArr.push([{
+                    id: flt.relField.id,
+                    compt: flt.relField.compt,
+                    val: flt.target.value && flt.target.value.length > 0 ? deptmentIds(flt.target.value) : [],
+                    express: flt.express.value
+                  }])
+                } else if (['checklist', 'multipleselect', 'radiobutton', 'selectbox'].indexOf(flt.relField.compt) !== -1) {
+                  this.conditionArr.push([{
+                    id: flt.relField.id,
+                    compt: flt.relField.compt,
+                    val: flt.target.value ? [flt.target.value] : '',
+                    express: flt.express.value
+                  }])
+                } else {
+                  this.conditionArr.push([{
+                    id: flt.relField.id,
+                    compt: flt.relField.compt,
+                    val: flt.target.value ? flt.target.value : '',
+                    express: flt.express.value
+                  }])
+                }
+              }
+            }
+            var echoData = publicUtils.getRelatedDataCache(_this, _this.widget.config.id, false)
+            if (this.widget.pid <= 0 && echoData && echoData.hasOwnProperty('cpage') && echoData.hasOwnProperty('pageSize')) {
+              this.$refs.formRecordForRelateRef.setStartPageParam(parseInt(echoData.cpage), parseInt(echoData.pageSize))
+            } else {
+              this.$refs.formRecordForRelateRef.setStartPageParam(1, 20)
+            }
+            this.$refs.formRecordForRelateRef.initSearchData(_this)
+          }
+          //子表单选择数据多选判断
+          forMultiSelect(this)
+          _this.selectDataIndex = []
+          _this.$store.commit('setIsClearRelatedData', false)
+          if (!flag) {
+            _this.clearRelatedDataCache()
+          }
+        },
+        //根据关联组件的值是否为空 来清除对应缓存
+        clearRelatedDataCache: function () {
+          var _this = this
+          var relateFields = _this.widget.config.relateForm.relateFields
+          for (var i = 0; i < relateFields.length; i++) {
+            if (_this.widget.pid > 0) {
+              if (publicUtils.isNotEmptyValForRelatedData(_this.$store.getters.getComptArrWidgetByConfigId(relateFields[i].currFieldId)[publicUtils.getCurrentDetailIndex(_this)].config)) {
+                return
+              }
+            } else {
+              var config = _this.$store.getters.getComptWidgetByConfigId(relateFields[i].currFieldId)
+                  ? _this.$store.getters.getComptWidgetByConfigId(relateFields[i].currFieldId).config : null
+              if (publicUtils.isNotEmptyValForRelatedData(config)) {
+                return
+              }
+            }
+          }
+          if (_this.widget.pid > 0) {
+            var singleKey = _this.$parent.widget.config.id + '_' + publicUtils.getCurrentDetailIndex(_this) + '_' + _this.widget.config.id,
+                totalKey = _this.$parent.widget.config.id + '_' + _this.widget.config.id,
+                totalCache = publicUtils.getRelatedDataCache(_this, totalKey, false)
+            if (totalCache && totalCache.hasOwnProperty(singleKey)) {
+              delete totalCache[singleKey]
+              if (JSON.stringify(totalCache) === '{}') {
+                publicUtils.delRelatedDataCache(_this, totalKey, false)
+                return
+              }
+              publicUtils.addRelatedDataCache(_this, totalKey, totalCache)
+            }
+            return
+          }
+          publicUtils.delRelatedDataCache(_this, _this.widget.config.id, false)
+        },
+        getFormUserData: function (formUserId) {
+          var resignDataList = this.$refs.formRecordForRelateRef.getResignDataList()
+          for (var i = 0; i < resignDataList.length; i++) {
+            if (formUserId === resignDataList[i].id) {
+              return resignDataList[i].formData
+            }
+          }
+        },
+        doSelFormUserData: function (result) {
+          var _this = this
+          if (_this.readonly) {
+            return
+          }
+          //取消选择的情况
+          if (result && result.formDataArr && result.selectDataIndex && result.formDataArr.length <= 0 && result.selectDataIndex.length <= 0) {
+            _this.clearRelatedFieldValue(result)
+            return
+          }
+          //选择被关联表单一行或几行数据值填充到当前表单关联的对应组件中
+          if (!result || !result.formDataArr || !result.selectDataIndex || result.formDataArr.length <= 0 || result.selectDataIndex.length <= 0) {
+            popup.alert('请选择数据行')
+            return
+          }
+          var formUserData = result.formDataArr[0]
+          if (!formUserData) {
+            popup.alert('请选择数据行')
+            return
+          }
+          _this.$store.commit('clearRelateFieldValue')
+          _this.$store.commit('setInitStatus', false)
+          _this.$store.commit('setIsClearRelatedData', false) //标注不是取消选择
+          if(_this.widget.pid > 0){
+            _this.selectDataIndex = result.selectDataIndex
+            childAddValueToField(_this, result)
+            return
+          }
+          _this.setRelateFieldValue(_this, formUserData)
+          //数据回显缓存
+          var pageParam = this.$refs.formRecordForRelateRef.getCurrPageParam()
+          publicUtils.addRelatedDataCache(_this, _this.widget.config.id, {
+            formUserId: result.selectDataIndex[0],
+            cpage: pageParam.cpage,
+            pageSize: pageParam.pageSize
+          })
+          this.$selFormUserDataAreaToggle(true)
+        },
+        clearRelatedFieldValue: function (result) {
+          var _this = this
+          _this.$store.commit('clearRelateFieldValue')
+          if (_this.widget.pid > 0) {
+            //根据当前组件的pid获取当前子表单信息
+            var detailWidgets = JSON.parse(JSON.stringify(_this.$store.state.widgets[_this.widget.pid]))
+            var singleKey = _this.$parent.widget.config.id + '_' + publicUtils.getCurrentDetailIndex(_this) + '_' + _this.widget.config.id
+            var totalKey = _this.$parent.widget.config.id + '_' + _this.widget.config.id
+            var oldFormUserId = parseInt(publicUtils.getRelatedDataCache(_this, totalKey, false)[singleKey])
+            var pageList = this.$refs.formRecordForRelateRef.getResignDataList()
+            for (var i = 0; i < pageList.length; i++) {
+              if (pageList[i].id === oldFormUserId) {
+                result.formDataArr.push(pageList[i].formData)
+                break
+              }
+            }
+            //将勾选的数据放入config的compts下
+            detailWidgets.config.compts = result.formDataArr
+            setChildRelateFieldValue(_this, [detailWidgets.config])
+            _this.$store.commit('setInitStatus', false)
+            publicUtils.relatedDataCacheClear(_this)
+          } else {
+            var formUserId = parseInt(publicUtils.getRelatedDataCache(_this, _this.widget.config.id, false).formUserId)
+            _this.setRelateFieldValue(_this, _this.getFormUserData(formUserId))
+            _this.$store.commit('setInitStatus', false)
+            publicUtils.relatedDataCacheClear(_this)
+          }
+          _this.selectDataIndex = []
+          _this.$nextTick(function () {
+            setTimeout(function () {
+              _this.$store.commit('clearRelateFieldValue')
+            }, 1000)
+          })
+          this.dataListAreaShow = !this.dataListAreaShow
+        },
+        checkComptExist: function(currFieldId, condFieldId) { // 配置的id的组件类型和配置id是同一个
+          var existCompt = this.$store.getters.getComptWidgetByConfigId(currFieldId)
+          var searchFields = $.extend(true, [], this.widget.config.relateForm.fieldList)
+          if (existCompt && searchFields) {
+            for (var i = 0; i < searchFields.length; i++) {
+              var searchField = searchFields[i]
+              if (searchField.compt === existCompt.config.compt && searchField.id === condFieldId) {
+                return true
+              }
+            }
+          }
+          return false
+        },
+        setRelateFieldValue: function (_this, formUserData) {
+          var relateFields = _this.widget.config.relateForm.relateFields, relateFieldObj = {}
+          for (var i = 0; i < relateFields.length; i++) {
+            //将匹配规则设置的字段列表转成对象
+            relateFieldObj[relateFields[i].condFieldId] = relateFields[i].currFieldId
+            if (_this.checkComptExist(relateFields[i].currFieldId, relateFields[i].condFieldId)) {
+              _this.$store.commit('setCurrFormValueFieldVerify', {
+                id: relateFields[i].currFieldId,
+                type: 3,
+                title: _this.title,
+                compt: _this.widget.config.compt,
+                inDetailGroupIndex: _this.widget.config.inDetailGroupIndex})
+            }
+          }
+          for (var condFieldId in relateFieldObj) {
+            var compt = acquireComptInfoFromFormData(formUserData, condFieldId)
+            if (!compt) {
+              continue
+            }
+            if (!compt.pid || compt.pid <= 0) {
+              continue
+            }
+            //当前组件在明细内
+            var groupDataArr = compt.compts
+            if (!groupDataArr || groupDataArr.length < 1) {
+              continue
+            }
+            //根据此明细内组数同步增加关联明细内相应组数
+            var currComptWidget = _this.$store.getters.getComptWidgetByConfigId(relateFieldObj[condFieldId])
+            if (!currComptWidget) {
+              continue
+            }
+            var currComptOfParentWidget = _this.$store.getters.getComptWidgetById(currComptWidget.pid)
+            if (!currComptOfParentWidget || !currComptOfParentWidget.config || currComptOfParentWidget.config.compt !== 'detailcombox') {
+              continue
+            }
+            _this.$store.commit('setRelateFieldValueStatus')
+            _this.$store.commit('setRelateFieldValue', {id: currComptOfParentWidget.config.id, detailNum: groupDataArr.length})
+          }
+          _this.$nextTick(function () {
+            setTimeout(function () {
+              for (var condFieldId in relateFieldObj) {
+                var compt = acquireComptInfoFromFormData(formUserData, condFieldId)
+                if (!compt) {
+                  continue
+                }
+                if (compt.pid && compt.pid > 0) {
+                  //当前组件在明细内
+                  var groupDataArr = compt.compts
+                  if (groupDataArr) {
+                    addDataFun(_this, groupDataArr, 0, condFieldId, relateFieldObj)
+                  }
+                  continue
+                }
+                _this.$store.commit('setRelateFieldValueStatus')
+                _this.$store.commit('setRelateFieldValue', {id: relateFieldObj[condFieldId], fields: compt.fields})
+              }
+            }, 1000)
+          })
+        }
+      },
+      components: {'tip-imgs': tipImgs, formRecordForRelate: VueUtils.loadComponent('static/js/src/front/forms/apps/mobile/fore/common/formRecords/formRecordForRelate.vue')},
+      computed: {
+        //publicUtils中使用
+        isEdit: function () {
+          return this.$store.getters.getIsEdit
+        },
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true;
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          if(this.$store.getters.getCurrentType){
+            return this.$store.getters.getReadonlyStatus
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs;
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel;
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          return showStatus
+        }
+      },
+      mounted: function () {}
+    }
+  }
+})

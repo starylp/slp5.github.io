@@ -1,0 +1,1076 @@
+define(['tipImgs', 'VueUtils', 'publicUtils', 'Area'], function (tipImgs, VueUtils, publicUtils) {
+  'use strict'
+  return function (widget) {
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      var areaCodeArr = []
+      for (var i = 0; i < _this.value.length; i++) {
+        areaCodeArr.push(_this.value[i].areaCode)
+      }
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: areaCodeArr.join(','),
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+    
+    /**
+     * 加载选中地址
+     * @param _this
+     */
+    function loadSelectedAreas(_this) {
+      _this.selectedAreas = []
+      if (_this.value.length === 0) {
+        return
+      }
+    
+      var otherAreas = [] // 附属项，比如全国
+      var areas = [] // 省市县地址
+      for (var i = 0; i < _this.value.length; i++) {
+        var area = _this.value[i]
+        var areaCode = $.trim(area.areaCode)
+      
+        if (areaCode.length < 6) { // 省市县行政区划代码为6位, 不是6位的为附加项，如全国 code = 0
+          otherAreas.push(area)
+        } else {
+          areas.push(area)
+        }
+      }
+    
+      for (var j = 0; j < otherAreas.length; j++) {
+        var otherArea = {
+          title: otherAreas[j].val,
+          code: otherAreas[j].areaCode,
+          checked: false,
+          children: []
+        }
+        // 加载附属项
+        _this.selectedAreas.push([otherArea])
+      }
+    
+      var pathAreaArr = []
+      var level = _this.widget.config.level
+      for (var k = 0; k < areas.length; k++) {
+        if (k % level === 0) {
+          pathAreaArr = []
+        }
+      
+        for (var t = 0; t < _this.areaList.length; t++) {
+          var _area = _this.areaList[t]
+          if (areas[k].areaCode === _area.code) {
+            pathAreaArr.push(_area)
+            break
+          }
+        }
+      
+        if ((k + 1) % level === 0) {
+          _this.selectedAreas.push(pathAreaArr) // 加载省市县层级
+        }
+      }
+    }
+    
+    /**
+     * 初始化地址多选对话框
+     */
+    function initAreaDialog(_this) {
+      var level = _this.widget.config.level
+      // 更新全国选中状态
+      if (_this.value.length === 0) {
+        _this.levelOptionConfig.otherOption.country.checked = false
+      } else {
+        for (var i = 0; i < _this.value.length; i++) {
+          var val = _this.value[i]
+          if ($.trim(val.areaCode).length < 6) { // 省市县行政区划代码为6位, 不是6位的为附加项，如全国 code = 0
+            if (val.areaCode === 0) {
+              _this.levelOptionConfig.otherOption.country.checked = true
+            }
+          }
+          
+          if ($.trim(val.areaCode).length === 6) {
+            break
+          }
+        }
+      }
+      _this.levelOptionConfig.otherOption.currCountryOption = null
+      // 更新省市县数据
+      resetAreaTreeList(_this.areaTreeList)
+      // 默认显示北京市数据
+      _this.levelOptionConfig.oneLevel.options = _this.areaTreeList
+      if (level === 2 || level === 3) {
+        _this.levelOptionConfig.twoLevel.options = _this.levelOptionConfig.oneLevel.options[0].children
+      }
+      if (level === 3) {
+        _this.levelOptionConfig.threeLevel.options = _this.levelOptionConfig.twoLevel.options[0].children
+      }
+      // 默认选中北京市第一条数据
+      if (level > 1) {
+        _this.levelOptionConfig.oneLevel.currOption = _this.levelOptionConfig.oneLevel.options[0]
+      }
+      if (level > 2) {
+        _this.levelOptionConfig.twoLevel.currOption = _this.levelOptionConfig.twoLevel.options[0]
+      }
+      // 更新省市县选中状态
+      var oneLevelSelOptions = []
+      var twoLevelSelOptions = []
+      var threeLevelSelOptions = []
+      if (_this.value.length > 0) {
+        updateAreaTreeList(_this.areaTreeList, _this.value, level, oneLevelSelOptions, twoLevelSelOptions, threeLevelSelOptions)
+      }
+      _this.levelOptionConfig.oneLevel.selectedOptions = oneLevelSelOptions
+      _this.levelOptionConfig.twoLevel.selectedOptions = twoLevelSelOptions
+      _this.levelOptionConfig.threeLevel.selectedOptions = threeLevelSelOptions
+    }
+    
+    /**
+     * 重置地址树状结构状态
+     * @param areaTreeList
+     */
+    function resetAreaTreeList(areaTreeList) {
+      for (var i = 0; i < areaTreeList.length; i++) {
+        var area = areaTreeList[i]
+        area.checked = false
+        if (area.children.length > 0) {
+          resetAreaTreeList(area.children)
+        }
+      }
+    }
+    
+    /**
+     * 更新地址树状结构选中状态
+     * @param areaTreeList
+     * @param selectedAreas
+     * @param level
+     * @param oneLevelSelOptions
+     * @param twoLevelSelOptions
+     * @param threeLevelSelOptions
+     */
+    function updateAreaTreeList(areaTreeList, selectedAreas, level, oneLevelSelOptions, twoLevelSelOptions, threeLevelSelOptions) {
+      for (var i = 0; i < areaTreeList.length; i++) {
+        var area = areaTreeList[i]
+        var areaLevel = getLevel(area)
+        
+        for (var j = 0; j < selectedAreas.length; j++) {
+          var selArea = selectedAreas[j]
+          if (selArea.areaCode === area.code) {
+            area.checked = !area.checked
+            if (areaLevel === 1) {
+              oneLevelSelOptions.push(area)
+            } else if (areaLevel === 2) {
+              twoLevelSelOptions.push(area)
+            } else {
+              threeLevelSelOptions.push(area)
+            }
+            break
+          }
+        }
+        
+        if (area.children.length > 0) {
+          updateAreaTreeList(area.children, selectedAreas, level, oneLevelSelOptions, twoLevelSelOptions, threeLevelSelOptions)
+        }
+      }
+    }
+    
+    /**
+     * 选中 || 取消选中省级地址数据
+     * @param _this
+     * @param area
+     */
+    function checkOneLevelArea(_this, area) {
+      area.checked = !area.checked
+      if (area.checked) { // 选中
+        _this.levelOptionConfig.oneLevel.selectedOptions.push(area)
+        return
+      }
+      // 取消选中
+      var selIndex = -1
+      for (var i = 0; i < _this.levelOptionConfig.oneLevel.selectedOptions.length; i++) {
+        var selArea = _this.levelOptionConfig.oneLevel.selectedOptions[i]
+        if (selArea.code === area.code) {
+          selIndex = i
+          break
+        }
+      }
+      
+      if (selIndex !== -1) {
+        _this.levelOptionConfig.oneLevel.selectedOptions.splice(selIndex, 1)
+      }
+    }
+    
+    /**
+     * 更新省级选中项
+     * @param _this
+     * @returns {[]}
+     */
+    function updateOneLevelSelectedOptions(_this) {
+      var selAreaList = []
+      var level = _this.widget.config.level
+      // 省市两级
+      if (level === 2) {
+        for (var i = 0; i < _this.levelOptionConfig.oneLevel.selectedOptions.length; i++) {
+          var oneLevelArea = _this.levelOptionConfig.oneLevel.selectedOptions[i]
+          var isTwoLevelChildrenCheckedExist = false
+          
+          for (var j = 0; j < oneLevelArea.children.length; j++) {
+            var twoLevelArea = oneLevelArea.children[j]
+            if (twoLevelArea.checked) {
+              isTwoLevelChildrenCheckedExist = true
+              break
+            }
+          }
+          
+          if (isTwoLevelChildrenCheckedExist) {
+            selAreaList.push(oneLevelArea)
+          }
+        }
+        return selAreaList
+      }
+      // 省市县三级
+      for (var m = 0; m < _this.levelOptionConfig.oneLevel.selectedOptions.length; m++) {
+        var _oneLevelArea = _this.levelOptionConfig.oneLevel.selectedOptions[m]
+        var isThreeLevelChildrenCheckedExist = false
+        
+        for (var n = 0; n < _oneLevelArea.children.length; n++) {
+          var _twoLevelArea = _oneLevelArea.children[n]
+          
+          for (var p = 0; p < _twoLevelArea.children.length; p++) {
+            var _threeLevelArea = _twoLevelArea.children[p]
+            if (_threeLevelArea.checked) {
+              isThreeLevelChildrenCheckedExist = true
+              break
+            }
+          }
+          
+          if (isThreeLevelChildrenCheckedExist) {
+            break
+          }
+        }
+        
+        if (isThreeLevelChildrenCheckedExist) {
+          selAreaList.push(_oneLevelArea)
+        }
+      }
+      return selAreaList
+    }
+    
+    /**
+     * 选中 || 取消选中市级地址数据
+     * @param _this
+     * @param area
+     */
+    function checkTwoLevelArea(_this, area) {
+      // 修改选中状态
+      area.checked = !area.checked
+      if (area.checked) { // 选中
+        _this.levelOptionConfig.twoLevel.selectedOptions.push(area)
+      } else { // 取消选中
+        var selIndex = -1
+        for (var i = 0; i < _this.levelOptionConfig.twoLevel.selectedOptions.length; i++) {
+          var selArea = _this.levelOptionConfig.twoLevel.selectedOptions[i]
+          if (selArea.code === area.code) {
+            selIndex = i
+            break
+          }
+        }
+        
+        if (selIndex !== -1) {
+          _this.levelOptionConfig.twoLevel.selectedOptions.splice(selIndex, 1)
+        }
+      }
+      // 判断是否存在选中的地址
+      var isSelectedAreaExist = false
+      for (var j = 0; j < _this.levelOptionConfig.twoLevel.options.length; j++) {
+        var _area = _this.levelOptionConfig.twoLevel.options[j]
+        if (_area.checked) {
+          isSelectedAreaExist = true
+          break
+        }
+      }
+      
+      if (isSelectedAreaExist) { // 省级标记为选中状态
+        _this.levelOptionConfig.oneLevel.selectedOptions.push(_this.levelOptionConfig.oneLevel.currOption)
+      } else {
+        _this.levelOptionConfig.oneLevel.selectedOptions = updateOneLevelSelectedOptions(_this)
+      }
+      _this.levelOptionConfig.otherOption.currCountryOption = null
+    }
+    
+    /**
+     * 更新市级选中项
+     * @param _this
+     * @returns {[]}
+     */
+    function updateTwoLevelSelectedOptions(_this) {
+      var selAreaList = []
+      for (var i = 0; i < _this.levelOptionConfig.twoLevel.selectedOptions.length; i++) {
+        var selArea = _this.levelOptionConfig.twoLevel.selectedOptions[i]
+        var isChildrenCheckedExist = false // 子地址是否存在选中的元素
+        
+        for (var j = 0; j < selArea.children.length; j++) {
+          var subArea = selArea.children[j]
+          if (subArea.checked) {
+            isChildrenCheckedExist = true
+            break
+          }
+        }
+        
+        if (isChildrenCheckedExist) {
+          selAreaList.push(selArea)
+        }
+      }
+      return selAreaList
+    }
+    
+    /**
+     * 获取某个地址的所有路径节点
+     */
+    function getPathAreas(areaList, lastLevelArea) {
+      var result = []
+      var lastLevel = getLevel(lastLevelArea)
+      if (lastLevel === 1) {
+        result.push(lastLevelArea)
+        return result
+      }
+      // 从后向前查找指定地址的所有路径地址元素
+      var currLevel = lastLevel
+      var isLastLevelAreaFound = false
+      for (var i = areaList.length - 1; i > -1; i--) {
+        var area = areaList[i]
+        var level = getLevel(area)
+        
+        if (area.code === lastLevelArea.code) {
+          isLastLevelAreaFound = true
+          result.push(area)
+          currLevel--
+        }
+        if (isLastLevelAreaFound && level === currLevel) {
+          result.push(area)
+          currLevel--
+        }
+        if (currLevel === 0) {
+          break
+        }
+      }
+      
+      return result.reverse()
+    }
+    
+    /**
+     * 获取地址的层级
+     */
+    function getLevel(area) {
+      var code = area.code + ''
+      var province = code.substring(2)
+      var city = code.substring(4)
+      
+      if (province === '0000') { // 省级
+        return 1
+      }
+      if (city === '00') { // 市级
+        return 2
+      }
+      return 3 // 区县级
+    }
+    
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{noClick:readonly, widget_error: errorTip}" v-show="isShow && hasAuthority">',
+        '<!--标题-->',
+        '<div class="form_widget_title">',
+        '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+        '</div>',
+        '<!--标题描述-->',
+        '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+        '<!--填写区域-->',
+        '<div class="form_widget_data">',
+        '<!--禁止编辑-->',
+        '<div class="form_contact_forbid" v-if="readonly">',
+        '<div class="form_forbid_edit form_forbid_nodata" v-if="selectedAreas.length==0">',
+        '<p class="form_forbid_word">暂无数据</p>',
+        '</div>',
+        '<ul class="ctat_res" v-if="selectedAreas.length > 0">',
+        '<li class="ctat_per address_per" v-for="pathAreaArr in selectedAreas">',
+        '<span class="ctat_name">{{pathAreaArr[pathAreaArr.length-1].title}}</span>',
+        '</li>',
+        '</ul>',
+        '</div>',
+        '<!--可编辑-->',
+        '<div class="form_widget_cont" v-if="!readonly">',
+        '<ul class="ctat_res">',
+        '<li class="ctat_per address_per" v-for="(pathAreaArr,index) in selectedAreas">',
+        '<span class="ctat_name">{{pathAreaArr[pathAreaArr.length-1].title}}</span>',
+        '<span class="ctat_del icon-userdel" @click.stop="deleteSelectedArea(index)"></span>',
+        '</li>',
+        '<li class="ctat_btn"><span class="icon-adduser" @click.stop="toggleAreaDialog"></span></li>',
+        '</ul>',
+        '<p class="space_line"></p>',
+        '</div>',
+        '</div>',
+        '<!--提示文本-->',
+        '<div class="form_widget_prompt">',
+        '<div class="widget_error_tip" v-show="errorTip">',
+        '<p class="must_word">此项为必填项</p>',
+        '</div>',
+        '<div style="display: none;">{{relateFieldValueStatus}}</div>',
+        '</div>',
+        
+        '<!--地址多选弹窗-->',
+        '<div class="area_checkbox_pop" v-show="selAreaConfig.show">',
+        '  <div class="area_checkbox_mask" @click.stop="toggleAreaDialog">',
+        '    <div class="area_checkbox_data">',
+        '      <div class="area_checkbox_top">',
+        '        <span class="area_pop_clear" @click.stop="doCancel">清空</span>',
+        '        <span class="area_pop_sure" @click.stop="doConfirm">{{confirmTip}}</span>',
+        '      </div>',
+        '      <!--temp_one:省  temp_two:省市  temp_three:省市区 -->',
+        '      <div class="area_checkbox_cont" :class="levelStyleCls">',
+        '        <!--省-->',
+        '        <ul class="area_province">',
+        '          <li class="area_per" :class="oneLevelCountryCls" v-if="widget.config.level >= 1" @click.stop="toggleOrCheckOneLevelCountry">全国 <span' +
+        ' class="area_icon' +
+        ' icon-toolcheck"></span></li>',
+        '          <li class="area_per" :class="oneLevelCls(area)" v-for="area in levelOptionConfig.oneLevel.options"' +
+        ' @click.stop="toggleOrCheckOneLevelArea(area)">{{oneLevelName(area)}}' +
+        ' <span class="area_icon icon-toolcheck"></span></li>',
+        '        </ul>',
+        '        <!--市-->',
+        '        <ul class="area_city">',
+        '          <li class="area_per" :class="twoLevelCountryCls" v-if="widget.config.level >= 2" @click.stop="toggleOrCheckTwoLevelCountry">全国 <span' +
+        ' class="area_icon' +
+        ' icon-toolcheck"></span></li>',
+        '          <li class="area_per" :class="twoLevelCls(area)" v-for="area in levelOptionConfig.twoLevel.options"' +
+        ' @click.stop="toggleOrCheckTwoLevelArea(area)">{{area.title}}' +
+        ' <span' +
+        ' class="area_icon' +
+        ' icon-toolcheck"></span></li>',
+        '        </ul>',
+        '        <!--区-->',
+        '        <ul class="area_district" >',
+        '          <li class="area_per" :class="{\'select\': levelOptionConfig.otherOption.country.checked}" v-if="widget.config.level === 3"' +
+        ' @click.stop="checkThreeLevelCountry">全国 <span class="area_icon' +
+        ' icon-toolcheck"></span></li>',
+        '          <li class="area_per" :class="{\'select\': area.checked}" v-for="area in levelOptionConfig.threeLevel.options"' +
+        ' @click.stop="checkThreeArea(area)">{{area.title}}' +
+        ' <span' +
+        ' class="area_icon' +
+        ' icon-toolcheck"></span></li>',
+        '        </ul>',
+        '      </div>',
+        '    </div>',
+        '  </div>',
+        '</div>',
+        
+        '<event-trigger :widget="widget" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event="triggerValueEvent"></event-trigger>',
+        '<field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          lastLinkValue: [],
+          lastRelateValue: [],
+          selAreaConfig: { // 地址多选选择框
+            show: false
+          },
+          levelOptionConfig: {
+            otherOption: {
+              country: { // 全国
+                title: '全国',
+                code: 0,
+                checked: false,
+                children: []
+              },
+              currCountryOption: null // 当前是否聚焦于全国
+            },
+            oneLevel: {
+              options: [], // 所有地址选项
+              selectedOptions: [], // 选中的地址选项
+              currOption: null // 当前聚焦选项
+            },
+            twoLevel: {
+              options: [],
+              selectedOptions: [],
+              currOption: null
+            },
+            threeLevel: {
+              options: [],
+              selectedOptions: []
+            }
+          },
+          selectedAreas: [],
+          shortNames: [
+            {code: 150000, name: '内蒙古自治区', shortName: '内蒙古'},
+            {code: 450000, name: '广西壮族自治区', shortName: '广西'},
+            {code: 540000, name: '西藏自治区', shortName: '西藏'},
+            {code: 640000, name: '宁夏回族自治区', shortName: '宁夏'},
+            {code: 650000, name: '新疆维吾尔自治区', shortName: '新疆'},
+            {code: 810000, name: '香港特别行政区', shortName: '香港'},
+            {code: 820000, name: '澳门特别行政区', shortName: '澳门'}
+          ]
+        }
+      },
+      components: {
+        'tip-imgs': tipImgs,
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue')
+      },
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        level: function () {
+          return this.widget.config.level
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if (this.required) {
+            return this.value.length > 0
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var relateStatus = this.$store.getters.getRelateFieldValueStatus
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (this.isPreview && this.isInit) {
+            return relateStatus
+          }
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === publicUtils.getCurrentDetailIndex(this)) || !obj.hasOwnProperty('inDetailIndex'))) {
+            var result = obj.fields[0].values
+            if (result && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+              this.value = []
+            }
+            if (result && JSON.stringify(this.lastRelateValue) !== JSON.stringify(result) && !this.$store.getters.getReadonlyStatus) {
+              if (result[0] && result[0].areaCode) {
+                this.value = result
+                this.lastRelateValue = result
+              }
+            }
+            if (this.isClearRelatedData) {
+              this.value = []
+            }
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          }
+          return relateStatus
+        },
+        isClearRelatedData: function () {
+          return this.$store.getters.getIsClearRelatedData
+        },
+        tipTextData: function () {
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          return this.widget.config.fields[0].tip.imgs
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+          if (!this.visible) {
+            return showStatus
+          }
+          return true
+        },
+        isShow: function () {
+          var showStatus = this.$store.state.reloadValSubField
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            if (this.widget.pid > 0 && !this.$store.state.verifieds[this.widget.pid].isShow) {
+              //明细内子组件时 如果明细组件是隐藏状态时 当前子组件也要改成隐藏状态
+              showStatus = false
+            } else {
+              showStatus = true
+            }
+          } else if (!!this.widget.config.fromDetail
+                     && this.widget.config.inDetailGroupIndex > -1
+                     && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        areaTreeList: function () {
+          return threeLevelArea
+        },
+        areaList: function () {
+          return areaList
+        },
+        levelStyleCls: function () {
+          var level = this.widget.config.level
+          if (level === 1) {
+            return 'temp_one' // 省
+          }
+          if (level === 2) {
+            return 'temp_two' // 省市
+          }
+          return 'temp_three' // 省市县
+        },
+        oneLevelCountryCls: function () {
+          var level = this.widget.config.level
+          var checked = this.levelOptionConfig.otherOption.country.checked
+          if (level === 1) {
+            return checked ? 'select' : ''
+          }
+          
+          var cls = ''
+          if (this.levelOptionConfig.otherOption.currCountryOption) {
+            cls += 'active'
+          }
+          if (checked) {
+            cls += ' select'
+          }
+          return cls
+        },
+        twoLevelCountryCls: function () {
+          var level = this.widget.config.level
+          var checked = this.levelOptionConfig.otherOption.country.checked
+          if (level === 2) {
+            return checked ? 'select' : ''
+          }
+          
+          var cls = ''
+          if (this.levelOptionConfig.otherOption.currCountryOption) {
+            cls += 'active'
+          }
+          if (checked) {
+            cls += ' select'
+          }
+          return cls
+        },
+        confirmTip: function () {
+          var length = 0
+          var level = this.widget.config.level
+          if (level === 1) {
+            length = this.levelOptionConfig.oneLevel.selectedOptions.length
+          } else if (level === 2) {
+            length = this.levelOptionConfig.twoLevel.selectedOptions.length
+          } else {
+            length = this.levelOptionConfig.threeLevel.selectedOptions.length
+          }
+          if (this.levelOptionConfig.otherOption.country.checked) { // 全国
+            length += 1
+          }
+          return length === 0 ? '确定' : '确定(' + length + ')'
+        }
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEvent: function (val) {
+          this.loadStatus = false
+        },
+        linkFieldValueStatus: function (result) {
+          if (this.isPreview && this.isInit) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+    
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+    
+          if (hasNullCondVal) {
+            this.value = []
+            this.lastLinkValue = []
+            loadSelectedAreas(this)
+            dataLoadInit(this)
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+          if (result && JSON.stringify(this.lastLinkValue) === JSON.stringify(result) && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+            this.value = []
+            loadSelectedAreas(this)
+          }
+          if (result && JSON.stringify(this.lastLinkValue) !== JSON.stringify(result)) {
+            this.value = result
+            this.lastLinkValue = result
+            loadSelectedAreas(this)
+            if (this.value.length > 0) {
+              dataLoadInit(this)
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        toggleAreaDialog: function () {
+          this.selAreaConfig.show = !this.selAreaConfig.show
+          initAreaDialog(this) // 初始化
+        },
+        toggleOrCheckOneLevelCountry: function () {
+          var level = this.widget.config.level
+          if (level === 1) {
+            this.levelOptionConfig.otherOption.country.checked = !this.levelOptionConfig.otherOption.country.checked
+            return
+          }
+          
+          if (this.levelOptionConfig.otherOption.currCountryOption) {
+            return
+          }
+          this.levelOptionConfig.otherOption.currCountryOption = this.levelOptionConfig.otherOption.country
+        },
+        toggleOrCheckTwoLevelCountry: function () {
+          var level = this.widget.config.level
+          if (level === 2) {
+            this.levelOptionConfig.otherOption.country.checked = !this.levelOptionConfig.otherOption.country.checked
+          }
+          
+          if (this.levelOptionConfig.otherOption.currCountryOption) {
+            return
+          }
+          if (level === 2 && this.levelOptionConfig.otherOption.country.checked) {
+            this.levelOptionConfig.otherOption.currCountryOption = this.levelOptionConfig.otherOption.country
+          }
+          if (level === 3) {
+            this.levelOptionConfig.otherOption.currCountryOption = this.levelOptionConfig.otherOption.country
+          }
+        },
+        checkThreeLevelCountry: function () {
+          this.levelOptionConfig.otherOption.country.checked = !this.levelOptionConfig.otherOption.country.checked
+          if (this.levelOptionConfig.otherOption.currCountryOption) {
+            return
+          }
+          if (this.levelOptionConfig.otherOption.country.checked) {
+            this.levelOptionConfig.otherOption.currCountryOption = this.levelOptionConfig.otherOption.country
+          }
+        },
+        toggleOrCheckOneLevelArea: function (area) {
+          var level = this.widget.config.level
+          // 只有省级，选中 || 取消选中省级数据
+          if (level === 1) {
+            checkOneLevelArea(this, area)
+            return
+          }
+          
+          if (this.levelOptionConfig.otherOption.currCountryOption) {
+            this.levelOptionConfig.oneLevel.currOption = null
+          }
+          // 存在市级或县级数据，选择省级数据
+          if (this.levelOptionConfig.oneLevel.currOption && this.levelOptionConfig.oneLevel.currOption.code === area.code) {
+            return
+          }
+          // 更新市级、县级数据
+          this.levelOptionConfig.twoLevel.options = area.children
+          if (level === 3) {
+            this.levelOptionConfig.threeLevel.options = this.levelOptionConfig.twoLevel.options[0].children
+          }
+          // 存在市级或县级，切换省选中状态
+          this.levelOptionConfig.oneLevel.currOption = area
+          if (level === 3) {
+            this.levelOptionConfig.twoLevel.currOption = this.levelOptionConfig.twoLevel.options[0]
+          }
+          this.levelOptionConfig.otherOption.currCountryOption = null
+        },
+        toggleOrCheckTwoLevelArea: function (area) {
+          var level = this.widget.config.level
+          // 省市两级，选中 || 取消选中市级数据
+          if (level === 2) {
+            checkTwoLevelArea(this, area)
+            return
+          }
+          
+          if (this.levelOptionConfig.otherOption.currCountryOption) {
+            this.levelOptionConfig.twoLevel.currOption = null
+          }
+          // 存在县一级，选择市级数据
+          if (this.levelOptionConfig.twoLevel.currOption && this.levelOptionConfig.twoLevel.currOption.code === area.code) {
+            return
+          }
+          // 切换市级选中状态
+          this.levelOptionConfig.twoLevel.currOption = area
+          // 更新县级数据
+          this.levelOptionConfig.threeLevel.options = area.children
+          this.levelOptionConfig.otherOption.currCountryOption = null
+        },
+        checkThreeArea: function (area) {
+          // 修改选中状态
+          area.checked = !area.checked
+          if (area.checked) { // 选中
+            this.levelOptionConfig.threeLevel.selectedOptions.push(area)
+          } else { // 取消选中
+            var selIndex = -1
+            for (var i = 0; i < this.levelOptionConfig.threeLevel.selectedOptions.length; i++) {
+              var selArea = this.levelOptionConfig.threeLevel.selectedOptions[i]
+              if (selArea.code === area.code) {
+                selIndex = i
+                break
+              }
+            }
+            
+            if (selIndex !== -1) {
+              this.levelOptionConfig.threeLevel.selectedOptions.splice(selIndex, 1)
+            }
+          }
+          // 判断是否存在选中的地址
+          var isSelectedAreaExist = false
+          for (var j = 0; j < this.levelOptionConfig.threeLevel.options.length; j++) {
+            var _area = this.levelOptionConfig.threeLevel.options[j]
+            if (_area.checked) {
+              isSelectedAreaExist = true
+              break
+            }
+          }
+          
+          if (isSelectedAreaExist) { // 省级和市级标记为选中状态
+            this.levelOptionConfig.oneLevel.selectedOptions.push(this.levelOptionConfig.oneLevel.currOption)
+            this.levelOptionConfig.twoLevel.selectedOptions.push(this.levelOptionConfig.twoLevel.currOption)
+          } else {
+            this.levelOptionConfig.oneLevel.selectedOptions = updateOneLevelSelectedOptions(this)
+            this.levelOptionConfig.twoLevel.selectedOptions = updateTwoLevelSelectedOptions(this)
+          }
+          this.levelOptionConfig.otherOption.currCountryOption = null
+        },
+        oneLevelName: function (area) { // 省级名称当存在市级、县级数据时，新疆等需要简写
+          var level = this.widget.config.level
+          if (level === 1) {
+            return area.title
+          }
+          var result = area.title
+          for (var i = 0; i < this.shortNames.length; i++) {
+            var shortNameObj = this.shortNames[i]
+            if (shortNameObj.code === area.code) {
+              result = shortNameObj.shortName
+              break
+            }
+          }
+          return result
+        },
+        oneLevelCls: function (area) {
+          var cls = ''
+          var level = this.widget.config.level
+          // 只有省级
+          if (level === 1) {
+            for (var i = 0; i < this.levelOptionConfig.oneLevel.selectedOptions.length; i++) {
+              var selArea = this.levelOptionConfig.oneLevel.selectedOptions[i]
+              if (selArea.code === area.code) {
+                cls += 'select' // 选中样式
+                break
+              }
+            }
+            return cls
+          }
+          // 存在市级、县级
+          if (!this.levelOptionConfig.otherOption.currCountryOption
+              && this.levelOptionConfig.oneLevel.currOption
+              && this.levelOptionConfig.oneLevel.currOption.code === area.code) {
+            cls += 'active' // 聚焦于当前地址样式
+          }
+          for (var j = 0; j < this.levelOptionConfig.oneLevel.selectedOptions.length; j++) {
+            var _selArea = this.levelOptionConfig.oneLevel.selectedOptions[j]
+            if (_selArea.code === area.code) {
+              cls += ' select' // 选中样式
+              break
+            }
+          }
+          return cls
+        },
+        twoLevelCls: function (area) {
+          var cls = ''
+          var level = this.widget.config.level
+          // 最后一级为市级
+          if (level === 2) {
+            for (var i = 0; i < this.levelOptionConfig.twoLevel.selectedOptions.length; i++) {
+              var selArea = this.levelOptionConfig.twoLevel.selectedOptions[i]
+              if (selArea.code === area.code) {
+                cls += 'select' // 选中样式
+                break
+              }
+            }
+            return cls
+          }
+          // 存在县级
+          if (!this.levelOptionConfig.otherOption.currCountryOption
+              && this.levelOptionConfig.twoLevel.currOption
+              && this.levelOptionConfig.twoLevel.currOption.code === area.code) {
+            cls += 'active' // 聚焦于当前地址样式
+          }
+          for (var j = 0; j < this.levelOptionConfig.twoLevel.selectedOptions.length; j++) {
+            var _selArea = this.levelOptionConfig.twoLevel.selectedOptions[j]
+            if (_selArea.code === area.code) {
+              cls += ' select' // 选中样式
+              break
+            }
+          }
+          return cls
+        },
+        doCancel: function () {
+          this.value = []
+          initAreaDialog(this)
+        },
+        doConfirm: function () {
+          var _this = this
+          // 修改value
+          this.value = []
+          // 全国
+          if (this.levelOptionConfig.otherOption.country.checked) {
+            this.value.push({
+              val: this.levelOptionConfig.otherOption.country.title,
+              areaCode: this.levelOptionConfig.otherOption.country.code
+            })
+          }
+          
+          var level = this.widget.config.level
+          if (level === 1) { // 省级
+            for (var i = 0; i < this.levelOptionConfig.oneLevel.selectedOptions.length; i++) {
+              var oneLevelArea = this.levelOptionConfig.oneLevel.selectedOptions[i]
+              var oneLevelPathAreaArr = getPathAreas(this.areaList, oneLevelArea)
+              oneLevelPathAreaArr.forEach(function (value) {
+                _this.value.push({
+                  val: value.title,
+                  areaCode: value.code
+                })
+              })
+            }
+          } else if (level === 2) { // 省市级
+            for (var j = 0; j < this.levelOptionConfig.twoLevel.selectedOptions.length; j++) {
+              var twoLevelArea = this.levelOptionConfig.twoLevel.selectedOptions[j]
+              var twoLevelPathAreaArr = getPathAreas(this.areaList, twoLevelArea)
+              twoLevelPathAreaArr.forEach(function (value) {
+                _this.value.push({
+                  val: value.title,
+                  areaCode: value.code
+                })
+              })
+            }
+          } else { // 省市县级
+            for (var k = 0; k < this.levelOptionConfig.threeLevel.selectedOptions.length; k++) {
+              var threeLevelArea = this.levelOptionConfig.threeLevel.selectedOptions[k]
+              var threeLevelPathAreaArr = getPathAreas(this.areaList, threeLevelArea)
+              threeLevelPathAreaArr.forEach(function (value) {
+                _this.value.push({
+                  val: value.title,
+                  areaCode: value.code
+                })
+              })
+            }
+          }
+          // 修改选中显示项
+          loadSelectedAreas(this)
+          resetAreaTreeList(this.areaTreeList)
+          dataLoadInit(this)
+          this.selAreaConfig.show = false // 关闭弹窗
+        },
+        deleteSelectedArea: function (index) {
+          var _this = this
+          this.selectedAreas.splice(index, 1)
+          this.value = []
+          for (var i = 0; i < this.selectedAreas.length; i++) {
+            var pathAreaArr = this.selectedAreas[i]
+            pathAreaArr.forEach(function (value) {
+              _this.value.push({
+                val: value.title,
+                areaCode: value.code
+              })
+            })
+          }
+          this.lastLinkValue = this.value
+          dataLoadInit(this)
+        }
+      },
+      created: function () {
+        this.value = this.widget.config.fields[0].values || []
+        loadSelectedAreas(this)
+        dataLoadInit(this, this.$store.getters.getComptDataType('init'))
+      }
+    }
+  }
+})

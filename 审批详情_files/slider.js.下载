@@ -1,0 +1,402 @@
+define(['jquery', 'tipImgs'], function ($, tipImgs) {
+  'use strict'
+  return function (widget) {
+
+    function updateSlider(_this) {
+      _this.value = _this.value.toString().replace(/[^\d+$]/g, '')
+      if (_this.value.length > 0 && _this.value.indexOf('0') === 0) {
+        _this.value = '0'
+      }
+
+      var bar = $('#bar' + _this.widget.id)
+      var btn = $('#btn' + _this.widget.id)
+      var line = $('#slider_line' + _this.widget.id)
+      var maxPos = bar[0].offsetWidth - btn[0].offsetWidth
+      if (_this.value === '') {
+        _this.sliderVal = ''
+        _this.errorInfo.show = false
+        btn.css({'left': '0px'})
+        line.css({'width': 0})
+        return
+      }
+      var val = parseInt(_this.value)
+      var minVal = parseInt(_this.sliderRange.minValue)
+      var maxVal = parseInt(_this.sliderRange.maxValue)
+      if (val < minVal) {
+        _this.sliderVal = '<' + _this.sliderRange.minValue
+        _this.errorInfo.show = true
+        _this.errorInfo.verifyMsg = '分值要介于' + minVal + '和' + maxVal + '之间'
+        btn.css({'left': '0px'})
+        line.css({'width': 0})
+      } else if (val > maxVal) {
+        _this.sliderVal = '>' + _this.sliderRange.maxValue
+        _this.errorInfo.show = true
+        _this.errorInfo.verifyMsg = '分值要介于' + minVal + '和' + maxVal + '之间'
+        btn.css({'left': maxPos + 'px'})
+        line.css({'width': maxPos})
+      } else {
+        _this.sliderVal = _this.value
+        _this.errorInfo.show = false
+        _this.errorInfo.verifyMsg = ''
+        var scale = Math.min(1, Math.max(0, (val - minVal) / (maxVal - minVal)))
+        var currPos = Math.round(maxPos * scale)
+        btn.css({'left': currPos + 'px'})
+        line.css({'width': currPos})
+      }
+    }
+  
+    /**
+     *触发第三方设置Url
+     */
+    function doInsertUrlField(_this) {
+      var insertUrlFields = _this.$store.getters.getInsertFiledIdById(_this.widget.config.id)
+      if (insertUrlFields && insertUrlFields.length > 0) {
+        var valArr = []
+        for (var i = 0; i < _this.value.length; i++) {
+          valArr.push(_this.value[i].val)
+        }
+        //存在当前字段被做为第三方Url条件字段
+        _this.$store.commit('operateInsertFiledData', {
+          id: _this.widget.id,
+          compt: _this.widget.config.compt,
+          configId: _this.widget.config.id,
+          value: valArr.join(',')
+        })
+      }
+    }
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: _this.value,
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{noClick:readonly, widget_error: errorTip || (errorInfo.show&&errorInfo.verifyMsg)}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+           '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_forbid_edit" :class="{form_forbid_nodata: !sliderVal}" v-show="readonly">',
+             '<p class="form_forbid_word">{{sliderVal}}</p>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-show="!readonly">',
+              '<div class="progress">',
+                '<div class="pgs_left">',
+                  '<input type="text" class="pgs_input" :readonly="readonly" v-model="value" @keyup="checkInput">',
+                '</div>',
+                '<div class="pgs_right">',
+                  '<div class="pgs_cont">',
+                    '<div class="pgs_line" :id="\'bar\' + widget.id">',
+                      '<div class="pgs_line_bar" :id="\'slider_line\' + widget.id"></div>',
+                      '<span class="pgs_line_icon" :id="\'btn\' + widget.id" @mousedown="doSlide($event)" @touchstart.stop="touchStart($event)" @touchmove="touchMove($event)">{{sliderVal}}</span>',
+                    '</div>',
+                    '<div class="pgs_info" v-show="rangeTextShow">',
+                      '<span class="pgs_info_left">{{sliderRange.minText}}</span>',
+                      '<span class="pgs_info_right">{{sliderRange.maxText}}</span>',
+                    '</div>',
+                  '</div>',
+                '</div>',
+              '</div>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorInfo.show&&errorInfo.verifyMsg">',
+             '<p class="must_word">{{errorInfo.verifyMsg}}</p>',
+            '</div>',
+            '<div style="display: none;">{{relateFieldValueStatus}}</div>',
+          '</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: '',
+          lastRelateValue: '',
+          sliderVal: '',
+          errorInfo: {
+            verifyMsg: '',
+            show: false
+          },
+          position: {
+            startX: 0,
+            startOffset: 0,
+            maxPos: 0
+          }
+        }
+      },
+      methods: {
+        checkInput: function () {
+          if (this.readonly) {
+            return
+          }
+          updateSlider(this)
+          doInsertUrlField(this)
+          dataLoadInit(this)
+        },
+        touchStart: function (event) {
+          if (this.readonly) {
+            return
+          }
+          this.position.startX = event.targetTouches[0].clientX
+          this.position.startOffset = event.target.offsetLeft
+          this.position.maxPos = $('#bar' + this.widget.id)[0].offsetWidth - event.target.offsetWidth
+        },
+        touchMove: function (event) {
+          if (this.readonly) {
+            return
+          }
+          this.$store.commit('setInitStatus', false)
+          var currX = event.targetTouches[0].clientX
+          var currPos = Math.min(this.position.maxPos, Math.max(-2, this.position.startOffset + currX - this.position.startX))
+          $('#btn' + this.widget.id).css({'left': currPos + 'px'})
+          $('#slider_line' + this.widget.id).css({'width': currPos})
+          var minVal = parseInt(this.sliderRange.minValue)
+          var maxVal = parseInt(this.sliderRange.maxValue)
+          this.value = minVal + Math.round(Math.max(0, currPos / this.position.maxPos) * (maxVal - minVal))
+          this.sliderVal= this.value
+          window.getSelection ? window.getSelection().removeAllRanges() : document.getSelection().empty()
+          doInsertUrlField(this)
+          dataLoadInit(this)
+        },
+        doSlide: function (event) {
+          if (this.readonly) {
+            return
+          }
+          var _this = this
+          var startX = event.clientX
+          var startOffset = event.target.offsetLeft
+          var maxPos = $('#bar' + _this.widget.id)[0].offsetWidth - event.target.offsetWidth
+          document.onmousemove = function (ev) {
+            var currX = (ev || window.event).clientX
+            var currPos = Math.min(maxPos, Math.max(-2, startOffset + currX - startX))
+            $('#btn' + _this.widget.id).css({'left': currPos + 'px'})
+            $('#slider_line' + _this.widget.id).css({'width': currPos})
+            var minVal = parseInt(_this.sliderRange.minValue)
+            var maxVal = parseInt(_this.sliderRange.maxValue)
+            _this.value = minVal + Math.round(Math.max(0, currPos / maxPos) * (maxVal - minVal))
+            _this.sliderVal = _this.value
+            window.getSelection ? window.getSelection().removeAllRanges() : document.getSelection().empty()
+          }
+          document.onmouseup = function (ev) {
+            document.onmousemove = null
+          }
+        }
+      },
+      components: {'tip-imgs': tipImgs},
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value}]}
+            ],
+            errMsg: this.errorInfo.verifyMsg,
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          this.$store.commit('calculateScore', {
+            id: this.widget.id,
+            pid: this.widget.pid,
+            configId: this.widget.config.id,
+            value: this.value,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            fromDetail: !!this.widget.config.fromDetail
+          })
+          this.$store.commit('setCalculableStatus')
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          if (this.required && $.trim(this.value) === '') {
+            this.errorInfo.verifyMsg = '此项为必填项'
+          }
+          if (this.required) {
+            if (this.value === '') {
+              return false
+            }
+          }
+          if (this.value !== '') {
+            var val = parseInt(this.value)
+            var minVal = parseInt(this.sliderRange.minValue)
+            var maxVal = parseInt(this.sliderRange.maxValue)
+            return val >= minVal && val <= maxVal
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            this.errorInfo.show = true
+            status = true
+          }
+          return status
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true;
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === this.widget.config.inDetailGroupIndex) || !obj.hasOwnProperty('inDetailIndex')) && !this.$store.getters.getReadonlyStatus && (!this.isPreview || !this.isInit)) {
+            this.sliderRange = obj.fields[0].sliderRange
+            var result = ''
+            if (obj.fields[0].values && obj.fields[0].values.length > 0 && obj.fields[0].values[0].val) {
+              result = parseFloat(obj.fields[0].values[0].val)
+            }
+            if (!result && this.lastRelateValue !== result) {
+              this.value = '0'
+              updateSlider(this)
+              this.lastRelateValue = result
+            }
+            if (result && this.lastRelateValue !== result) {
+              this.value = result
+              this.lastRelateValue = result
+              updateSlider(this)
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs;
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            errMsg: this.errorInfo.verifyMsg,
+            fvalues: [
+              {fidx: 0, values: [{val: $.trim(this.value)}]}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        rangeTextShow: function () {
+          return this.sliderRange.textVisible && (this.sliderRange.minText || this.sliderRange.maxText)
+        }
+      },
+      created: function () {
+        var values = this.widget.config.fields[0].values
+        this.value = values ? (values[0] && values[0].val + '') || '' : ''
+        this.sliderRange = this.widget.config.fields[0].sliderRange
+      },
+      mounted: function () {
+        var _this = this
+        updateSlider(this)
+        _this.$nextTick(function () {
+          setTimeout(function () {
+            // 默认值触发公式编辑
+            dataLoadInit(_this, _this.$store.getters.getComptDataType('init'))
+          }, 500)
+        })
+      }
+    }
+  }
+})

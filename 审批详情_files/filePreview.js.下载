@@ -1,0 +1,463 @@
+!function (t) {
+  window.FP = window.FP || {}
+}(jQuery),
+    function (s) {
+      window.FP = window.FP || {};
+      var a = {};
+      s.shortcut = function (t, e) {
+        if (null != a[t]) throw"shortcut:[" + t + "] has been registered";
+        a[t] = e, s.extend(e.prototype, {xtype: t})
+      },
+          FP.extend = function (t, e, i) {
+            "object" == typeof e && (i = e, e = t, t = function () {
+              e.apply(this, arguments)
+            });
+            function a() {
+            }
+            var n = e.prototype;
+            return a.prototype = n, t.prototype = new a, t.superclass = n, s.extend(t.prototype, i), t
+          },
+          FP.STATIC = {
+            _st: (new Date).getTime(),
+            _ct: (new Date).getTime(),
+            zIndex: 8e3,
+            num: 0,
+            IDBase: +new Date
+          }
+    }(jQuery),
+    function (t) {
+      t.extend(FP, {
+        Keys: { // 键盘左右方向键切换图片
+          LEFT: 37,
+          RIGHT: 39,
+        },
+        CONST: {
+          INVALID_TYPE: {
+            INVALID: 1,
+            BLANK: 3
+          },
+          MAX_IMAGE_VIEW_SIZE: 20971520 // 图片预览最大尺寸 20M
+        },
+      })
+    }(jQuery),
+    function (m) {
+      FP.Utils = FP.Utils || {}, m.extend(FP.Utils, {
+        isString: function (t) {
+          return "string" == typeof t
+        }, isNumber: function (t) {
+          return m.isNumeric(t)
+        }, isFunction: function (t) {
+          return m.isFunction(t)
+        }, isDate: function (t) {
+          return t instanceof Date
+        }, isArray: function (t) {
+          return m.isArray(t)
+        }, isEmpty: function (t) {
+          return "" === t || FP.Utils.isNull(t)
+        },
+        isNull: function (t) {
+          return null == t
+        }, isObjectEmpty: function (t) {
+          if (null == t) return !0;
+          if (0 < t.length) return !1;
+          if (0 === t.length) return !0;
+          for (var e in t) if (hasOwnProperty.call(t, e)) return !1;
+          return isNaN(t)
+        },
+        applyFunc: function (t, e, i, a) {
+          return FP.Utils.isFunction(e) ? e.apply(t, i || []) : a
+        }, forEach: function (t, e) {
+          if (Array.isArray(t) || t instanceof jQuery) for (var i = 0, a = t.length; i < a && !1 !== e.apply(t[i], [i, t[i]]); i++) ; else if (t && "object" == typeof t) for (var n in t) if (t.hasOwnProperty(n) && !1 === e.apply(t[n], [n, t[n]])) break
+        },
+        redirectTo: function (t) {
+          window.location.href = t
+        },
+        createLoadIcon: function (t, e) {
+          t = m('<div class="x-loader-icon"/>').appendTo(t);
+          return e && t.addClass("colorful"), m("<div/>").appendTo(t), t
+        },
+        fileDownload: function (t) {
+          FP.Utils.redirectTo(t)
+        },
+        isPdfExt: function (t) {
+          return /^pdf$/i.test(t)
+        }, isOfficeExt: function (t) {
+          return /^(doc|docx|ppt|pptx|xls|xlsx)$/i.test(t)
+        }, isImageExt: function (t) {
+          return /^(png|jpg|jpeg|gif)$/i.test(t)
+        }, isVideoExt: function (t) {
+          return /^(mp4|m4v|webm|mov)$/i.test(t)
+        }, isAudioExt: function (t) {
+          return /^(ogg|mp3|wav)$/i.test(t)
+        },
+        createFileThumb: function (t, e) {
+          e = e || "normal";
+          var i = "other";
+          return FP.Utils.isVideoExt(t) ? i = "video" : FP.Utils.isAudioExt(t) ? i = "audio" : FP.Utils.isImageExt(t) ? i = "image" : /^(pptx?|docx?|xlsx?|zip|rar|csv|txt|pdf)$/i.test(t) && (i = t.toLowerCase()), m('<div class="fui_file_thumb ' + i + " size-" + e + '"/>')
+        }
+      })
+    }(jQuery),
+    FP.OB = function (t) {
+      this.options = $.extend(this._defaultConfig(), t), this._beforeInit(), this._init(), this._afterInit()
+    },
+    $.extend(FP.OB.prototype, {
+      _defaultConfig: function () {
+        return {onBeforeInit: null, onAfterInit: null}
+      }, _init: function () {
+      }, _beforeInit: function () {
+        FP.Utils.applyFunc(this, this.options.onBeforeInit, [], !1)
+      }, _afterInit: function () {
+        FP.Utils.applyFunc(this, this.options.onAfterInit, [], !1)
+      }
+    }),
+    FP.Widget = FP.extend(FP.OB, {
+      _defaultConfig: function () {
+        return $.extend(FP.Widget.superclass._defaultConfig.apply(this, arguments), {
+          widgetName: "",
+          baseCls: "",
+          customCls: null,
+          enable: !0,
+          visible: !0,
+          invalidateType: FP.CONST.INVALID_TYPE.BLANK
+        })
+      },
+      _init: function () {
+        FP.Widget.superclass._init.apply(this, arguments), this._initRoot(), this._initNameEffects()
+      },
+      _afterInit: function () {
+        this._initElementSize(), this._initVisualEffects(), this._initDefaultValue(), FP.Widget.superclass._afterInit.apply(this, arguments)
+      },
+      _initRoot: function () {
+        var t = this.options;
+        this.xtype && (t.type = this.xtype), null != t.renderEl ? this.element = $(t.renderEl) : this.element = this._defaultRoot(), t.baseCls && this.element.addClass(t.baseCls), t.customCls && this.element.addClass(t.customCls)
+      },
+      _initNameEffects: function () {
+        var t = this.options;
+        t.widgetName || (t.widgetName = "_widget_" + FP.STATIC.IDBase++), this.element.attr({widgetName: t.widgetName})
+      },
+      _initElementSize: function () {
+        this.doResize()
+      }, _initVisualEffects: function () {
+        this.setEnable(this.options.enable), this.setVisible(this.options.visible)
+      }, _initDefaultValue: function () {
+        var t = this.options;
+        null != t.value ? this.setValue(t.value) : null != t.text && this.setText(t.text)
+      },
+      _defaultRoot: function () {
+        return $("<div/>")
+      }, getWidgetByName: function (t) {
+        return this.options.resultWidgets ? this.options.resultWidgets[t] : null
+      }, getWidgetName: function () {
+        return this.options.widgetName
+      }, getWidgetType: function () {
+        return this.options.type
+      }, getText: function () {
+        return this.options.text
+      }, setText: function (t) {
+        this.options.text = t
+      }, getValue: function () {
+        return this.options.value
+      }, setValue: function (t) {
+        this.options.value = t
+      }, isEnabled: function () {
+        return this.options.enable
+      }, setEnable: function (t) {
+        this.options.enable = !!t, !0 === this.options.enable ? this.element.removeClass("x-ui-disable") : this.element.addClass("x-ui-disable")
+      }, isVisible: function () {
+        return this.options.visible
+      }, setVisible: function (t) {
+        this.options.visible = !!t, !0 === this.options.visible ? this.element.removeClass("x-ui-hidden") : this.element.addClass("x-ui-hidden")
+      }, reset: function () {
+        this.setValue(null)
+      }, doResize: function (t) {
+        var e = this.options;
+        t && (e.width = t.width, e.height = t.height), FP.Utils.isEmpty(e.width) || this.element.css({width: e.width}), FP.Utils.isEmpty(e.height) || this.element.css({height: e.height})
+      },
+      destroy: function () {
+        this.element.remove()
+      },
+      rebuild: function () {
+        this.options.renderEl = this.element, this.element.empty(), this._beforeInit(), this._init(), this._afterInit()
+      }, checkValidate: function () {
+        return !0
+      }, fireEvent: function (t, e) {
+        this.element.trigger(t, e)
+      }, getOptions: function (t) {
+        var e = this.options;
+        return {
+          type: e.type,
+          widgetName: e.widgetName,
+          height: e.height,
+          width: e.width,
+          value: e.value,
+          enable: e.enable,
+          visible: e.visible,
+          allowBlank: e.allowBlank,
+          rely: e.rely
+        }
+      }, getInvalidateType: function () {
+        return this.options.invalidateType
+      }, setInvalidateType: function (t) {
+        this.options.invalidateType = t
+      }, getNullValue: function () {
+        return null
+      }, getLinkValue: function () {
+        return this.getValue()
+      }, getLinkType: function () {
+        return this.getWidgetType()
+      }, getCacheValue: function () {
+        return this.getValue()
+      }, setCacheValue: function (t) {
+        this.setValue(t)
+      },
+      bindWidgetEvent: function (t, e) {
+        this.options[t] = e
+      }, unbindWidgetEvent: function (t) {
+        this.options[t] = null
+      }
+    }),
+    $.extend(Array.prototype, {
+      remove: function (t) {
+        t = this.indexOf(t);
+        return -1 != t && this.splice(t, 1), this
+      }
+    }),
+    $.extend($.Event.prototype, {
+      stopEvent: function () {
+        this.stopPropagation(), this.preventDefault()
+      }
+    }),
+    // 放大、缩小tooltip
+    function (r) {
+      FP.UI = {
+        showPopover: function (t) {
+          var e = r('<div class="x-ui-popover"/>').appendTo("body"), i = r.extend({
+            anchor: null,
+            position: "top",
+            content: null,
+            maxWidth: null,
+            animation: !0,
+            delay: null,
+            type: "light",
+            edge: 8,
+            customCls: null
+          }, t);
+          i.customCls && e.addClass(i.customCls), i.maxWidth && e.css({"max-width": i.maxWidth}), i.type && e.addClass(i.type), i.animation && e.addClass("animation"), i.content && i.content.appendTo(e);
+          var a = i.anchor, n = a.offset(), s = {"z-Index": FP.STATIC.zIndex++}, o = n.top - r("body").offset().top;
+          switch (i.position) {
+            case"topLeft":
+              e.addClass("top top-left"), s.left = Math.max(n.left + a.outerWidth() / 2 - 30, i.edge / 2), s.bottom = document.body.clientHeight - o + i.edge;
+              break;
+            case"top":
+              e.addClass("top"), s.left = Math.max(n.left + a.outerWidth() / 2 - e.outerWidth() / 2, i.edge / 2), s.bottom = document.body.clientHeight - o + i.edge;
+              break;
+            case"topRight":
+              e.addClass("top top-right"), s.right = Math.max(document.body.clientWidth - n.left - a.outerWidth() / 2 - 30, i.edge / 2), s.bottom = document.body.clientHeight - o + i.edge;
+              break;
+            case"bottomLeft":
+              e.addClass("bottom"), s.left = Math.max(n.left + a.outerWidth() / 2 - e.outerWidth() / 2, i.edge / 2), s.top = o + a.height() + i.edge;
+              break;
+            case"bottom":
+              e.addClass("bottom"), s.right = Math.max(document.body.clientWidth - n.left - a.outerWidth() / 2 - e.outerWidth() / 2, i.edge / 2), s.top = o + a.height() + i.edge;
+              break;
+            case"bottomRight":
+              e.addClass("bottom bottom-right"), s.right = Math.max(document.body.clientWidth - n.left - a.outerWidth() / 2 - 30, i.edge / 2), s.top = o + a.height() + i.edge;
+              break;
+            case"rightTop":
+              e.addClass("right"), s.right = Math.max(document.body.clientWidth - n.left - a.width() - e.outerWidth() - i.edge, i.edge / 2), s.bottom = Math.max(document.body.clientHeight - o - a.height() / 2 - e.outerHeight() / 2, i.edge / 2);
+              break;
+            case"rightTopBaseline":
+              e.addClass("right baseline-right"), s.right = Math.max(document.body.clientWidth - n.left - a.width() - e.outerWidth() - i.edge, i.edge / 2), s.bottom = Math.max(document.body.clientHeight - o - e.outerHeight(), i.edge / 2);
+              break;
+            case"rightBottom":
+              e.addClass("right"), s.right = Math.max(document.body.clientWidth - n.left - a.width() - e.outerWidth() - i.edge, i.edge / 2), s.top = Math.max(o + a.height() / 2 - e.outerHeight() / 2, i.edge / 2);
+              break;
+            case"leftTop":
+              e.addClass("left"), s.left = Math.max(n.left - e.outerWidth() - i.edge, i.edge / 2), s.bottom = Math.max(document.body.clientHeight - o - a.height() / 2 - e.outerHeight() / 2, i.edge / 2);
+              break;
+            case"leftBottom":
+              e.addClass("left"), s.left = Math.max(n.left - e.outerWidth() - i.edge, i.edge / 2), s.top = Math.max(o + a.height() / 2 - e.outerHeight() / 2, i.edge / 2)
+          }
+          return e.css(s), i.delay ? setTimeout(function () {
+            e.addClass("fadein")
+          }, 1e3 * i.delay) : e.addClass("fadein"), e
+        }, closePopover: function () {
+          var t = r(".x-ui-popover");
+          0 < t.length && (t.remove(), t = null)
+        }
+      }
+    }(jQuery),
+    function (l) {
+      FP.FilePreview = FP.extend(FP.Widget, {
+        ROTATE_DIRECTION: {UP: 0, RIGHT: 1, DOWN: 2, LEFT: 3}, _defaultConfig: function () {
+          return l.extend(FP.FilePreview.superclass._defaultConfig.apply(), {
+            renderEl: l("<div/>").appendTo("body"),
+            baseCls: "fui_file_preview",
+            autoClose: !1,
+            files: [],
+            scale: 1.25,
+            scaleWheel: 1.1,
+            currentItem: 0,
+            duration: 150,
+            height4Head: 60,
+            width4Side: 160,
+            maxScale: 5,
+            hasDownload: !0,
+            autoPlay: !1,
+            loop: !1,
+            minScale: .18,
+            // otherExtTip: '' // 文档跳转地址
+          })
+        }, _init: function () {
+          FP.FilePreview.superclass._init.apply(this, arguments);
+          var t = this.options, e = this;
+          this.element.addClass("x-window-mask modal dark").css({"z-index": FP.STATIC.zIndex++}), t.autoClose && this.element.click(function (t) {
+            l(t.target).hasClass("x-window-mask") && e.destroy()
+          }), this._bindKeydownEvent(), this._createNaviBtns(), this.$fileWrapper = l('<div class="file-wrapper"/>').appendTo(this.element), t.files && (this.totalPage = t.files.length, FP.Utils.forEach(t.files, function () {
+            l('<div class="file-item"/>').appendTo(e.$fileWrapper)
+          }), this.maxWidth = this.element.width() - 2 * t.width4Side, this.maxHeight = this.element.height() - t.height4Head, this._viewFileAt(t.currentItem))
+        }, _bindKeydownEvent: function () {
+          var e = this;
+          this.element.attr("tabindex", -1), this.element.focus(), this.element.bind("keydown", function (t) {
+            t.keyCode === FP.Keys.LEFT && 0 < e.currentPage && e._viewFileAt(e.currentPage - 1), t.keyCode === FP.Keys.RIGHT && e.currentPage < e.totalPage - 1 && e._viewFileAt(e.currentPage + 1), t.stopEvent()
+          })
+        }, _viewFileAt: function (t) {
+          var e = this.options;
+          this.currentPage = t, this._refreshNav(t), this.$pageIndex && this.$pageIndex.text(t + 1 + " / " + this.totalPage);
+          e = e.files[t];
+          e && (this.currentPlay && (this.currentPlay[0].pause && this.currentPlay[0].pause(), this.currentPlay = null), this.$fileName.text(e.name || ""), this.$currentView = this.$fileWrapper.children(".file-item").eq(t).show(), this.$currentView.siblings().hide(), this.$download && this.$download.attr({"download-url": e.downloadUrl, "data-index": t}), this.$currentView.children() && 0 !== this.$currentView.children().length || (t = e.name ? e.name.split(".").pop() : "", FP.Utils.isImageExt(t) ? this._dealImagePreview(e, !1) : FP.Utils.isVideoExt(t) ? (this._dealVideoPreview(e), this.$currentView.addClass("file-video")) : FP.Utils.isAudioExt(t) ? this._dealAudioPreview(e) : FP.Utils.isOfficeExt(t) ? this._dealBoxFilePreview(e, {hideHeader: !0}) : FP.Utils.isPdfExt(t) ? this._dealBoxFilePreview(e, {hideHeader: !1}) : this._dealOtherFile(t)))
+        }, _dealVideoPreview: function (t) {
+          var e = this, i = l('<div class="iframe-wrapper"/>').appendTo(this.$currentView);
+          e.hideHeader && i.addClass("hide-header"), l('<iframe class="file-box-preview" frameborder="0"/>').appendTo(i).attr("src", t.previewUrl)
+        }, _dealAudioPreview: function (t) {
+          var e = this, i = this.options,
+              a = l('<audio class="preview-item" controls="controls"/>').appendTo(this.$currentView);
+          i.autoPlay && a.attr("autoplay", "autoplay"), i.loop && a.attr("loop", "loop"), t.downloadUrl && a.attr("src", t.downloadUrl).on("playing", function () {
+            e.currentPlay = a
+          })
+        }, _dealImagePreview: function (t, e) {
+          var i, a, n, s, o = this, r = this.options;
+          t.size >= FP.CONST.MAX_IMAGE_VIEW_SIZE ? l('<div class="file-unknown"/>').append(l('<div class="fui_file_thumb image size-normal"/>')).append(l('<div class="file-tip"/>').text("支持图片的最大尺寸20M")).appendTo(this.$currentView) : (i = FP.Utils.createLoadIcon(this.$currentView), a = l('<img draggable="false" class="x-ui-hidden"/>').data({
+            file: t,
+            useOriginUrl: e
+          }).appendTo(this.$currentView), n = t.previewUrl, e && t.url && (n = t.url), a.attr("src", n), s = {flag: !1}, a.on("load", function () {
+            a.removeClass("x-ui-hidden"), i.remove(), o._createToolBar().appendTo(o.$currentView), a.data("scale", 1), o._adjustImg(a)
+          }).on("mousedown", function (t) {
+            s.flag = !0, s.oriX = t.clientX, s.oriY = t.clientY, s.marginLeft = parseInt(a.css("margin-left")), s.marginTop = parseInt(a.css("margin-top"))
+          }).on("wheel", function (t) {
+            0 < t.originalEvent.deltaY ? o._scaleImg(l(t.currentTarget), 1 / r.scaleWheel) : o._scaleImg(l(t.currentTarget), r.scaleWheel)
+          }), this.element.off("mousemove.imgpreview"), this.element.on("mousemove.imgpreview", function (t) {
+            if (s.flag) return a.css({
+              marginLeft: s.marginLeft + t.clientX - s.oriX,
+              marginTop: s.marginTop + t.clientY - s.oriY
+            }), !1
+          }), this.element.off("mouseup.imgpreview"), this.element.on("mouseup.imgpreview", function () {
+            s.flag = !1
+          }))
+        }, _dealBoxFilePreview: function (t, e) {
+          var iframe_url;
+          if (!!t.previewUrl) {
+            iframe_url = t.previewUrl
+          } else {
+            if (!!t.fileNavFn && typeof t.fileNavFn === 'function') {
+              iframe_url = t.fileNavFn()
+            }
+          }
+          var i = l('<div class="iframe-wrapper"/>').appendTo(this.$currentView);
+          e.hideHeader && i.addClass("hide-header"), l('<iframe class="file-box-preview" frameborder="0"/>').appendTo(i).attr("src", iframe_url)
+        }, _dealOtherFile: function (t) {
+          var e = this.options;
+          l('<div class="file-unknown"/>').append(FP.Utils.createFileThumb(t)).append(l('<div class="file-tip"/>').text("当前文件类型不支持在线预览")).appendTo(this.$currentView)
+        }, _refreshNav: function (t) {
+          var e = l(".file-nav.prev", this.element), i = l(".file-nav.next", this.element);
+          t === this.totalPage - 1 ? i.addClass("x-ui-hidden") : i.removeClass("x-ui-hidden"), 0 === t ? e.addClass("x-ui-hidden") : e.removeClass("x-ui-hidden")
+        }, _adjustImg: function (t) {
+          var e, i, a, n, s = this.options, o = t.data("scale");
+          o && (e = t.width() / o, i = t.height() / o, a = {
+            width: t.width(),
+            height: t.height(),
+            marginLeft: (this.maxWidth - t.width()) / 2 + s.width4Side,
+            marginTop: (this.maxHeight - t.height()) / 2
+          }, n = this.maxWidth, o = this.maxHeight, -1 < [this.ROTATE_DIRECTION.LEFT, this.ROTATE_DIRECTION.RIGHT].indexOf(t.data("directionIdx") % 4) && (n = this.maxHeight, o = this.maxWidth), (n < e || o < i) && (o = Math.min(n / e, o / i), t.data("scale", o), o < s.minScale && (s.minScale = o), a.width = e * o, a.height = i * o, a.marginLeft = (this.maxWidth - a.width) / 2 + s.width4Side, a.marginTop = (this.maxHeight - a.height) / 2), t.css(a), this._refreshScaleVal(t))
+        }, _refreshScaleBtn: function (t) {
+          var e = this.options, i = l("i.enlargement", this.$currentView), a = l("i.narrow", this.$currentView),
+              n = !0;
+          return t > e.maxScale ? (i.addClass("x-ui-disable"), n = !1) : i.removeClass("x-ui-disable"), t < e.minScale ? (a.addClass("x-ui-disable"), n = !1) : a.removeClass("x-ui-disable"), n
+        }, _refreshScaleVal: function (t) {
+          t = parseInt(100 * t.data("scale"));
+          l(".scale-val", this.$currentView).text(t + "%")
+        }, _createNaviBtns: function () {
+          var e = this, t = this.options, i = l('<div class="file-header"/>').appendTo(this.element);
+          l('<i class="icon-close-normal file-nav close">').click(function () {
+            e.destroy()
+          }).appendTo(i), t.hasDownload && (this.$download = l('<a target="_blank" class="file-nav download"/>').append(l('<i class="icon-vip-center-excel-import">')).append(l("<span />").text("下载")).click(function () {
+            var cur_file_item = t.files[e.$download.attr("data-index")]
+            if (!!cur_file_item.downloadFn && typeof cur_file_item.downloadFn === 'function') {
+              cur_file_item.downloadFn()
+            } else {
+              FP.Utils.fileDownload(e.$download.attr("download-url"))
+            }
+          }).appendTo(i)), this.$pageIndex = l('<div class="file-counter"/>').appendTo(i), 1 < this.options.files.length && (l('<div class="file-nav next"/>').append(l('<div class="nav-wrapper"><i class="icon-arrow-right"/></div>')).click(function (t) {
+            e._viewFileAt(e.currentPage + 1)
+          }).appendTo(this.element), l('<div class="file-nav prev"/>').append(l('<div class="nav-wrapper"><i class="icon-arrow-left"/></div>')).click(function () {
+            e._viewFileAt(e.currentPage - 1)
+          }).appendTo(this.element)), this.$fileName = l('<div class="file-name"/>').appendTo(i)
+        }, _createToolBar: function () {
+          var e = this, i = this.options, t = l('<div class="file-toolbar"/>');
+          return l('<i class="icon-enlargement file-btn enlargement">').on("click", function (t) {
+            l(t.currentTarget).hasClass("x-ui-disable") || 0 < (t = e.$currentView.children("img")).length && e._scaleImg(t, i.scale)
+          }).hover(function (t) {
+            FP.UI.showPopover({anchor: l(t.target), content: l("<span />").text("放大"), type: "dark"})
+          }, function () {
+            FP.UI.closePopover()
+          }).appendTo(t), l('<div class="scale-val"/>').appendTo(t), l('<i class="icon-narrow file-btn narrow">').on("click", function (t) {
+            l(t.currentTarget).hasClass("x-ui-disable") || 0 < (t = e.$currentView.children("img")).length && e._scaleImg(t, 1 / i.scale)
+          }).hover(function (t) {
+            FP.UI.showPopover({
+              anchor: l(t.target),
+              content: l("<span />").text("缩小"),
+              type: "dark"
+            })
+          }, function () {
+            FP.UI.closePopover()
+          }).appendTo(t), l('<i class="icon-rotate file-btn rotate"/>').on("click", function () {
+            var t = e.$currentView.children("img");
+            0 < t.length && e._rotateImg(t)
+          }).hover(function (t) {
+            FP.UI.showPopover({
+              anchor: l(t.target),
+              content: l("<span />").text("旋转"),
+              type: "dark"
+            })
+          }, function () {
+            FP.UI.closePopover()
+          }).appendTo(t), l('<i class="icon-origin-image file-btn origin"/>').on("click", function () {
+            var t = e.$currentView.children("img");
+            0 < t.length && (e._useOriginImg(t), FP.UI.closePopover())
+          }).hover(function (t) {
+            FP.UI.showPopover({
+              anchor: l(t.target),
+              content: l("<span />").text("查看原图"),
+              type: "dark"
+            })
+          }, function () {
+            FP.UI.closePopover()
+          }).appendTo(t), t
+        }, _scaleImg: function (t, e) {
+          this.options;
+          var i, a = t.width(), n = t.height(), s = t.data("scale");
+          this._refreshScaleBtn(s * e) && (t.data("scale", s *= e), i = parseInt(t.css("margin-left")), s = parseInt(t.css("margin-top")), t.css({
+            width: a * e,
+            height: n * e,
+            marginLeft: i + a * (1 - e) / 2,
+            marginTop: s + n * (1 - e) / 2
+          }), this._refreshScaleVal(t))
+        }, _rotateImg: function (t) {
+          var e = t.data("directionIdx") || this.ROTATE_DIRECTION.UP;
+          t.data("directionIdx", ++e), t.css({transform: "rotate(" + 90 * e + "deg)"}), this._adjustImg(t)
+        }, _useOriginImg: function (t) {
+          var e = t.data("file");
+          t.data("useOriginUrl") || (this.$currentView.empty(), this._dealImagePreview(e, !0))
+        }
+      }), l.shortcut("filepreview", FP.FilePreview)
+    }(jQuery)

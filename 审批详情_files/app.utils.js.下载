@@ -1,0 +1,905 @@
+define(['jquery', 'bridge'], function ($, B) {
+  'use strict';
+
+  function AppUtils() {
+  }
+
+  function getJSON(url, data) {
+    return $.getJSON(url, data)
+  }
+
+  /**
+   * 退出客户端
+   *
+   * @param tips 退出时的提示信息
+   */
+  AppUtils.prototype.exit = function (tips) {
+    B.postNotification('CLIENT_EXIT_WEBAPP', {
+      message: tips || ''
+    });
+  };
+
+  /**
+   * 退回到首页
+   *
+   * @param tips
+   */
+  AppUtils.prototype.backHome = function (tips) {
+    B.postNotification('CLIENT_BACK_HOME', {
+      message: tips || ''
+    });
+  };
+
+  /**
+   * 退出当前webview
+   *
+   * @param tips 退出时的提示信息
+   */
+  AppUtils.prototype.closeView = function (option) {
+    B.postNotification('CLIENT_EXIT_LEVEL', $.extend({
+      level: 1 //要后退的视窗个数，默认可以不传，默认值为1
+    }, option));
+  };
+
+  /**
+   * 打开语音识别, 返回 promise
+   *
+   * @param tips 打开语音识别时的提示信息
+   */
+  AppUtils.prototype.openSpeech = function (tips) {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_SPEECH_RECOGNIZER', dtd)
+     .postNotification('CLIENT_SPEECH_RECOGNIZER', {
+       message: tips || ''
+     });
+    return dtd.promise();
+  };
+
+  /**
+   * 打开条形码, 返回 promise
+   *
+   * manualInputTitle 扫码页面标题
+   * config       扫码页面配置信息
+   * inputUnable  是否支持手动输入
+   * lightUnable  闪光灯是否可用
+   * albumUnable  是否能读取相册图片
+   * cancleUnable  是否扫码过程中支持返回
+   * @param tips 打开条形码时的提示信息
+   */
+  AppUtils.prototype.openScanner = function (tips) {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_BARCODE_SCANNER', dtd)
+     .postNotification('CLIENT_BARCODE_SCANNER', {
+       manualInputTitle: tips || ''
+     });
+    return dtd.promise();
+  };
+
+  /**
+   * 打开视频播放器
+   *
+   * @param option 可以是数组或一个object对象（视频信息）
+   */
+  AppUtils.prototype.openVideoPlayer = function (option) {
+
+    var defultOpt = {
+      seriesid: 0, // 系列id
+      title: '', // 视频标题
+      videopathm3u8: '', // m3u8视频播放地址
+      videopathmp4: '', // mp4播放地址
+      candownload: 0 // 是否允许下载,默认不允许下载  (1可以下载，0不可下载)
+    };
+
+    var videos = [];
+
+    if ($.isArray(option)) {
+      for (var i = 0, o; o = option[i++];) {
+        if (!$.isEmptyObject(o)) {
+          videos.push($.extend(defultOpt, o));
+        }
+      }
+    } else {
+      videos.push($.extend(defultOpt, option));
+    }
+
+    B.postNotification('CLIENT_VIDEO_PLAYER', {videolist: videos});
+  };
+  
+  /**
+   * 打开视频播放器
+   *
+   * @param option 一个object对象（视频信息）
+   */
+  AppUtils.prototype.openVideoPlayerExtend = function (option) {
+    var defaultOptions = {
+      'att_video': {
+        'coverUrl': option.fileUrl,
+        'createTime': 0,
+        'fileLength': option.size,
+        'fileTitle': option.name,
+        'objectId2': option.objectId,
+        'resid': option.resid,
+        'status': 0,
+        'thumbnails_url': '',
+        'titleEdited': 0,
+        'type': 'mp4',
+        'videoHeight': 0,
+        'videoLength': 0,
+        'videoWidth': 0
+      },
+      'attachmentType': 29,
+      'cid': ''
+    }
+    B.postNotification('CLIENT_OPEN_ATTACHMENT', defaultOptions);
+  };
+
+  /**
+   * 打开音频播放器
+   *
+   * @param option 可以是数组或一个object对象（音频信息）
+   */
+  AppUtils.prototype.openAudioPlayer = function (option, name) {
+
+    var defaultOpt = {
+      mediaId: 0,
+      mediaTitle: '',
+      mediaPath: '',
+      mediaPathIOS: ''
+    };
+
+    var audios = [];
+
+    if ($.isArray(option)) {
+      for (var i = 0, o; o = option[i++];) {
+        if (!$.isEmptyObject(o)) {
+          audios.push($.extend(defaultOpt, o));
+        }
+      }
+    } else {
+      audios.push($.extend(defaultOpt, option));
+    }
+
+    B.postNotification('CLIENT_AUDIO_PLAYER', {"sourceType": 1, "title": name || '名称', "activeIndex": 0, "list": audios});
+  };
+
+  /**
+   * 打开直播
+   *
+   * @param data
+   */
+  AppUtils.prototype.openLive = function (data) {
+
+    /*data = {
+        description: {
+            vdoid: "240808Sii1x",
+            liveIntroduce: "<p><span style=\";font-family:宋体\">主题：用读书,丈量这个时代 <br/></span></p><p><span style=\";font-family:宋体\">时间：2017.12.1（周五）19:00-</span></p><p><span style=\";font-family:宋体\">主讲：俞敏洪&nbsp; 新东方教育集团创始人 </span></p><p style=\"text-indent:42px\"><span style=\";font-family:宋体\">古典 &nbsp;&nbsp;新精英生涯创始人</span></p><p><span style=\";font-family:宋体\">主办：中信出版集团</span></p><p><span style=\";font-family:宋体\">&nbsp;</span></p><p><span style=\";font-family:宋体\">&nbsp;</span></p><p><span style=\";font-family:宋体\">【俞敏洪】</span></p><p style=\"text-align:left;line-height:28px\"><span style=\";font-family:宋体\">新东方教育集团创始人,洪泰基金联合创始人。</span></p><p style=\"text-align:left;line-height:28px\"><span style=\";font-family:宋体\">湖南卫视《天天向上》、央视《开讲啦》节目嘉宾。</span></p><p style=\"text-align:left;line-height:28px\"><span style=\";font-family:宋体\">最新作品《行走的人生》、《让成长带你穿透迷茫》</span></p><p><span style=\";font-family:宋体\">&nbsp;</span></p><p><span style=\";font-family:宋体\">【古典】</span></p><p style=\"text-align:left;line-height:28px\"><span style=\";font-family:宋体\">新精英生涯创始人，顶尖个人事业发展顾问，300万册畅销书《拆掉思维里的墙》作者，2017最新作品《跃迁：成为高手的技术》&nbsp;</span></p><p style=\"text-align:left;line-height:28px\"><span style=\";font-family:宋体\">&nbsp;</span></p><p><span style=\";font-family:宋体\">【视频回看 订阅预告】</span></p><p><span style=\"font-size:14px;font-family:宋体\">学习通首页右上角输入邀请码“bg9902”,加入“超星讲座直播厅”课程。看名师讲座，与大咖互动！</span></p><p><br/></p>",
+            iconUrl: photoUrl + "/p/40747727_80",
+            liveState: 2,
+            modeType: 1,
+            type: 1,
+            ifReview: 0,
+            downUrl: {
+                m3u8Url: "http://chaoxing.ks3-cn-beijing.ksyun.com/record/live/LIVENEWblF83iZ4/hls/LIVENEWblF83iZ4-240808Sii1x.m3u8",
+                mp4Url: "http://ks3-cn-beijing.ksyun.com/chaoxing/240808Sii1x.mp4"
+            },
+            pushUrl: "rtmp://chaoxing.uplive.ks-cdn.com/live/LIVENEWblF83iZ4?signature=af5%2BEysXY0vK7ObQZPfHcQffieU%3D&accesskey=YbAIvlTzp6KEbJnhukkT&expire=2143009424080&nonce=1b57105484af4dec859b87c8bef7bab8&public=0&vdoid=240808Sii1x",
+            streamName: "LIVENEWblF83iZ4_240808Sii1x",
+            pageNum: "",
+            chatRoomId: 506595,
+            userName: "超星讲座直播",
+            liveTitle: "用读书丈量这个时代",
+            ifRemind: 0,
+            thumb: "",
+            puid: 40747727,
+            pullUrl: {
+                flvPullUrl: "http://chaoxing.hdllive.ks-cdn.com/live/LIVENEWblF83iZ4.flv",
+                rtmpPullUrl: "rtmp://chaoxing.rtmplive.ks-cdn.com/live/LIVENEWblF83iZ4",
+                originalPullUrl: "http://chaoxing.hlslive.ks-cdn.com/live/LIVENEWblF83iZ4/index.m3u8"
+            },
+            ViewerName: "用读书丈量这个时代"
+        }
+    };*/
+    B.postNotification('CLIENT_OPEN_LIVE', data);
+  };
+
+  /**
+   * 打开笔记
+   * @param option
+   * uid:笔记的创建者id
+   * noteCid:笔记的cid
+   */
+  AppUtils.prototype.openNoteDetail = function (option) {
+    B.postNotification('CLIENT_OPEN_NOTE_DETAIL', option);
+  };
+
+  /**
+   * 通用写笔记协议
+   * @param option
+   * releateId: 传入vid，作为草稿唯一标识
+   * quoteInfo: 附件信息数组，此处使用链接附件，格式如下
+   * [{
+     *      "att_web":{
+     *          "logo": "",
+     *          "title": "",
+     *          "url": "",
+     *          "content": ""
+     *      },
+     *      "attachmentType": "25"
+     * }]
+   */
+  AppUtils.prototype.writeNote = function (option) {
+    option = $.extend({
+      type: 5, //讲座笔记传5
+      changeFile: 0, //0,可以切换文件夹，1，不可切换
+      saveDarft: 0,//是否保存草稿，0，保存，1，不保存
+      showSaveDraftPmt: 1,//是否提示保存草稿，0，提示，1，不提示
+      readNoteDraft: 1, //0,点击进入不考虑是否有相应草稿，1，读取对应草稿
+      showNoteDetail: 0, //0,不跳转详情，1，跳转详情
+      releateId: "",//唯一标识id，若需要读取草稿，要传
+      quoteInfo: "", //附件信息
+      other: "" //备用字段
+    }, option);
+    B.postNotification('CLIENT_WRITE_NOTE_COMMON', option);
+  };
+
+  /**
+   * 根据小组id打开小组
+   * @param option
+   * {"GroupId":groupId }
+   */
+  AppUtils.prototype.openGroup = function (option) {
+    B.postNotification('CLIENT_OPEN_GROUP', option);
+  };
+
+  /**
+   * 打开某个小组里面的某个话题
+   * @param option
+   * GroupId: 小组id
+   * TopicId: 话题id
+   */
+  AppUtils.prototype.openTopic = function (option) {
+    B.postNotification('CLIENT_OPEN_TOPIC', option);
+  };
+
+  /**
+   * 定制菜单 (注：此方法必须放在 _jsBridgeReady方法中执行)
+   *
+   * @param option 数组或obejct对象，菜单信息
+   */
+  AppUtils.prototype.customMenu = function (option) {
+    B.postNotification('CLIENT_CUSTOM_MENU', $.extend({
+      index: 0,
+      show: 1, //是否显示  1显示，0不显示
+      width: '',
+      height: '',
+      icon: '', //菜单图标，为空或没有此属性，则不显示
+      menu: '', //菜单名称，为空或没有此属性，则不显示
+      option: '', //操作，实际类型为js方法，在客户端上调用webapp内的js方法
+      children: [] //为子菜单列表，如上述属性
+    }, option));
+  };
+
+  /**
+   * 获取登录状态, 返回promise
+   *
+   * @param accountKey 账户类型的key, "" (空字符串)为统一认证用户信息, "cx_fanya"为泛雅用户信息， "cx_opac"为opac用户信息
+   */
+  AppUtils.prototype.getLoginState = function (accountKey) {
+    var dtd = $.Deferred();
+
+    if (accountKey !== '' && !accountKey) {
+      dtd.reject();
+    } else {
+      B.bind('CLIENT_LOGIN_STATUS', dtd)
+       .postNotification('CLIENT_LOGIN_STATUS', {
+         accountKey: accountKey
+       });
+    }
+
+    return dtd.promise();
+  };
+
+  /**
+   * 客户端打开链接地址，可以是webview或客户端浏览器, 默认使用webview打开，默认不检查是否登录
+   * loadType=0 在本页打开一个链接，带退出webview按钮
+   * loadType=0+INNER 在本页打开一个链接，带退出webview按钮；加iner了会覆盖前一级页面，不加inner的话进入多级页面，点返回按钮会一层一层返回，加了会覆盖前一层页面，点返回按钮直接退出网页了
+   * loadType=1 新打开一个webview
+   * loadType=2 从浏览器中打开
+   * loadType=3
+   *
+   * @param option object对象
+   */
+  AppUtils.prototype.openUrl = function (option) {
+    if (/.*[\u4e00-\u9fa5]+.*$/.test(option.webUrl)) {//有中文进行编码
+      option.webUrl = encodeURI(option.webUrl);
+    }
+
+    B.postNotification('CLIENT_OPEN_URL', $.extend({
+      tabBarShowFlag: 0,
+      toolbarType: 2,//标题类型，0-不使用客户端工具栏，1-使用客户端工具栏，2-使用客户端工具栏且支持屏蔽某级别的后退逻辑
+      title: '', //标题
+      loadType: 1, //打开方式，0在本页面打开，1使用客户端webview打开新页面，2打开系统浏览器
+      webUrl: '' //要打开的url
+    }, option));
+  };
+  
+  /**
+   * 客户端打开INNER链接地址，可以是webview或客户端浏览器, 默认使用webview打开，默认不检查是否登录
+   * loadType=0 在本页打开一个链接，带退出webview按钮
+   * loadType=0+INNER 在本页打开一个链接，带退出webview按钮；加iner了会覆盖前一级页面，不加inner的话进入多级页面，点返回按钮会一层一层返回，加了会覆盖前一层页面，点返回按钮直接退出网页了
+   * loadType=1 新打开一个webview
+   * loadType=2 从浏览器中打开
+   * loadType=3
+   *
+   * @param option object对象
+   */
+  AppUtils.prototype.openInnerUrl = function (option) {
+    if (/.*[\u4e00-\u9fa5]+.*$/.test(option.webUrl)) {//有中文进行编码
+      option.webUrl = encodeURI(option.webUrl)
+    }
+    option.webUrl += '#INNER'
+    B.postNotification('CLIENT_OPEN_URL', $.extend({
+      tabBarShowFlag: 0,
+      toolbarType: 2,//标题类型，0-不使用客户端工具栏，1-使用客户端工具栏，2-使用客户端工具栏且支持屏蔽某级别的后退逻辑
+      title: '', //标题
+      loadType: 1, //打开方式，0在本页面打开，1使用客户端webview打开新页面，2打开系统浏览器
+      webUrl: '' //要打开的url
+    }, option));
+  };
+  
+  /**
+   * 打开指定app
+   *
+   * @param option object对象
+   */
+  AppUtils.prototype.openApp = function (option) {
+    B.postNotification('CLIENT_OPEN_APP', $.extend({
+      appid: '', //应用id
+      appname: '' //应用名称
+    }, option));
+  };
+
+  /**
+   * 返回进行刷新页面，必须是用loadtype=1这种加载新视图的方式来返回刷新，客户端才会在返回的时候进行通知
+   */
+  AppUtils.prototype.refreshStatus = function (opt) {
+    B.postNotification('CLIENT_REFRESH_STATUS', $.extend({
+      status: 1
+    }, opt));
+  };
+
+  /**
+   * 绑定返回刷新事件。b页面调用refreshStatus之后，再返回a页面，会调用a页面通过此协议绑定的方法
+   */
+  AppUtils.prototype.refreshEvent = function () {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_REFRESH_EVENT', dtd);
+    return dtd.promise();
+  };
+
+  /**
+   * 打开个人信息页-tuid
+   * {
+      UserID: '',// 学习通id
+      passportID: '' // passportId
+    }
+   */
+  AppUtils.prototype.openUserInfo = function (option) {
+    B.postNotification('CLIENT_OPEN_USERINFO', option);
+  };
+
+  /**
+   * 打开不同类型的资源管理器
+   *
+   * file:打开文件管理器, image:打开图库，相机, image_file：打开图库，相机，文件管理器
+   */
+  AppUtils.prototype.openResourceMgr = function (type) {
+    var dtd = $.Deferred();
+    if (!type) {
+      dtd.reject();
+    } else {
+      B.bind('CLIENT_FILEINPUTTYPE', dtd)
+       .postNotification('CLIENT_FILEINPUTTYPE', {
+         type: type
+       });
+    }
+
+    dtd.promise();
+  };
+
+  /**
+   * 选择图片, 返回promise
+   */
+  AppUtils.prototype.chooseImage = function (tips, singleImage) {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_CHOOSE_IMAGE_RESULT', dtd)
+     .postNotification('CLIENT_CHOOSE_IMAGE', {
+       singleImage: singleImage,
+       allowsEditing: false, // 是否可以裁剪 默认为true
+       message: tips || ''
+     });
+    return dtd.promise();
+  };
+
+  /**
+   * 选择图片，先上传到云盘
+   */
+  AppUtils.prototype.clientChooseImage = function (option) {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_CHOOSE_IMAGE_RESULT', dtd)
+     .postNotification('CLIENT_CHOOSE_IMAGE', $.extend({
+       allowsEditing: false, // 是否可以裁剪 默认为true
+       camare: 3,// 先上传到云盘
+       maxImageCount: 9,// 最多选择图片数量
+       compressQuality: 0.6 // 图片压缩质量，取值0-1，默认值0.6
+     }, option));
+    return dtd.promise();
+  }
+
+  /**
+   * 获取用户登录信息, 返回promise
+   *
+   * @param accountKey 账户类型的key, "" (空字符串)为统一认证用户信息, "cx_fanya"为泛雅用户信息， "cx_opac"为opac用户信息
+   */
+  AppUtils.prototype.getUserInfo = function (accountKey) {
+    var dtd = $.Deferred();
+    if (accountKey !== '' && !accountKey) {
+      dtd.reject();
+    } else {
+      B.bind('CLIENT_GET_USERINFO', dtd)
+       .postNotification('CLIENT_GET_USERINFO', {
+         accountKey: accountKey
+       });
+    }
+
+    return dtd.promise();
+  };
+
+  /**
+   * 显示客户端登录页
+   *
+   * @param accountKey 账户类型的key, "" (空字符串)为统一认证用户信息, "cx_fanya"为泛雅用户信息， "cx_opac"为opac用户信息
+   */
+  AppUtils.prototype.showAppLogin = function (accountKey) {
+    B.postNotification('CLIENT_LOGIN', {
+      accountKey: accountKey || ''
+    });
+  }
+
+  /**
+   * 调用客户端登录, 返回promise
+   *
+   * @param accountKey 账户类型的key, "" (空字符串)为统一认证用户信息, "cx_fanya"为泛雅用户信息， "cx_opac"为opac用户信息
+   */
+  AppUtils.prototype.doAppLogin = function (accountKey) {
+    var dtd = $.Deferred();
+    if (accountKey !== '' && !accountKey) {
+      dtd.reject();
+    } else {
+      B.bind('CLIENT_LOGIN', dtd)
+       .postNotification('CLIENT_LOGIN', {
+         accountKey: accountKey
+       });
+    }
+    return dtd.promise();
+  };
+
+  /**
+   * 调用手机通讯录，选择联系人, 返回promise
+   *
+   */
+  AppUtils.prototype.openContacts = function () {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_OPEN_CONTACTS', dtd)
+     .postNotification('CLIENT_OPEN_CONTACTS', null);
+    return dtd.promise();
+  };
+
+  /**
+   * 调用客户端通讯录，选择联系人, 返回promise
+   * 新协议没有fid deptType choosePerson 参数
+   * @param option
+   * multiple: 是否为多选,
+   * chooseDept: 是否为可选部门,
+   * choosePerson: 是否为可选人员 YES 为可选 （NO隐藏会人员列表），也可用0或1，true或false
+   * deptType: 显示通讯录类型  0单位通讯录（默认），1自建通讯录，2所有（单位加自建）
+   */
+  AppUtils.prototype.clientOpenContact = function (option) {
+    var dtd = $.Deferred();
+    var ua = navigator.userAgent;
+    ua = ua.substring(ua.indexOf("ChaoXingStudy_") + 14);
+    ua = ua.substring(ua.indexOf("_") + 1);
+    ua = ua.substring(0, ua.indexOf("_"));
+    if (ua >= '3.2.6.6') {// 3266版本之后的，使用新的通讯录协议，支持的参数multiple //是否为多选 YES 为多选， NO为只能单选
+      B.bind('CLIENT_CHOOSE_CONTACT_RESULT', dtd)
+       .postNotification('CLIENT_CHOOSE_NEWCONTACT', option);
+    } else {
+      B.bind('CLIENT_CHOOSE_CONTACT_RESULT', dtd)
+       .postNotification('CLIENT_CHOOSE_CONTACT', option);
+    }
+    return dtd.promise();
+  };
+
+  /**
+   * 调用客户端通讯录，选择联系人, 返回promise
+   *
+   * @param option
+   * multiple: 是否为多选,
+   * chooseDept: 是否为可选部门,
+   * choosePerson: 是否为可选人员 YES 为可选 （NO隐藏会人员列表），也可用0或1，true或false
+   * deptType: 显示通讯录类型  0单位通讯录（默认），1自建通讯录，2所有（单位加自建）
+   */
+  AppUtils.prototype.clientOpenContactByOld = function (option) {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_CHOOSE_CONTACT_RESULT', dtd)
+    .postNotification('CLIENT_CHOOSE_CONTACT', option);
+    return dtd.promise();
+  };
+
+  /**
+   * 调用客户端消息提示
+   *
+   * @param message
+   */
+  AppUtils.prototype.clientMessageDisplay = function (message) {
+    B.postNotification('CLIENT_DISPLAY_MESSAGE', {
+      message: message
+    });
+  };
+
+  /**
+   * 发送通知
+   *
+   * @param id
+   * @param name
+   */
+  AppUtils.prototype.clientSendNotice = function (id, name) {
+    var cmd = 'CLIENT_OPEN_SEND_NOTICE';
+
+    B.postNotification(cmd, {
+      subject: [{
+        id: id,
+        name: name
+      }]
+    });
+  };
+
+  /**
+   * 打开通知列表页
+   *
+   * @param option {"showType":1}
+   */
+  AppUtils.prototype.clientOpenSendNotice = function (option) {
+    B.postNotification('CLIENT_OPEN_SEND_NOTICE', option);
+  };
+
+  /**
+   * 刷新通知列表回复标示的协议
+   *
+   * @param noticeId 通知id
+   * @param isProcess 0 不显示回复标示，1 显示回复标示
+   */
+  AppUtils.prototype.clientUpdateNoticeList = function (noticeId, isProcess) {
+    B.postNotification('CLIENT_UPDATE_NOTICE_LIST', {
+      noticeId: noticeId,
+      isProcess: isProcess
+    });
+  }
+
+  /**
+   * 打开和保存图片
+   *
+   * @param img_urlArray
+   * @param index
+   */
+  AppUtils.prototype.clientPreviewImages = function (img_urlArray, index) {
+    /* img_urlArray 格式
+     [{
+     "imageUrl": src
+     }, {
+     "imageUrl": src
+     }]
+     */
+
+    B.postNotification('CLIENT_PREVIEW_IMAGES', {
+      imageUrls: img_urlArray,
+      showIndex: index
+    });
+  };
+
+  /**
+   * 选择附件, 返回 promise
+   */
+  AppUtils.prototype.uploadFile = function (url) {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_PROXY_UPLOADFILE_RESULT', dtd)
+     .postNotification('CLIENT_PROXY_UPLOADFILE', {
+       url: url,
+       name: 'file',
+       type: '*',
+       flag: 1
+     });
+    return dtd.promise();
+  };
+
+  /**
+   * 获取定位信息, 返回 promise
+   *
+   * @return result 属性 1 成功  0失败
+   *         latitude    经度
+   *         longitude   维度
+   *         altitude    海拔
+   */
+  AppUtils.prototype.clientUserLocation = function () {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_USER_LOCATION', dtd)
+     .postNotification('CLIENT_USER_LOCATION', {message: ''});
+    return dtd.promise();
+  };
+
+  /**
+   * 执行传入的指令
+   *
+   * @param cmd
+   * @param option
+   */
+  AppUtils.prototype.clientExecuteCmd = function (cmd, option) {
+    B.postNotification(cmd, option);
+  };
+
+  /**
+   * 是否是夜间模式,m_o_d_e为‘nightmode’时为夜间模式
+   * 此协议不能用来获取，只能用来接收状态变化的通知
+   */
+  AppUtils.prototype.isNightMode = function () {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_NIGHT_MODE', dtd).postNotification('CLIENT_NIGHT_MODE', {});
+    return dtd.promise();
+  };
+
+  /**
+   * 打开客户端云盘
+   * maxSize : 最大上传个数
+   * supports : 限制扩展名,数组类型,如['xls','xlsx']
+   */
+  AppUtils.prototype.clientSelectCloudRes = function (option) {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_SELECT_CLOUDRES', dtd)
+     .bind('CLIENT_WEB_EXTRAINFO', dtd)
+     .postNotification('CLIENT_SELECT_CLOUDRES', option);
+    return dtd.promise();
+  };
+
+  /**
+   * 打开云盘资源
+   * @param option
+   * filename: 文件名,
+   * objectId: objectId(不可为空),
+   * downPath: 下载路径(不可为空),
+   * suffix: 扩展名,
+   * size: 文件大小
+   */
+  AppUtils.prototype.clientOpenRes = function (option) {
+    getJSON('data/common/resource/file/info', {objectId: option.objectId}).then(function (result) {
+      if (result.success) {
+        var obj = {
+          cataid: 100000019,
+          cataName: option.filename,
+          key: option.key || option.objectId,
+          content: {
+            fileNum: 0,
+            isfile: true,
+            downPath: result.data.fileInfo.download,
+            id: option.objectId,
+            objectId: option.objectId,
+            name: option.filename,
+            size: option.size,
+            suffix: option.suffix
+          }
+        };
+        B.postNotification('CLIENT_OPEN_RES', obj);
+        return
+      }
+      alert(result.msg)
+    })
+  };
+
+  /**
+   * 转发
+   * @param option
+   * logo: 转发的图标,
+   * title: 转发的标题,
+   * url: 转发的url
+   */
+  AppUtils.prototype.clientTransferInfo = function (option) {
+    var dtd = $.Deferred();
+    var obj = {
+      cataid: '100000015',
+      content: {
+        resLogo: option.logo,
+        resTitle: option.title,
+        resUrl: option.url
+      }
+    };
+    B.bind('CLIENT_TRANSFER_INFO', dtd)
+     .postNotification('CLIENT_TRANSFER_INFO', obj);
+    return dtd.promise();
+  };
+
+  /**
+   * 自定义底部面板上传多类型、多形式附件
+   * @param option
+   */
+  AppUtils.prototype.clientSelectOptionBar = function (option) {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_AUDIO_RECORD', dtd)
+     .bind('CLIENT_SELECT_NOTE', dtd)
+     .bind('CLIENT_CHOOSE_IMAGE_RESULT', dtd)
+     .bind('CLIENT_SELECT_CLOUDRES', dtd)
+     .bind('CLIENT_WEB_EXTRAINFO', dtd)
+     .bind('CLIENT_SELECT_RES', dtd)
+     .postNotification('CLIENT_SELECT_OPTION_BAR', option);
+    return dtd.promise();
+  };
+
+  /**
+   * 自定义顶部返回按钮
+   * @param option
+   */
+  AppUtils.prototype.customBackBtn = function (option) {
+    var obj = {
+      show: 1,//动态控制按钮隐藏或显示0：隐藏 1：显示，默认为0
+      icon: {
+        android: {
+          icon: option.androidIcon,
+          iconHd: option.androidIcon
+        },
+        ios: {
+          icon: option.iosIcon,
+          iconHd: option.iosIcon
+        }
+      },
+      option: option.option
+    };
+
+    B.postNotification('CLIENT_CUSTOM_LEFTBTN', obj);
+  };
+
+  /**
+   * 隐藏顶部工具条
+   */
+  AppUtils.prototype.closeTopToolBar = function () {
+    var obj = {
+      toolbarType: 0 // 0 隐藏 1 显示
+    };
+
+    B.postNotification('CLIENT_TOOLBAR_TYPE', obj);
+  };
+
+  /**
+   * 学习通顶部中间button,
+   * @segments segments: [{"title": "已发放", "option": "getDataList(1)"}, {"title": "表单库", "option": "getDataList(2)"}]
+   @return 无
+   */
+  AppUtils.prototype.createTopCenterBtn = function (option) {
+    var obj = {
+      segments: option.segments || [],
+      defaultIndex: option.defaultIndex || 0
+    };
+
+    B.postNotification('CLIENT_SEGMENT_CONTROL', obj);
+  };
+
+
+  /**
+   * 网页标题更新协议
+   *
+   * @param option：webTitle 标题内容 数据结构 {'webTitle':'你好'}
+   * @return 无
+   */
+  AppUtils.prototype.updatePageTitle = function (option) {
+    var obj = {
+      webTitle: option.webTitle || ''
+    };
+    B.postNotification('CLIENT_TOOLBAR_TITLE', obj);
+  };
+
+  /**
+   * 回传数据到上一级网页或客户端页面
+   */
+  AppUtils.prototype.doReturnBackData = function (obj) {
+    B.postNotification('CLIENT_WEB_EXTRAINFO', obj);
+  };
+
+  /**
+   * 绑定监听并获取回传到上一级网页或客户端页面的数据
+   */
+  AppUtils.prototype.acquireBackData = function () {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_WEB_EXTRAINFO', dtd)
+    return dtd.promise();
+  };
+
+  /**
+   * 调用客户端数字键盘，返回promise
+   */
+  AppUtils.prototype.clientNumberKeyboard = function (option) {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_SHOW_CUSTOM_KEYBOARD', dtd)
+     .postNotification('CLIENT_SHOW_CUSTOM_KEYBOARD', option);
+    return dtd.promise();
+  };
+  
+  /**
+   * 网页投屏状态发生改变更改客户端投屏状态
+   */
+  AppUtils.prototype.clientScreenCastStatusChanged = function (option) {
+    var obj = {
+      message: option.message
+    }
+    B.postNotification('CLIENT_SCREEN_CAST_STATUS_CHANGED', obj)
+  }
+  
+  /**
+   * 投屏状态
+   */
+  AppUtils.prototype.clientScreenCastStatus = function () {
+    var dtd = $.Deferred()
+    B.bind('CLIENT_SCREEN_CAST_STATUS', dtd)
+     .postNotification('CLIENT_SCREEN_CAST_STATUS', {})
+    return dtd.promise()
+  }
+  
+  /**
+   * 投屏
+   * @param option
+   *  resType int 资源类型 1=图片 2=网页 3 视频 4 音频
+   *  opt  int 操作类型 1=投屏 0=关闭投屏
+   *  openModel int  1 关闭前一级投屏网页(同级网页内部跳转，只在当前页面打开需要该参数)
+   *  url String  资源地址
+   */
+  AppUtils.prototype.clientScreenCastEvent = function (option) {
+    var obj = {
+      resType: option.resType,
+      opt: option.opt,
+      openModel: 1,
+      url: option.url
+    }
+    B.postNotification('CLIENT_SCREEN_CAST_EVENT', obj)
+  }
+  
+  /**
+   * 顶部toolbar中间下拉菜单
+   */
+  AppUtils.prototype.topToolbar = function (option) {
+    var dtd = $.Deferred()
+    B.bind('CLIENT_CUSTOM_TOPBTN', dtd)
+     .postNotification('CLIENT_CUSTOM_TOPBTN', $.extend({
+       show: 1
+     }, option))
+    return dtd.promise()
+  }
+  
+  /**
+   * 隐藏顶部toolbar中间下拉菜单
+   */
+  AppUtils.prototype.hideTopToolbar = function (option) {
+    var dtd = $.Deferred()
+    B.bind('CLIENT_CUSTOM_TOPBTN', dtd)
+     .postNotification('CLIENT_CUSTOM_TOPBTN', $.extend({
+       show: 0
+     }, option))
+    return dtd.promise()
+  }
+  /** 上传video
+   */
+  AppUtils.prototype.uploadVideo = function (option) {
+    var dtd = $.Deferred();
+    B.bind('CLIENT_SELECT_CLOUDRES', dtd)
+     .bind('CLIENT_WEB_EXTRAINFO', dtd)
+     .postNotification('CLIENT_SELECT_CLOUDRES', option)
+    return dtd.promise()
+  }
+
+  return new AppUtils();
+});

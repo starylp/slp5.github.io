@@ -1,0 +1,374 @@
+define(['Vue', 'jquery', 'moment'], function (Vue, $, moment) {
+  'use strict'
+  
+  /** 判断是否有values相关信息 */
+  function hasFieldValues(comptData) {
+    if (!comptData || !comptData.fields || comptData.fields.length === 0) {
+      return false
+    }
+    for (let i = 0; i < comptData.fields.length; i++) {
+      let field = comptData.fields[i]
+      if (field.values && field.values.length !== 0) {
+        return true
+      }
+    }
+    return false
+  }
+  
+  /**
+   * 获取地址多选的层级
+   */
+  function getLevel(area) {
+    var code = area.areaCode + ''
+    var province = code.substring(2)
+    var city = code.substring(4)
+    
+    if (province === '0000') { // 省级
+      return 1
+    }
+    if (city === '00') { // 市级
+      return 2
+    }
+    return 3 // 区县级
+  }
+  
+  /** 加载数据日志数据 */
+  function loadFormUserDataTrace(_this) {
+    $.getJSON('data/approve/apps/forms/fore/dataStrace/info', {formId: _this.formsUser.formId, formUserId: _this.formsUser.id, pageEnc: _this.pageEnc}, function (resp) {
+      if (resp.success) {
+        for (let item of resp.data.pageList) {
+          // 对于数据修改操作,只有一个字段的修改记录,且是权限隐藏字段的,进行过滤; 对于子表单只有一个字段,且是权限隐藏字段的,也进行过滤
+          if (filterPermissionSetHideFieldsDataTrace(_this, item)) {
+            triggerFormName(item, resp.data.formNames)
+            _this.formUserDataTrace.push(item)
+          }
+        }
+        
+      }
+    })
+  }
+  
+  /** 根据后台设置隐藏字段权限, 过滤隐藏的字段; 判断当前修改的记录是否就一个字段,且这个字段是隐藏字段, 如果是则不显示当前记录 */
+  function filterPermissionSetHideFieldsDataTrace(_this, dataTrace) {
+    if (dataTrace.operate !== 'update') {
+      return true
+    }
+    for (let i = dataTrace.diffData.length - 1; i >= 0; i--) {
+      let diffData = dataTrace.diffData[i], newData = diffData.newData
+      if (!newData && diffData.hasOwnProperty('aprvStatus')) {
+        continue
+      }
+      // 过滤隐藏的字段
+      if (!newData || !_this.$store.getters.getApproveFieldShowStatus(newData.id, newData.compt)) {
+        dataTrace.diffData.splice(i, 1)
+        continue
+      }
+      
+      // 过滤子表单只有一个字段,且是隐藏字段的
+      if (newData.compt === 'detailcombox') {
+        // 数据异常的过滤掉
+        if (!(newData.compts[0] instanceof Array)) {
+          dataTrace.diffData.splice(i, 1)
+          continue
+        }
+        if (newData.compts[0].length === 1 && (!_this.$store.getters.getApproveFieldShowStatus(newData.compts[0][0].id, newData.compts[0][0].compt))) {
+          dataTrace.diffData.splice(i, 1)
+          continue
+        }
+        //判断是否隐藏子表单的修改，若子表单内明细组件全部隐藏则不显示子表单
+        var allRowComptsHide = true
+        for (let j = 0; j < newData.compts[0].length; j++) {
+          if (_this.$store.getters.getApproveFieldShowStatus(newData.compts[0][j].id, newData.compts[0][j].compt)) {
+            allRowComptsHide = false
+            break
+          }
+        }
+        if (allRowComptsHide) {
+          dataTrace.diffData.splice(i, 1)
+        }
+      }
+    }
+    return dataTrace.diffData.length !== 0
+    
+  }
+  
+  /** 组装执行触发器的表单名 */
+  function triggerFormName(dataTrace, formNames) {
+    if (!dataTrace.triggerFormId || !dataTrace.triggerFormType) {
+      dataTrace.triggerFormName = ''
+      return
+    }
+    switch (dataTrace.triggerFormType) {
+      case 'forms': {
+        dataTrace.triggerFormName = formNames.customFormNames[dataTrace.triggerFormId] || ''
+        break
+      }
+      case 'approves': {
+        dataTrace.triggerFormName = formNames.aprvFormNames[dataTrace.triggerFormId] || ''
+        break
+      }
+      default: {
+        dataTrace.triggerFormName = ''
+      }
+    }
+  }
+  
+  /** 过滤明细表单的隐藏字段 */
+  function filterPermissionSetHideFieldsCompt(compt) {
+    return this.$store.getters.getApproveFieldShowStatus(compt.id, compt.compt)
+  }
+  
+  /** 前台展示操作类型的样式类 */
+  function operateStyleClass(operate) {
+    switch (operate) {
+      case 'insert':
+        return 'create'
+      case 'update':
+      case 'frontupdate':
+        return 'amend'
+      case 'delete':
+        return 'delete'
+      case 'recover':
+        return 'recover'
+      case 'process':
+        return 'aprv'
+    }
+  }
+  
+  /** 前台展示操作类型名称 */
+  function operateName(operate) {
+    switch (operate) {
+      case 'insert':
+        return '创建'
+      case 'update':
+      case 'frontupdate':
+        return '修改'
+      case 'delete':
+        return '删除'
+      case 'recover':
+        return '恢复'
+      case 'process':
+        return '处理'
+      default:
+        return ''
+    }
+  }
+  
+  /** 格式化显示时间 */
+  function formatTime(value, formater) {
+    return moment(value || new Date()).format(formater)
+  }
+  
+  /** 当前修改的字段名 */
+  function fieldName(comptData) {
+    let subcomptName = ['matrixradio', 'matrixcheckbox', 'detailcombox']
+    if (subcomptName.includes(comptData.compt)) {
+      return comptData.label
+    }
+    if ('datetimerange' === comptData.compt) {
+      return comptData.fields[0].label + '-' + comptData.fields[1].label
+    }
+    return comptData.fields[0].label
+  }
+  
+  /** 过滤组件的值是val,但初始时没有val键,组件修改保存后val='',实际是没有变化的 */
+  function filterNoValCompt(diffComptData) {
+    if (diffComptData.newData.compt === 'detailcombox') {
+      return false
+    }
+    
+    let newComptName = diffComptData.newData.compt, comptNames = ['matrixradio', 'matrixcheckbox']
+    if (comptNames.includes(newComptName)) {
+      return true
+    }
+    
+    let newHasValues = hasFieldValues(diffComptData.newData), oldHasValues = hasFieldValues(diffComptData.oldData)
+    if (!newHasValues && !oldHasValues) {
+      return false
+    }
+    let noValCompts = ['contact', 'department', 'imagebox', 'videobox', 'fileupload', 'location', 'livevideo', 'button', 'belonger', 'relateddata', 'imageocr',
+                       'captiontext']
+    if (noValCompts.includes(diffComptData.newData.compt)) {
+      return true
+    }
+    
+    let newValues = diffComptData.newData.fields && diffComptData.newData.fields[0] && diffComptData.newData.fields[0].values,
+        oldValues = diffComptData.oldData && diffComptData.oldData.fields && diffComptData.oldData.fields[0] &&
+                    diffComptData.oldData.fields[0].values
+    if (!newValues && !oldValues) {
+      return false
+    }
+    let newValNotBlank = newValues && newValues.some(value => value.val !== ''),
+        oldValNotBlank = oldValues && oldValues.some(value => value.val !== '')
+    return !!(newValNotBlank || oldValNotBlank)
+    
+  }
+  
+  /** 当前字段的值 */
+  function comptDataValues(comptData) {
+    if (!comptData) {
+      return '[无]'
+    }
+    let vals = []
+    let comptNames = ['matrixradio', 'matrixcheckbox']
+    if (comptNames.includes(comptData.compt)) {
+      for (let i = 0; i < comptData.compts[0].length; i++) {
+        let compt = comptData.compts[0][i]
+        let v = compt.fields[0].values[0]
+        if (v && v.val !== undefined) {
+          vals.push(v.val)
+        }
+      }
+      
+      let valStr = vals.join(',')
+      if ($.trim(valStr) === '') {
+        valStr = '[无]'
+      }
+      return valStr
+    }
+    // 地址多选
+    if (comptData.compt === 'areacheckbox') {
+      if (!comptData.fields[0].values || comptData.fields[0].values.length === 0) {
+        return '[无]'
+      }
+      
+      let valStr
+      let otherAreas = [] // 全国等数据
+      let areas = [] // 省市县
+      for (let i = 0; i < comptData.fields[0].values.length; i++) {
+        let area = comptData.fields[0].values[i]
+        if ($.trim(area.areaCode).length < 6) {
+          otherAreas.push(area)
+        } else {
+          areas.push(area)
+        }
+      }
+      
+      let vals = []
+      for (let i = 0; i < otherAreas.length; i++) {
+        vals.push(otherAreas[i].val)
+      }
+      
+      if (areas.length > 0) {
+        let pathAreaArr = []
+        let level = getLevel(areas[areas.length - 1]) // 地址层级
+        for (let i = 0; i < areas.length; i++) {
+          if (i % level === 0) {
+            pathAreaArr = []
+          }
+          pathAreaArr.push(areas[i].val)
+          if ((i + 1) % level === 0) {
+            vals.push(pathAreaArr.join('/'))
+          }
+        }
+      }
+      
+      valStr = vals.join(',')
+      if ($.trim(valStr) === '') {
+        valStr = '[无]'
+      }
+      return valStr
+    }
+    
+    for (let i = 0; i < comptData.fields.length; i++) {
+      let field = comptData.fields[i]
+      if (!field.values) {
+        continue
+      }
+      for (let j = 0; j < field.values.length; j++) {
+        let v = field.values[j]
+        switch (comptData.compt) {
+          case 'contact':
+          case 'belonger':
+            if ($.trim(v.uname) !== '') {
+              vals.push(v.uname)
+            }
+            break
+          case 'department':
+            if ($.trim(v.departmentName) !== '') {
+              vals.push(v.departmentName)
+            }
+            break
+          case 'matrixradio':
+          case 'matrixcheckbox':
+            break
+          case 'imagebox':
+          case 'videobox':
+          case 'fileupload':
+            if ($.trim(v.name) !== '') {
+              vals.push(v.name)
+            }
+            break
+          case 'location':
+            if ($.trim(v.address) !== '') {
+              vals.push(v.address)
+            }
+            break
+          case 'livevideo':
+            if ($.trim(v.playUrl) !== '') {
+              let title = ''
+              switch (v.liveStatus) {
+                case 0:
+                  title += '未开始'
+                  break
+                case 1:
+                  title += '正在直播'
+                  break
+                case 4:
+                  title += '已结束'
+                  break
+                default:
+                  //回放
+                  if (v.ifreview === 0) {
+                    title += '直播回放'
+                  }
+              }
+              if (title !== '') {
+                title += '-'
+              }
+              title += v.playUrl
+              vals.push(title)
+            }
+            break
+          case 'button':
+            if ($.trim(v.title) !== '') {
+              let title = v.title
+              if ($.trim(v.subTitle) !== '') {
+                title += '-' + v.subTitle
+              }
+              vals.push(title)
+            }
+            break
+          case 'relatedaprv':
+            if ($.trim(v.approveName) !== '') {
+              vals.push(v.approveName)
+            }
+          case 'detailcombox':
+            break
+          default:
+            if ($.trim(v.val) !== '') {
+              vals.push(v.val)
+            }
+        }
+      }
+    }
+    let valStr = vals.join(',')
+    if ($.trim(valStr) === '') {
+      valStr = '[无]'
+    }
+    return valStr
+  }
+  
+  return {
+    loadFormUserDataTrace: loadFormUserDataTrace,
+    filterPermissionSetHideFieldsDataTrace: filterPermissionSetHideFieldsDataTrace,
+    triggerFormName: triggerFormName,
+    filterPermissionSetHideFieldsCompt: filterPermissionSetHideFieldsCompt,
+    operateStyleClass: operateStyleClass,
+    operateName: operateName,
+    formatTime: formatTime,
+    fieldName: fieldName,
+    filterNoValCompt: filterNoValCompt,
+    comptDataValues: comptDataValues
+  }
+})

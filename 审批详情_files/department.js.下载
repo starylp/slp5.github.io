@@ -1,0 +1,449 @@
+define(['jquery', 'util', 'popup', 'tipImgs', 'publicUtils', 'VueUtils'], function ($, util, popup, tipImgs, publicUtils, VueUtils) {
+  'use strict';
+  return function (widget) {
+
+    function getJSON(url, data) {
+      return $.getJSON(url, data);
+    }
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      var departmentIdArr = []
+      for (var i = 0; i < _this.value.length; i++) {
+        departmentIdArr.push(_this.value[i].departmentId)
+      }
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: departmentIdArr.join(','),
+        values: _this.value,
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+  
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{widget_error: errorTip}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+            '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_contact_forbid" v-if="readonly">',
+              '<div class="form_forbid_edit form_forbid_nodata" v-if="value.length == 0">',
+                '<p class="form_forbid_word">暂无数据</p>',
+              '</div>',
+              '<ul class="ctat_res" v-if="value.length > 0">',
+                '<li class="ctat_per" v-for="(dept, index) in value">',
+                  '<span class="ctat_icon icon-department"></span>',
+                  '<span class="ctat_name">{{dept.departmentName}}</span>',
+                '</li>',
+              '</ul>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont field" v-if="!readonly">',
+              '<ul class="ctat_res">',
+                '<li class="ctat_per" v-for="(dept, index) in value">',
+                  '<span class="ctat_icon icon-department"></span>',
+                  '<span class="ctat_name">{{dept.departmentName}}</span>',
+                  '<span class="ctat_del icon-userdel" @click.stop="delSelDepartment(index)"></span>',
+                '</li>',
+                '<li class="ctat_btn"><span class="icon-adduser" @click.stop="showOrgPop"></span></li>',
+              '</ul>',
+              '<p class="space_line"></p>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorTip">',
+              '<p class="must_word">此项为必填项</p>',
+            '</div>',
+            '<div style="display: none">{{reSelVal}}</div>',
+            '<div style="display: none;">{{formContactDeptFieldData}}{{relateFieldValueStatus}}</div>',
+          '</div>',
+          '<field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+          '<organize-user-pop v-if="isShowOrgUserPop" :type="\'department\'" :is-multiple="multiple" :result-list.sync="value" :params="params" @hide-pop="isShowOrgUserPop = false"></organize-user-pop>',
+          '<detail-combox-field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="detailComboxLinkFieldValueStatus"></detail-combox-field-link-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          lastLinkValue: [],
+          lastRelateValue: [],
+          manualSetVal: false, // 手动设置
+          isShowOrgUserPop: false //选人、选部门弹窗显示
+        }
+      },
+      methods: {
+        showOrgPop: function () {
+          if (this.readonly) {
+            return
+          }
+          this.isShowOrgUserPop = true
+          this.$store.commit('setInitStatus', false)
+        },
+        delSelDepartment: function (index) {
+          if (this.readonly) {
+            return;
+          }
+          this.value.splice(index, 1);
+          this.$store.commit('setInitStatus', false)
+          this.manualSetVal = true
+        },
+        linkFieldValueStatus: function (result) {
+          if (this.isPreview && this.isInit) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+
+          if (hasNullCondVal) {
+            this.value = []
+            this.lastLinkValue = []
+            dataLoadInit(this)
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+          if (result && JSON.stringify(this.lastLinkValue) === JSON.stringify(result) && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+            this.value = []
+          }
+          if (result && JSON.stringify(this.lastLinkValue) !== JSON.stringify(result)) {
+            this.value = result
+            this.lastLinkValue = result
+            if (this.value.length > 0) {
+              dataLoadInit(this)
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        detailComboxLinkFieldValueStatus: function (result) {
+          if (this.isPreview && this.isInit) {
+            return
+          }
+          if (result && JSON.stringify(this.lastLinkValue) === JSON.stringify(result) && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+            this.value = []
+          }
+          if (result && JSON.stringify(this.lastLinkValue) !== JSON.stringify(result)) {
+            this.value = result
+            this.lastLinkValue = result
+            if (this.value.length > 0) {
+              dataLoadInit(this)
+            }
+          }
+        }
+      },
+      components: {
+        'tip-imgs': tipImgs,
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue'),
+        organizeUserPop: VueUtils.loadComponent('static/js/src/front/forms/apps/common/userOrg/organizeUserPop.vue'),
+        'detailComboxFieldLinkTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/detailcombox/detailComboxFieldLinkTrigger.vue')
+      },
+      watch: {
+        value: function () {
+          dataLoadInit(this)
+          if (!this.value || this.value.length <= 0) {
+            return
+          }
+
+          this.$store.commit('clearChoseUserStrData')
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          });
+        }
+      },
+      computed: {
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          if (this.required) {
+            return this.value.length !== 0
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true;
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        reSelVal: function () {
+          //检查是否当前组件提交数据,不是则退出,如果是取出数据填充到当前组件数据
+          var arr = []
+          if (this.$store.state.choseUserData.id === this.widget.id && this.$store.state.choseUserData.departmentValueStr) {
+            var selResult = JSON.parse(this.$store.state.choseUserData.departmentValueStr)
+            for (var i = 0; i < selResult.length; i++) {
+              var departmentId = !!selResult[i].id ? selResult[i].id : selResult[i].departmentId//通讯录页面“确定”与“返回”数据结构不一致问题修复
+              var departmentName = !!selResult[i].name ? selResult[i].name : selResult[i].departmentName//通讯录页面“确定”与“返回”数据结构不一致问题修复
+              arr.push({departmentId: parseInt(departmentId), departmentName: departmentName})
+            }
+            this.value = arr
+            this.manualSetVal = true
+          }
+          return this.$store.getters.getReSelValStatus
+        },
+        multiple: function () {
+          return this.widget.config.fields[0].fieldType.multiple
+        },
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        name: function () {
+          return this.widget.config.fields[0].name
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs;
+        },
+        relateFieldValueStatus: function () {
+          var relateStatus = this.$store.getters.getRelateFieldValueStatus
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (this.isPreview && this.isInit) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return relateStatus
+          }
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === publicUtils.getCurrentDetailIndex(this)) || !obj.hasOwnProperty('inDetailIndex'))) {
+            var result = obj.fields[0].values
+            if (result && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+              this.value = []
+            }
+            if (result && JSON.stringify(this.lastRelateValue) !== JSON.stringify(result) && !this.$store.getters.getReadonlyStatus) {
+              if (result[0] && result[0].departmentId) {
+                this.value = result
+                this.lastRelateValue = result
+              }
+            }
+            if (this.isClearRelatedData) {
+              this.value = []
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return relateStatus
+        },
+        isClearRelatedData: function () {
+          return this.$store.getters.getIsClearRelatedData
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = this.$store.state.reloadValSubField
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            if (this.widget.pid > 0 && !this.$store.state.verifieds[this.widget.pid].isShow) {
+              //明细内子组件时 如果明细组件是隐藏状态时 当前子组件也要改成隐藏状态
+              showStatus = false
+            } else {
+              showStatus = true
+            }
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        formContactDeptFieldData: function () {
+          var _this = this
+          var formContactDeptFieldArr = _this.$store.getters.getFormContactDeptFieldData(_this.widget.config.fields[0].contactId)
+          if (_this.manualSetVal) {
+            _this.manualSetVal = false
+            return formContactDeptFieldArr
+          }
+
+          if (_this.isPreview && _this.isInit) {
+            return formContactDeptFieldArr
+          }
+
+          var formContactDeptFieldObj = null
+          var filterArr = formContactDeptFieldArr.filter(function (item) {
+            return item.departmentId === _this.widget.config.id
+          })
+
+          if (filterArr && filterArr.length > 0) {
+            formContactDeptFieldObj = filterArr[0]
+            if (formContactDeptFieldObj) {
+              if (_this.widget.config.fields[0].fieldType.multiple) {
+                _this.value = formContactDeptFieldObj.departmentValues
+              } else {
+                _this.value = []
+                if (formContactDeptFieldObj.departmentValues && formContactDeptFieldObj.departmentValues.length > 0) {
+                  _this.value.push(formContactDeptFieldObj.departmentValues[0])
+                }
+              }
+            }
+          }
+          return formContactDeptFieldObj
+        },
+        deptStructure: function () {
+          return this.$store.getters.getDeptStructure
+        },
+        params: function () {
+          return {
+            scopeType: 0,
+            serviceName: this.deptStructure ? this.deptStructure.name : ''
+          }
+        }
+      },
+      created: function () {
+        var _this = this
+        this.value = this.widget.config.fields[0].values || [];
+        if (this.widget.config.fields[0].hasOwnProperty('unchangeable')) {
+          this.widget.config.fields[0].editable = !this.widget.config.fields[0].unchangeable
+          delete this.widget.config.fields[0].unchangeable
+        }
+        var rev = this.$store.getters.getRelevance
+        if (rev != null && rev.hasOwnProperty(this.widget.config.id) && rev[this.widget.config.id]) {
+          var val = rev[this.widget.config.id]
+          this.value = []
+          for(var i = 0; i < val.length; i++) {
+            if (val[i].hasOwnProperty('departmentId') && val[i].hasOwnProperty('departmentName')) {
+              this.value.push({departmentId: val[i].departmentId, departmentName:val[i].departmentName})
+            } else {
+              this.value.push(val[i])
+            }
+          }
+        }
+        if (this.widget.config.fields[0].curUserOrg && this.value.length <= 0) {
+          getJSON('data/form/find/user/org', {}).then(function (res) {
+            if (res.success && res.data.userDept.data && res.data.userDept.data.length > 0) {
+              if (_this.widget.config.fields[0].fieldType.multiple) {
+                res.data.userDept.data.forEach(function (value) {
+                  _this.value.push({departmentId: parseInt(value.id), departmentName: value.name})
+                })
+              } else {
+                _this.value.push({departmentId: parseInt(res.data.userDept.data[0].id), departmentName: res.data.userDept.data[0].name})
+              }
+              //防止子组件中构造各组件实例未执行，导致默认值数据关联失效问题
+              _this.$nextTick(function () {
+                setTimeout(function () {
+                  dataLoadInit(_this, _this.$store.getters.getComptDataType('init'))
+                }, 500)
+              })
+            }
+          })
+        } else {
+          //防止子组件中构造各组件实例未执行，导致默认值数据关联失效问题
+          _this.$nextTick(function () {
+            setTimeout(function () {
+              dataLoadInit(_this, _this.$store.getters.getComptDataType('init'))
+            }, 500)
+          })
+        }
+      }
+    }
+  }
+})

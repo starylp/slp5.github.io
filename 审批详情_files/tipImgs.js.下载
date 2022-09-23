@@ -1,0 +1,41 @@
+define(['publicUtils'], function (publicUtils) {
+  'use strict';
+  return {
+    template: [
+      '<div class="form_widget_describe">',
+      '<aside class="des" v-dompurify-html="formatTxt" v-if="formatTxt"></aside>',
+      '<div class="form_des_pic" v-if="tipImgArr.length > 0">',
+      '<div class="imgW" v-for="(img, index) in tipImgArr" v-if="img.objectId">',
+      '<img :src="imgUrl+img.objectId" class="img" @click.stop="preview(index)" />',
+      '</div>',
+      '</div>',
+      '</div>'
+    ].join(''),
+    data: function () {
+      return {
+        imgUrl: panUrl + '/thumbnail/60,80,100/'
+      }
+    },
+    props: ['tipText', 'tipImgArr'],
+    computed: {
+      readonly: function () {
+        return this.$store.getters.getReadonlyStatus;
+      },
+      formatTxt: function () {
+        var text = this.tipText
+        if (text) {
+          text = text.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          if (text.indexOf('\n') !== -1) {
+            text = text.replace(/\n/g, '<br/>')
+          }
+        }
+        return text
+      }
+    },
+    methods: {
+      preview: function (index) {
+        publicUtils.filePreview(this.tipImgArr, index)
+      }
+    }
+  };
+});

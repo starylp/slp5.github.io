@@ -1,0 +1,467 @@
+define(['jquery', 'cookies'], function ($, Cookies) {
+  
+  function doRequest(url, data, async) {
+    return $.ajax({
+      url: url,
+      type: 'post',
+      data: data,
+      async: !async,
+      dataType: 'json'
+    })
+  }
+  /**
+   * 根据文件数量，设置提示信息
+   */
+  function getFileVerify(_this, length) {
+    if (length > 0) {
+      var errorMsg = ''
+      if (_this.min !== '' && _this.max === '' && length < _this.min) {
+        errorMsg = '上传个数最小限制' + _this.min + '个'
+        _this.errorInfo.verifyMsg =_this.widget.config.inDetailGroupIndex >= 0 && errorMsg.indexOf(_this.title) === -1 ? _this.title + errorMsg : errorMsg
+        return false
+      }
+      if (_this.min === '' && _this.max !== '' && length > _this.max) {
+        errorMsg = '上传个数限制最大' + _this.max + '个'
+        _this.errorInfo.verifyMsg =_this.widget.config.inDetailGroupIndex >= 0 && errorMsg.indexOf(_this.title) === -1 ? _this.title + errorMsg : errorMsg
+        return false
+      }
+      if (_this.min !== '' && _this.max !== '' && (length < _this.min || length > _this.max)) {
+        errorMsg = '上传个数范围限制' + _this.min + '-' + _this.max + '个'
+        _this.errorInfo.verifyMsg =_this.widget.config.inDetailGroupIndex >= 0 && errorMsg.indexOf(_this.title) === -1 ? _this.title + errorMsg : errorMsg
+        return false
+      }
+    }
+    _this.errorInfo.verifyMsg = ''
+    return true
+  }
+  
+  /**
+   *  设置校验信息，禁止提交
+   */
+  function setFileVerify(_this, length) {
+    if (!getFileVerify(_this, length)) {
+      _this.errorInfo.show = true
+      _this.$store.commit('watchValues', {
+        id: _this.widget.id,
+        configId: _this.widget.config.id,
+        fvalues: [
+          {fidx: 0, values: _this.value}
+        ],
+        inDetailGroupIndex: _this.widget.config.inDetailGroupIndex,
+        errMsg: _this.errorInfo.verifyMsg,
+        verified: !_this.errorInfo.show,
+        isShow: _this.isShow,
+        hasAuthority: _this.hasAuthority
+      })
+      _this.verified = false
+      if (_this.widget.config.inDetailGroupIndex >= 0) {
+        _this.errorInfo.verifyMsg = _this.errorInfo.verifyMsg.indexOf(_this.title) === -1 ? _this.title + _this.errorInfo.verifyMsg : _this.errorInfo.verifyMsg
+        _this.$store.commit('setDetailComptErrorTip', {
+          id: _this.widget.id,
+          pid: _this.widget.pid,
+          showTip: _this,
+          verified: _this.verified,
+          errMsg: _this.errorInfo.verifyMsg
+        })
+      }
+    } else {
+      _this.errorInfo.show = false
+      _this.errorInfo.verifyMsg = ''
+    }
+    _this.$forceUpdate()
+  }
+  
+  /**
+   * 校验文件上传数量是否符合条件
+   */
+  function verifyLimitFileCount(_this, e) {
+    var tip = ''
+    switch (_this.widget.config.compt) {
+      case 'imagebox':
+        tip = '图片'
+        break
+      case 'fileupload':
+        tip = '附件'
+        break
+      case 'videobox':
+        tip = '视频'
+        break
+    }
+    if (_this.max !== '' && _this.widget.config.fields[0].values.length >= _this.max) {
+      _this.errorInfo.show = true
+      alert('限制上传'+ tip +'个数' + (_this.min === '' ? 0 :  _this.min) + " - " + _this.max + '个,请删除已上传' + tip + '后再试。')
+      e.preventDefault()
+    }
+  }
+  
+  
+  /**
+   * 限制上传个数，由个数转换成范围历史数据处理
+   */
+  function doUploadLimitSizeHistoryData(_this) {
+    var verify = _this.widget.config.fields[0].verify
+    if (verify.hasOwnProperty('limitCount') && verify.limitCount > 0) {
+      verify.minValue = {
+        range: 0,
+        errMsg: '上传个数最小限制'
+      }
+      verify.maxValue = {
+        range: verify.limitCount,
+        errMsg: '上传个数最大限制'
+      }
+    }
+  }
+  
+  /**
+   * 视频提示信息
+   */
+  function setVideoNotice(_this) {
+    doUploadLimitSizeHistoryData(_this)
+    var limitWidth = _this.widget.config.fields[0].verify.limitWidth
+    var limitHeight = _this.widget.config.fields[0].verify.limitHeight
+    var limitDurationMin = _this.widget.config.fields[0].verify.limitDurationMin
+    var limitDurationMax = _this.widget.config.fields[0].verify.limitDurationMax
+    var limitDurationMaxVisible = _this.widget.config.fields[0].verify.hasOwnProperty('limitDurationMaxVisible') ? _this.widget.config.fields[0].verify.limitDurationMaxVisible : false
+    var limitDurationMinVisible = _this.widget.config.fields[0].verify.hasOwnProperty('limitDurationMinVisible') ? _this.widget.config.fields[0].verify.limitDurationMinVisible : false
+    var textInfoArr = setFileCommonNotice(_this)
+    if (limitDurationMinVisible && !limitDurationMaxVisible && limitDurationMin > 0) {
+      textInfoArr.push('时长大于' + _this.secondToMinute(limitDurationMin))
+    }
+    if (!limitDurationMinVisible && limitDurationMaxVisible && limitDurationMax > 0) {
+      textInfoArr.push('时长小于' + _this.secondToMinute(limitDurationMax))
+    }
+    if (limitDurationMinVisible && limitDurationMaxVisible && limitDurationMax && limitDurationMin && limitDurationMax - limitDurationMin !== 0) {
+      textInfoArr.push('时长在' + _this.secondToMinute(limitDurationMin) + '到' + _this.secondToMinute(limitDurationMax) + '之间')
+    }
+    if (limitHeight > 0 && limitWidth > 0) {
+      textInfoArr.push('分辨率为' + limitWidth + '*' + limitHeight)
+    }
+    if (textInfoArr.length > 0) {
+      _this.limitTextInfo = '请上传' + textInfoArr.join(',') + '的视频'
+    }
+  }
+  
+  /**
+   * 图片上传提示信息
+   */
+  function setImageNotice(_this) {
+    var limitWidth = _this.widget.config.fields[0].verify.limitWidth
+    var limitHeight = _this.widget.config.fields[0].verify.limitHeight
+    var textInfoArr = setFileCommonNotice(_this)
+    if (limitHeight > 0 && limitWidth > 0) {
+      textInfoArr.push('宽高为' + limitWidth + '*' + limitHeight + '像素')
+    }
+    if (textInfoArr.length > 0) {
+      _this.limitTextInfo = '请上传' + textInfoArr.join(',') + '的图片'
+    }
+  }
+  
+  /**
+   * 上传文件提示信息
+   */
+  function setUploadFileNotice(_this) {
+    var textInfoArr = setFileCommonNotice(_this)
+    if (textInfoArr.length > 0) {
+      _this.limitTextInfo = '请上传' + textInfoArr.join(',') + '的文件'
+    }
+  }
+  
+  /**
+   * 文件上传
+   * @param _this
+   */
+  function setFileCommonNotice(_this) {
+    var limitSize = _this.widget.config.fields[0].verify.limitSize
+    var limitType = _this.widget.config.fields[0].verify.limitType
+    var limitMinValue = _this.widget.config.fields[0].verify.minValue
+    var limitMaxValue = _this.widget.config.fields[0].verify.maxValue
+    var textInfoArr = []
+    if (limitType) {
+      var str = ''
+      if (limitMinValue && limitMaxValue && limitMinValue.range !== ''
+          && limitMaxValue.range === '' && limitMinValue.range > 0) {
+        str = '大于' + limitMinValue.range + '个'
+      }
+      if (limitMaxValue && limitMinValue && limitMinValue.range === ''
+          && limitMaxValue.range !== '' && limitMaxValue.range > 0) {
+        str = '小于' + limitMaxValue.range + '个'
+      }
+      if (limitMaxValue && limitMinValue && limitMaxValue.range !== ''
+          && limitMinValue.range !== '' && limitMaxValue.range > 0) {
+        str = limitMinValue.range + '-' + limitMaxValue.range + '个'
+      }
+      textInfoArr.push(str + limitType.split(';').join('、') + '格式')
+    } else {
+      if (limitMinValue && limitMaxValue && limitMinValue.range !== ''
+          && limitMaxValue.range === '' && limitMinValue.range > 0) {
+        textInfoArr.push('大于' + limitMinValue.range + '个')
+      }
+      if (limitMaxValue && limitMinValue && limitMinValue.range === ''
+          && limitMaxValue.range !== '' && limitMaxValue.range > 0) {
+        textInfoArr.push('小于' + limitMaxValue.range + '个')
+      }
+      if (limitMaxValue && limitMinValue && limitMaxValue.range !== ''
+          && limitMinValue.range !== '' && limitMaxValue.range > 0) {
+        textInfoArr.push(limitMinValue.range + '-' + limitMaxValue.range + '个')
+      }
+    }
+    if (limitSize > 0) {
+      textInfoArr.push('大小不超过' + limitSize + 'M')
+    }
+    return textInfoArr
+  }
+  
+  /**
+   * 数据联动，视频文件格式校验
+   */
+  function verifyVideoDetail(_this, value) {
+    var limitSize = _this.widget.config.fields[0].verify.limitSize
+    var limitType = _this.widget.config.fields[0].verify.limitType
+    var limitWidth = _this.widget.config.fields[0].verify.limitWidth
+    var limitHeight = _this.widget.config.fields[0].verify.limitHeight
+    var limitDurationMin = _this.widget.config.fields[0].verify.limitDurationMin
+    var limitDurationMax = _this.widget.config.fields[0].verify.limitDurationMax
+    //异步检测，错误时退出
+    var def = $.Deferred()//定义异步延时机制
+    var promise = def.promise()
+    for (var i = 0; i < value.length; i++) {
+      //校验时长分辨率
+      if (limitWidth > 0 && limitHeight > 0) {
+        // 没有分辨率不校验
+        var videoWidth = value[i].hasOwnProperty('videoWidth') ? value[i].videoWidth : ''
+        var videoHeight = value[i].hasOwnProperty('videoHeight') ? value[i].videoHeight : ''
+        if (videoWidth !== '' && videoHeight !== '') {
+          videoWidth = parseInt(videoWidth)
+          videoHeight = parseInt(videoHeight)
+          if (videoWidth !== parseInt(limitWidth) || videoHeight !== parseInt(limitHeight)) {
+            def.reject('视频分辨率不符合要求')
+          }
+        }
+      }
+      var duration = value[i].duration
+      if (duration && duration !== '') {
+        duration = parseInt(duration)
+        if ((limitDurationMin > 0 && duration > 0 && duration < parseInt(limitDurationMin))
+            || (limitDurationMax > 0 && duration > 0 && duration > parseInt(limitDurationMax))) {
+          def.reject('视频时长不符合要求')
+        }
+      }
+      //校验类型
+      if (limitType) {
+        var type = value[i].name.substr(value[i].name.lastIndexOf('.') + 1)
+        var typeReg = '^(' + limitType.replace(/\;/g, '|') + ')$'
+        var reg = new RegExp(typeReg, 'i')
+        if (!reg.test(type)) {
+          def.reject('视频格式不符合要求')
+        }
+      }
+      var size = value[i].byteSize
+      if (size === '' && value[i].size) {
+        size = parseInt(value[i].size )* 1024 * 1024
+      }
+      if (2048 < size / 1024 / 1024) {
+        def.reject('视频大小超出最大限制2G')
+      }
+      //校验大小
+      if (limitSize > 0 && limitSize < size / 1024 / 1024) {
+        def.reject('视频大小不符合要求')
+      }
+    }
+    setTimeout(function () {
+      def.resolve()
+    }, 500)
+    removeFieldLinkCheck(_this, promise)
+  }
+  
+  /**
+   *  获取文件信息
+   */
+  function getImageSize(url) {
+    return new Promise(function (resolve, reject) {
+      var image = new Image();
+      image.onload = function () {
+        resolve({
+          width: image.width,
+          height: image.height
+        });
+      };
+      image.onerror = function () {
+        reject(new Error('error'));
+      };
+      image.src = url;
+    });
+  }
+  
+  /**
+   * 数据联动，图片格式检验
+   */
+  function verifyImageDetail(_this, value) {
+    var limitSize = _this.widget.config.fields[0].verify.limitSize
+    var limitType = _this.widget.config.fields[0].verify.limitType
+    var limitWidth = _this.widget.config.fields[0].verify.limitWidth
+    var limitHeight = _this.widget.config.fields[0].verify.limitHeight
+    
+    var def = $.Deferred()//定义异步延时机制
+    var promise = def.promise()
+    //异步检测，错误时退出
+    for (var i = 0; i < value.length; i++) {
+      //校验类型
+      if (limitType) {
+        var type = value[i].name.substr(value[i].name.lastIndexOf('.') + 1)
+        var typeReg = '^(' + limitType.replace(/\;/g, '|') + ')$'
+        var reg = new RegExp(typeReg, 'i')
+        if (!reg.test(type)) {
+          def.reject('图片格式不符合要求')
+        }
+      }
+      var size = value[i].byteSize
+      if (size === '' && value[i].size) {
+        size = parseInt(value[i].size )* 1024 * 1024
+      }
+      //校验大小
+      if (limitSize > 0 && limitSize < size / 1024 / 1024) {
+        def.reject('图片大小不符合要求')
+      }
+      //校验宽高
+      if (limitWidth > 0 && limitHeight > 0) {
+        getImageSize(value[i].fileUrl).then(function (resolve, reject) {
+          var img = resolve
+          if (img && img.width && img.height && (img.width !== parseInt(limitWidth) || img.height !== parseInt(limitHeight))) {
+            def.reject('图片尺寸不符合要求')
+          }
+        })
+      }
+    }
+    //img.onload方法为异步，此处也采取异步等待
+    setTimeout(function () {
+      def.resolve()
+    }, 500)
+    removeFieldLinkCheck(_this, promise)
+  }
+  
+  /**
+   * 数据联动、文件上传文件校验
+   */
+  function verifyUploadDetail(_this, value) {
+    var limitSize = _this.widget.config.fields[0].verify.limitSize
+    var limitType = _this.widget.config.fields[0].verify.limitType
+  
+    var def = $.Deferred()//定义异步延时机制
+    var promise = def.promise()
+    
+    if (_this.max > 1 && value.length > _this.max) {
+      def.reject('上传文件个数范围限制' +  (_this.min !=='' ? _this.min + '-' : '') + _this.max + ',请重新上传。')
+    }
+    for (var i = 0; i < value.length; i++) {
+      //校验类型
+      if (limitType) {
+        var type = value[i].name.substr(value[i].name.lastIndexOf('.') + 1)
+        var typeReg = '^(' + limitType.replace(/\;/g, '|') + ')$'
+        var reg = new RegExp(typeReg, 'i')
+        if (!reg.test(type)) {
+          def.reject('文件格式不符合要求')
+        }
+      }
+      var size = value[i].byteSize
+      if (size === '' && value[i].size) {
+        size = parseInt(value[i].size )* 1024 * 1024
+      }
+      //校验大小
+      if (2048 < size / 1024 / 1024) {
+        def.reject('文件大小超出最大限制2G')
+      }
+      if (limitSize > 0 && limitSize < size / 1024 / 1024) {
+        def.reject('文件大小不符合要求')
+      }
+    }
+  
+    setTimeout(function () {
+      def.resolve()
+    }, 500)
+    removeFieldLinkCheck(_this, promise)
+  }
+  
+  /**
+   * 视频、附件、图片文件格式是否合格
+   */
+  function removeFieldLinkCheck(_this, promise) {
+    promise.done(function () {
+      _this.fieldLinkCheck = true
+      _this.errorInfo.show = false
+      _this.errorInfo.verifyMsg = ''
+      _this.verified = true
+      _this.$store.commit('watchValues', {
+        id: _this.widget.id,
+        configId: _this.widget.config.id,
+        fvalues: [
+          {fidx: 0, values: _this.value}
+        ],
+        inDetailGroupIndex: _this.widget.config.inDetailGroupIndex,
+        errMsg: '',
+        verified: true,
+        isShow: _this.isShow,
+        hasAuthority: _this.hasAuthority
+      })
+      if (_this.widget.config.inDetailGroupIndex > -1) {
+        _this.$store.commit('setDetailComptErrorTip', {
+          id: _this.widget.id,
+          pid: _this.widget.pid,
+          verified: _this.verified,
+          showTip: false
+        })
+      }
+      // 校验文件数量
+     setFileVerify(_this, _this.value.length)
+    }).fail(function (error) {
+      _this.fieldLinkCheck = false
+      _this.errorInfo.show = true
+      _this.verified = false
+      _this.$forceUpdate()
+      
+      _this.$store.commit('watchValues', {
+        id: _this.widget.id,
+        configId: _this.widget.config.id,
+        fvalues: [
+          {fidx: 0, values: _this.value}
+        ],
+        inDetailGroupIndex: _this.widget.config.inDetailGroupIndex,
+        errMsg: error,
+        verified: !_this.errorInfo.show,
+        isShow: _this.isShow,
+        hasAuthority: _this.hasAuthority
+      })
+      if (_this.widget.config.inDetailGroupIndex > -1) {
+        _this.errorInfo.verifyMsg = error.indexOf(_this.title) === -1 ? _this.title + error : error
+        _this.$store.commit('setDetailComptErrorTip', {
+          id: _this.widget.id,
+          pid: _this.widget.pid,
+          showTip: _this,
+          verified: _this.verified,
+          errMsg: _this.errorInfo.verifyMsg
+        })
+      } else {
+        _this.errorInfo.verifyMsg = error
+      }
+    })
+  }
+  
+  /**
+   * 获取文件时长
+   */
+  function getVideoDuration(objectId) {
+    return doRequest('/data/common/resource/ext/file/info', {puid: Cookies.get('oa_uid'), objectId: objectId}, true)
+  }
+  
+  return {
+    getFileVerify: getFileVerify, // 获取文件校验信息
+    setFileVerify: setFileVerify, // 设置文件校验不通过信息
+    verifyLimitFileCount: verifyLimitFileCount,
+    setVideoNotice: setVideoNotice, // 设置视频提示信息
+    setImageNotice: setImageNotice, // 设置视频提示信息
+    setUploadFileNotice: setUploadFileNotice, // 设置上传文件提示信息
+    verifyVideoDetail: verifyVideoDetail, // 数据联动，视频文件，格式校验
+    verifyImageDetail: verifyImageDetail, // 数据联动，视频文件，格式校验
+    getVideoDuration: getVideoDuration, // 获取视频时长
+    verifyUploadDetail: verifyUploadDetail, // 数据联动，附件，格式校验
+  }
+})

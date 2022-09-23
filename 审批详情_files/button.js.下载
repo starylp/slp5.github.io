@@ -1,0 +1,353 @@
+define(['jquery', 'util', 'popup', 'tipImgs', 'cookies'], function ($, util, popup, tipImgs, Cookies) {
+  'use strict'
+  return function (widget) {
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{widget_error: errorTip}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+           '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_button_forbid" v-if="readonly">',
+              '<div class="form_forbid_edit" :class="{form_forbid_nodata: value.length == 0}" v-if="value.length == 0">',
+                '<p class="form_forbid_word">暂无数据</p>',
+              '</div>',
+              '<ul class="form_upload_file" v-if="value.length > 0">',
+                '<li class="upload_file_per" v-for="(linkInfo, index) in value" @click.stop="openUrl(index)">',
+                  '<div class="upload_file_type">',
+                    '<img class="upload_file_icon" :src="linkInfo.cover"/>',
+                  '</div>',
+                  '<div class="upload_file_data">',
+                    '<div class="upload_file_info">',
+                      '<h6 class="upload_file_name">{{linkInfo.title}}</h6>',
+                      '<p class="upload_file_size">{{linkInfo.subTitle}}</p>',
+                    '</div>',
+                  '</div>',
+                '</li>',
+              '</ul>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<ul class="form_upload_file">',
+                '<li class="upload_file_per" v-for="(linkInfo, index) in value" @click.stop="openUrl(index)">',
+                  '<div class="upload_file_type">',
+                    '<img class="upload_file_icon" :src="linkInfo.cover"/>',
+                  '</div>',
+                  '<div class="upload_file_data">',
+                    '<div class="upload_file_info">',
+                      '<h6 class="upload_file_name">{{linkInfo.title}}</h6>',
+                      '<p class="upload_file_size">{{linkInfo.subTitle}}</p>',
+                    '</div>',
+                  '</div>',
+                  '<span class="upload_file_del icon-del" @click.stop="deleteLinkInfo(index)"></span>',
+                '</li>',
+              '</ul>',
+              '<div class="temp_button" :class="{selected: value.length > 0}" @click.stop="toggleLinkWindowShow(true)">',
+                '<span class="button_icon icon-btn"></span>{{name||"按钮"}}',
+              '</div>',
+              '<!--查看详情弹窗-->',
+              '<div class="prev_subform_pop" v-show="linkWindow.show" >',
+                '<div class="prev_pop_mask" @click.stop="toggleLinkWindowShow(false)">',
+                  '<div class="prev_suform_row" style="height: 100%;border-radius: unset">',
+                    '<div class="prev_suform_cont">',
+                      '<iframe :id="\'button_frame_content\' + widget.id" name="button_frame_content" width="100%" height="100%" scrolling="yes" :src="link"' +
+                      ' v-show="linkWindow.show"></iframe>',
+                    '</div>',
+                    '<div class="prev_suform_bottom">',
+                      '<span class="psb_close" @click.stop="toggleLinkWindowShow(false)">关闭</span>',
+                    '</div>',
+                  '</div>',
+                '</div>',
+              '</div>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorTip">',
+             '<p class="must_word">此项为必填项</p>',
+            '</div>',
+          '</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          linkWindow: {
+            show: false,
+            currWidgetId: 0
+          },
+          link: ''
+        }
+      },
+      methods: {
+        toggleLinkWindowShow: function (isShow) {
+          if (this.readonly) {
+            return
+          }
+          if (isShow) {
+            this.$linkAddParam()
+          }
+          this.linkWindow.show = isShow
+          this.linkWindow.currWidgetId = isShow ? this.widget.id : 0
+        },
+        openUrl: function (index) {
+          var linkInfo = this.value[index]
+          window.open(linkInfo.link)
+        },
+        deleteLinkInfo: function (index) {
+          if (this.readonly) {
+            return
+          }
+          this.value.splice(index, 1)
+        },
+        $linkAddParam: function () {
+          var linkConfig = this.widget.config.fields[0].buttonOptions.linkConfig
+          //初始化按钮URL
+          this.link = linkConfig.link
+          if (this.link) {
+            //动态追加配置参数
+            if (linkConfig.hasOwnProperty('paramFields') && linkConfig.paramFields.length > 0) {
+              var paramFields = linkConfig.paramFields
+              for (var i = 0; i < paramFields.length; i++) {
+                var paramField = paramFields[i]
+                if (paramField.type === 'text') {
+                  this.link += paramField.label
+                } else if (paramField.type === 'field') {
+                  var rootWidgets = this.$store.getters.rootWidgets
+                  for (var j = 0; j < rootWidgets.length; j++) {
+                    var valArr = []
+                    if (rootWidgets[j].config.id === parseInt(paramField.cid)) {
+                      if (paramField.ftype === 'uname' || paramField.ftype === 'uid') {
+                        var vs = rootWidgets[j].config.fields[0].values
+                        for (var k = 0; k < vs.length; k++) {
+                          if (paramField.ftype === 'uname') {
+                            valArr.push(vs[k].uname)
+                          } else if (paramField.ftype === 'uid') {
+                            valArr.push(vs[k].puid)
+                          }
+                        }
+                      } else {
+                        if (rootWidgets[j].config.fields[0].values && rootWidgets[j].config.fields[0].values.length > 0) {//下拉框、单选未选择情况判断
+                          var val = rootWidgets[j].config.fields[0].values[0].val
+                          if (val !== '') {
+                            valArr.push(val)
+                          }
+                        }
+                      }
+                    }
+                    this.link += encodeURIComponent(valArr.join(','))
+                  }
+                }
+              }
+            }
+            //自动追加单位ID、用户ID及表单ID
+            this.link += this.link.indexOf('?') !== -1 ? '&' : '?'
+            this.link += 'deptId=' + (this.$store.getters.getFormFid || 0) + '&uid=' + (Cookies.get('oa_uid') || 0) + '&formId=' + formId
+          }
+        }
+      },
+      components: {'tip-imgs': tipImgs},
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        }
+      },
+      computed: {
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if (this.required) {
+            return this.value.length !== 0
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        multiple: function () {
+          return this.widget.config.fields[0].fieldType.multiple
+        },
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        name: function () {
+          return this.widget.config.fields[0].name
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        link: function () {
+          var linkConfig = this.widget.config.fields[0].buttonOptions.linkConfig
+          var link = linkConfig.link
+          if (link) {
+            link += link.indexOf('?') !== -1 ? '&' : '?'
+            link += 'deptId=' + (this.$store.getters.getFormFid || 0) + '&uid=' + (Cookies.get('oa_uid') || 0) + '&formId=' + formId
+          }
+          return link
+        }
+      },
+      created: function () {
+        var _this = this
+        this.value = this.widget.config.fields[0].values || []
+        if (this.widget.config.fields[0].hasOwnProperty('unchangeable')) {
+          this.widget.config.fields[0].editable = !this.widget.config.fields[0].unchangeable
+          delete this.widget.config.fields[0].unchangeable
+        }
+        
+        window.addEventListener('message', function (ev) {
+          if (parseInt(_this.widget.id) !== parseInt(_this.linkWindow.currWidgetId)) { // 不是同一个id,直接返回
+            return
+          }
+          
+          var data = ev.data
+          if (data.type === 'close') { // 关闭
+            _this.toggleLinkWindowShow(false)
+            return
+          }
+          
+          if (data.type === 'data') { // 按钮卡片数据
+            _this.value.splice(0, _this.value.length)
+            var dt = data.data
+            if (dt instanceof Array) {
+              for (var i = 0; i < dt.length; i++) {
+                _this.value.push(dt[i])
+              }
+            } else if (dt instanceof Object) {
+              _this.value.push(dt)
+            }
+            return
+          }
+  
+          if (data.type === 'setFieldValue') { // 根据字段别名和val把值回填到对应的字段上
+            var fieldValue = data.data
+            if (fieldValue instanceof Array && fieldValue.length > 0) {
+              _this.$store.commit('setButtonFieldValue', fieldValue)
+            }
+          }
+        })
+      }
+    }
+  }
+})

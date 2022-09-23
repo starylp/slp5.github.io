@@ -1,0 +1,91 @@
+define(['jquery'], function ($) {
+  'use strict';
+
+  $(function () {
+    $('<iframe class="NotificationReady" style="display:none;" />').appendTo($('body')).attr('src', 'jsbridge://NotificationReady');
+  });
+
+  var def = $.Deferred();//定义异步延时机制
+  var promise = def.promise();
+
+  var ntfc = {
+    device: "ios",
+    actionId: 0,
+    action: {
+      c: {}
+    },
+    event: {}
+  };
+
+
+  window.jsBridge = {
+    /**
+     * after app client init finished to call this method
+     * app客户端初始化完成后，调用此方法，表示web方和app双方都初始化完成；才能进行通信操作
+     * @param device
+     */
+    setDevice: function (device) {
+      ntfc.device = device;
+      def.resolve();//异步延时完成
+      $('.NotificationReady').remove();
+    },
+    /**
+     * 绑定客户端回调事件的deferred, 客户端会调用trigger方法来与web端交互
+     * @param event
+     * @param deferred
+     * @returns {jsBridge}
+     */
+    bind: function (event, deferred) {
+      ntfc.event[event] = deferred;
+      return this;
+    },
+    /**
+     * 调用客户端相关信息
+     * @param action 要执行的命令的标识,字符串类型
+     * @param params 要执行的命令的参数信息,json类型; 如果没有设置成null
+     */
+    postNotification: function (action, params) {
+      promise.done(function () {//延时操作
+        ntfc.action.c[ntfc.actionId] = {
+          actionId: ntfc.actionId,
+          params: params,
+          action: action
+        };
+
+
+        if (ntfc.device == 'android') {
+          androidjsbridge.postNotification(action, JSON.stringify(params));
+        } else {
+          var src = 'jsbridge://PostNotificationWithId-' + ntfc.actionId;
+          $('<iframe style="display:none;" />').attr({id: ntfc.actionId, src: src}).appendTo($('body'));
+        }
+
+        ntfc.actionId++;
+      });
+    },
+    /**
+     * pop the notification in the cache, for ios
+     * 取参数值
+     */
+    popNotificationObject: function (actionId) {
+      var act = ntfc.action.c[actionId];
+      var value = {name: act.action, userInfo: act.params};
+      //console.log('popNotificationObject', value, actionId, JSON.stringify(value));
+      var actionInfo = JSON.stringify(value);
+      $('#' + act.actionId).remove();
+      return actionInfo;
+    },
+    /**
+     * 回调web函数,直接执行deferred.resolve(result)
+     */
+    trigger: function (action, result) {
+      var deferred = ntfc.event[action];
+      if (!deferred) {
+        return;
+      }
+      deferred.resolve(result);
+    }
+  };
+
+  return window.jsBridge;
+});

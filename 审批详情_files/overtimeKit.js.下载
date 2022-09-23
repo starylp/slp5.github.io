@@ -1,0 +1,740 @@
+define(['util', 'moment', 'iosSelectCmp', 'jquery', 'VueUtils', 'publicUtils'], function (util, moment, IosSelectCmp, $, VueUtils, publicUtils) {
+  'use strict'
+  return function (widget) {
+    
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: $.trim(_this.value),
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+    
+    return {
+      id: widget.id,
+      template: [
+        '<div v-show="isShow">',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="time_range_forbid" v-if="readonly">',
+              '<!--开始时间-->',
+              '<div class="time_forbid_start">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{stitle}}</h2>',
+                '</div>',
+                '<div class="form_forbid_edit" :class="{form_forbid_nodata: !stip}">',
+                  '<p class="form_forbid_word">{{stip ? stip :\'暂无数据\'}}</p>',
+                '</div>',
+              '</div>',
+              '<!--结束时间-->',
+              '<div class="time_forbid_end mt20">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{etitle}}</h2>',
+                '</div>',
+                '<div class="form_forbid_edit" :class="{form_forbid_nodata: !etip}">',
+                  '<p class="form_forbid_word">{{etip ? etip :\'暂无数据\'}}</p>',
+                '</div>',
+              '</div>',
+              '<!--时长-->',
+              '<div class="time_forbid_length mt20" v-if="calculate">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{rtitle}}</h2>',
+                '</div>',
+                '<div class="form_forbid_edit" :class="{form_forbid_nodata: !rinput}">',
+                  '<p class="form_forbid_word">{{rinput ? rinput :\'暂无数据\'}}</p>',
+                '</div>',
+              '</div>',
+              '<div class="time_forbid_length mt20" v-show="timeUsage.type === 2">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>时长计入加班或调休：</h2>',
+                '</div>',
+                '<div class="form_forbid_edit">',
+                  '<p class="form_forbid_word">{{timeUsage.custom=0 ? \'计入调休\' :\'计入加班\'}}</p>',
+                '</div>',
+              '</div>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<!--开始时间-->',
+              '<div class="widget_time_start mt20">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{stitle}}</h2>',
+                '</div>',
+                '<div class="temp_icon_input" @click.stop="selectTime(0)">',
+                  '<i class="input_icon icon-date"></i>{{stip}}',
+                '</div>',
+              '</div>',
+              '<!--结束时间-->',
+              '<div class="widget_time_end mt20">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{etitle}}</h2>',
+                '</div>',
+                '<div class="temp_icon_input" @click.stop="selectTime(1)">',
+                  '<i class="input_icon icon-date"></i>{{etip}}',
+                '</div>',
+              '</div>',
+              '<!--时长-->',
+              '<div class="widget_time_length mt20" v-if="calculate">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{rtitle}}</h2>',
+                '</div>',
+                '<div class="temp_icon_input">{{rinput}}</div>',
+                '<div class="amend_tab_per" v-show="timeUsage.type === 2">' +
+                  '<div class="tab_per_left">时长计入加班或调休：</div>' +
+                  '<div class="tab_per_right">' +
+                    '<ul class="cont_type">' +
+                      '<li class="cont_type_per"><input type="radio" id="weekday_work" :checked="timeUsage.custom===0"' +
+                        ' @click.stop="timeUsage.custom=0"/><label for="weekday_work"> 计入加班</label></li>' +
+                      '<li class="cont_type_per"><input type="radio" id="weekday_relax" :checked="timeUsage.custom===1"' +
+                        ' @click.stop="timeUsage.custom=1"/><label for="weekday_relax"> 计入调休</label></li>' +
+                    '</ul>' +
+                  '</div>' +
+                  '<div class="clear"></div>' +
+                '</div>' +
+              '</div>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" style="display:none;">',
+              '<p class="must_word">开始时间不能晚于结束时间</p>',
+            '</div>',
+          '</div>',
+        '<event-trigger :widget="widget" :compose="\'col\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event-type="triggerValueEventByType" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          groupId: '',
+          figureAttendVo: {},//用户班次等信息
+          attendOvertimeRule: {},//加班套件配置信息
+          ratio: 1,//调休比
+          minUnit: 3, //加班最小单位 1/2/3/4/5 天/半天/小时/半小时/分钟
+          calcuType: '',//计算方式 1/2/3 按审批时长/在审批时间段内，按打卡时长/无需审批，按打卡时长
+          reduced: '', //日时长折算（小时）多少小时为一天
+          value: [],
+          svalue: '',
+          evalue: '',
+          sCalValue: '',
+          eCalValue: '',
+          startAmpmVal: 0,
+          endAmpmVal: 0,
+          rinput: '',
+          rvalue: '',
+          errMsg: '',
+          userAttendGroup: {},
+          rangeReadonly: true,
+          isRepeat: false, //是否存在加班申请时间交叉现象(默认：false无）
+          timeUsage: {//加班时长计入加班或调休
+            type: 0,//0，加班；1，调休；2，员工自选
+            custom: 0//自选结果；0，加班；1，调休
+          }
+        }
+      },
+      components: {
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEventByType: function (data) {
+          if (data && data.hasOwnProperty('val') && data.hasOwnProperty('type')) {
+            switch (data.type) {
+              case '0':
+                this.sCalValue = publicUtils.convertTimestampToFormatStr(data.val, this.format)
+                break
+              case '1':
+                this.eCalValue = publicUtils.convertTimestampToFormatStr(data.val, this.format)
+                break
+              default:
+                this.sCalValue = ''
+                this.eCalValue = ''
+            }
+          }
+          this.loadStatus = false
+        },
+        triggerGetValueEvent: function (callback) {
+          callback([{svalue: this.svalue, evalue: this.evalue}])
+        },
+        $verifyDatetimeRange: function (startValue, endValue) {
+          var _this = this
+          if (!startValue || !endValue || !_this.calculate) {
+            return
+          }
+          //根据日期类型获取相应配置数据
+          $.get('/overtimerule/data/get/figureattend', {date: startValue, groupId: _this.groupId}).then(function (res) {
+            if (res.success && res.data) {
+              _this.figureAttendVo = res.data
+              if (_this.groupId > 0) {
+                switch (_this.figureAttendVo.type) {//日期类型（0：工作日；1：休息日；2：节假日）
+                  case 0:
+                    _this.calcuType = _this.attendOvertimeRule.weekdayCalcuType
+                    if (_this.calcuType === 1) {
+                      _this.ratio = _this.attendOvertimeRule.weekdayRatio
+                    }
+                    if (_this.attendOvertimeRule.extension) {
+                      _this.timeUsage.type = _this.attendOvertimeRule.extension.weekdayTimeType
+                    }
+                    break
+                  case 1:
+                    _this.calcuType = _this.attendOvertimeRule.weekendCalcuType
+                    if (_this.calcuType === 1) {
+                      _this.ratio = _this.attendOvertimeRule.weekendRatio
+                    }
+                    if (_this.attendOvertimeRule.extension) {
+                      _this.timeUsage.type = _this.attendOvertimeRule.extension.weekendTimeType
+                    }
+                    break
+                  case 2:
+                    _this.calcuType = _this.attendOvertimeRule.holidayCalcuType
+                    if (_this.calcuType === 1) {
+                      _this.ratio = _this.attendOvertimeRule.holidayRatio
+                    }
+                    if (_this.attendOvertimeRule.extension) {
+                      _this.timeUsage.type = _this.attendOvertimeRule.extension.holidayTimeType
+                    }
+                    break
+                }
+              }
+            }
+          })
+          var choiceSDate = moment(startValue)
+          var choiceEDate = moment(endValue)
+          if (choiceEDate.valueOf() < choiceSDate.valueOf()) {
+            _this.rvalue = ''
+            _this.rinput = ''
+            return
+          }
+          $.get('/overtimerule/data/get/result', {sdate: startValue, edate: endValue, groupId: _this.groupId}).then(function (res) {
+            if (res.success) {
+              _this.rinput = parseFloat(parseFloat(res.data.result).toFixed(2))
+              _this.rvalue = _this.rinput
+            }
+          })
+        },
+        $calculateTime: function (startDate, endDate) {
+          return util.lengthOfTimeByStr(startDate, endDate)
+        },
+        selectTime: function (type) {
+          if (this.readonly) {
+            return
+          }
+          var _this = this
+          var date = moment(), formatter = 'yyyy-MM-dd'
+          switch (_this.minUnit) {
+            case 1:
+              //按天计算
+              formatter = 'yyyy-MM-dd'
+              break
+            case 2:
+              //按半天
+              formatter = 'yyyy-MM-dd pm-am'
+              break
+            case 3:
+            case 4:
+            case 5:
+              //按小时
+              formatter = 'yyyy-MM-dd HH:mm'
+              break
+          }
+          if (type === 0) {
+            if (this.sCalValue) {
+              date = moment(this.sCalValue)
+            }
+          } else {
+            if (this.eCalValue) {
+              date = moment(this.eCalValue)
+            } else if (this.sCalValue) {
+              date = moment(this.sCalValue)
+            }
+          }
+          var year = parseInt(date.format('YYYY')),
+              month = parseInt(date.format('MM')),
+              day = parseInt(date.format('DD')),
+              hour = parseInt(date.format('HH')),
+              minute = parseInt(date.format('mm'))
+          IosSelectCmp.datePickerByFormat(year - 100, parseInt(year) + 100, {
+            title: '',
+            oneLevelId: year,
+            twoLevelId: month,
+            threeLevelId: day,
+            fourLevelId: hour,
+            fiveLevelId: minute,
+            itemHeight: 35,
+            format: formatter,
+            relation: [1, 1, 1, 0],
+            callback: function (selectOneObj, selectTwoObj, selectThreeObj, selectFourObj, selectFiveObj) {
+              var dateStr, dateStrTip
+              switch (formatter) {
+                case 'yyyy-MM-dd' :
+                  dateStr = selectOneObj.id + '-' + selectTwoObj.id + '-' + selectThreeObj.id
+                  dateStrTip = dateStr
+                  _this.startAmpmVal = 0
+                  _this.endAmpmVal = 0
+                  break
+                case 'yyyy-MM-dd HH:mm' :
+                  dateStr = selectOneObj.id + '-' + selectTwoObj.id + '-' + selectThreeObj.id + ' ' + selectFourObj.id + ':' + selectFiveObj.id
+                  dateStrTip = dateStr
+                  _this.startAmpmVal = 0
+                  _this.endAmpmVal = 0
+                  break
+                case 'yyyy-MM-dd pm-am':
+                  dateStr = selectOneObj.id + '-' + selectTwoObj.id + '-' + selectThreeObj.id
+                  dateStrTip = dateStr + ' ' + selectFourObj.id
+                  if (type === 0) {
+                    _this.startAmpmVal = 1
+                    if (selectFourObj.id === '下午') {
+                      _this.startAmpmVal = 2
+                    }
+                  } else {
+                    _this.endAmpmVal = 1
+                    if (selectFourObj.id === '下午') {
+                      _this.endAmpmVal = 2
+                    }
+                  }
+                  break
+              }
+              if (type === 0) {
+                var startHour = ''
+                if (selectFourObj.id === '下午') {
+                  startHour = ' 12:00:00'
+                } else if (selectFourObj.id === '上午') {
+                  startHour = ' 00:00:00'
+                }
+                dateStr += startHour
+                _this.svalue = dateStrTip
+                _this.sCalValue = dateStr
+              } else {
+                var startHour = ''
+                if (selectFourObj.id === '下午') {
+                  startHour = ' 23:59:59'
+                } else if (selectFourObj.id === '上午') {
+                  startHour = ' 12:00:00'
+                }
+                dateStr += startHour
+                _this.evalue = dateStrTip
+                _this.eCalValue = dateStr
+              }
+            }
+          })
+        },
+        toWatchValues: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.svalue, timeType: this.minUnit, ampm: this.startAmpmVal}]},
+              {fidx: 1, values: [{val: this.evalue, timeType: this.minUnit, ampm: this.endAmpmVal}]},
+              {
+                fidx: 2,
+                values: [{
+                  val: this.rvalue,
+                  ratio: this.ratio,
+                  minUnit: this.minUnit,
+                  calcuType: this.calcuType,
+                  reduced: this.reduced,
+                  figureAttend: this.figureAttendVo,
+                  timeUsage: this.timeUsage.type === 2 ? this.timeUsage.custom : this.timeUsage.type
+                }]
+              }
+            ],
+            configId: this.widget.config.id,
+            verified: this.verified,
+            errMsg: this.errMsg,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        },
+        toDate: function (date) {
+          if (!date) {
+            return ''
+          }
+          date = date.replace(/-/g, '/')
+          return new Date(date)
+        },
+        computeOverTime: function (startTime, endTime, dateStr) {
+          var _this = this
+          var time = 0, rDay = 0, rHour = 0, rMinute = 0, duration = '', end
+          var attend = this.figureAttendVo
+          var initTimeArr = []
+          if (attend.scheduleId === 0) {
+            initTimeArr.push({'start': this.getTime('00:00:00', dateStr), 'end': this.getTime('23:59:59', dateStr)})
+          } else {
+            initTimeArr.push({'start': this.getTime('00:00:00', dateStr), 'end': this.getTime(attend.startTime, dateStr)})
+            //根据上下班时间段将空闲时间存入数组中
+            if (attend.hasNoonBreak === 1) {
+              initTimeArr.push({'start':this.getTime(attend.breakStartTime, dateStr), 'end': this.getTime(attend.breakEndTime, dateStr)});
+              initTimeArr.push({'start':this.getTime(attend.endTime, dateStr), 'end': this.getTime('23:59:59', dateStr)});
+            } else {
+              initTimeArr.push({'start': this.getTime(attend.endTime, dateStr), 'end': this.getTime('23:59:59', dateStr)})
+            }
+            if (attend.scheduleNum === 2) {
+              initTimeArr.push({'start': this.getTime(attend.endTime, dateStr), 'end': this.getTime(attend.secondStartTime, dateStr)})
+              initTimeArr.push({'start': this.getTime(attend.secondEndTime, dateStr), 'end': this.getTime('23:59:59', dateStr)})
+            }
+            if (attend.scheduleNum === 3) {
+              initTimeArr.push({'start': this.getTime(attend.endTime, dateStr), 'end': this.getTime(attend.secondStartTime, dateStr)})
+              initTimeArr.push({'start': this.getTime(attend.secondEndTime, dateStr), 'end': this.getTime(attend.thirdStartTime, dateStr)})
+              initTimeArr.push({'start': this.getTime(attend.thirdEndTime, dateStr), 'end': this.getTime('23:59:59', dateStr)})
+            }
+          }
+          startTime = startTime.getTime() //申请的开始时间
+          endTime = endTime.getTime() //申请的结束时间
+          
+          initTimeArr.forEach(function (value) {
+            var start = value.start, end = value.end
+            time += _this.computeTimeRange(startTime, endTime, start, end)
+          })
+          if (time < 60000) {
+            return {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时'}
+          }
+          rDay = parseInt(time / (1000 * 60 * 60 * 24))
+          rHour = parseInt((time % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+          rMinute = parseInt((time % (1000 * 60 * 60)) / (1000 * 60))
+          duration = rDay + '天' + rHour + '小时'
+          return {rDay: rDay, rHour: rHour, rMinute: rMinute, duration: duration}
+        },
+        getTime: function (time, dateStr) {
+          return this.toDate(dateStr + ' ' + time).getTime()
+        },
+        computeTimeRange: function (startTime, endTime, start, end) {
+          if (end < startTime || endTime < start) {
+            return 0
+          }
+          if (startTime < start) {
+            startTime = start
+          }
+          if (endTime > end) {
+            endTime = end
+          }
+          return endTime - startTime
+        }
+      },
+      watch: {
+        sCalValue: function (val) {
+          var _this = this
+          var errMsg = ''
+          this.$verifyDatetimeRange(val, _this.eCalValue)
+          if (_this.sCalValue && _this.eCalValue) {
+            var choiceSDate = moment(_this.sCalValue)
+            var choiceEDate = moment(_this.eCalValue)
+            //校验时间范围是否合法
+            var rangeVerify = this.isInclude ? choiceEDate.valueOf() >= choiceSDate.valueOf() : choiceEDate.valueOf() > choiceSDate.valueOf()
+            if (!rangeVerify) {
+              if (!this.isInclude && choiceEDate.valueOf() === choiceSDate.valueOf()) {
+                errMsg = '开始时间不能等于结束时间'
+              } else {
+                errMsg = this.widget.config.verify.dateRange.errMsg
+              }
+              this.isDatetimeError = true;
+            } else {
+              this.isDatetimeError = false;
+              //动态校验是否有重叠时间的加班申请
+              if (_this.$store.state.defaultType == 1) {
+                $.get('/overtime/kit/checkrepeat', {startTime: _this.sCalValue, endTime: _this.eCalValue, deptId: _this.$store.state.currentUserDeptId}).then(function (res) {
+                  _this.isDatetimeError = true;
+                  _this.isRepeat = res.data
+                  var startDate = _this.sCalValue.split(' ')[0], endDate = _this.eCalValue.split(' ')[0]
+                  if (startDate !== endDate) {
+                    _this.errMsg = '请选择同一天'
+                  } else if (_this.isRepeat) {
+                    _this.errMsg = '该时间段内您已有加班申请'
+                  } else {
+                    _this.isDatetimeError = false;
+                  }
+                })
+              }
+            }
+          } else {
+            _this.isDatetimeError = false;
+          }
+          _this.errMsg = errMsg
+          _this.toWatchValues()
+          dataLoadInit(this)
+        },
+        eCalValue: function (val) {
+          var _this = this
+          var errMsg = ''
+          if (_this.sCalValue && _this.eCalValue) {
+            var choiceSDate = moment(_this.sCalValue)
+            var choiceEDate = moment(_this.eCalValue)
+            //校验时间范围是否合法
+            var rangeVerify = this.isInclude ? choiceEDate.valueOf() >= choiceSDate.valueOf() : choiceEDate.valueOf() > choiceSDate.valueOf()
+            if (!rangeVerify) {
+              if (!this.isInclude && choiceEDate.valueOf() === choiceSDate.valueOf()) {
+                errMsg = '开始时间不能等于结束时间'
+              } else {
+                errMsg = this.widget.config.verify.dateRange.errMsg
+              }
+              this.isDatetimeError = true;
+            } else {
+              this.isDatetimeError = false;
+              //动态校验是否有重叠时间的加班申请
+              if (_this.$store.state.defaultType == 1) {
+                $.get('/overtime/kit/checkrepeat', {startTime: _this.sCalValue, endTime: _this.eCalValue, deptId: _this.$store.state.currentUserDeptId}).then(function (res) {
+                  _this.isDatetimeError = true;
+                  _this.isRepeat = res.data
+                  var startDate = _this.sCalValue.split(' ')[0], endDate = _this.eCalValue.split(' ')[0]
+                  if (startDate !== endDate) {
+                    _this.errMsg = '请选择同一天'
+                  } else if (_this.isRepeat) {
+                    _this.errMsg = '该时间段内您已有加班申请'
+                  } else {
+                    _this.isDatetimeError = false;
+                  }
+                })
+              }
+            }
+          } else {
+            _this.isDatetimeError = false;
+          }
+          _this.$verifyDatetimeRange(_this.sCalValue, val)
+          _this.errMsg = errMsg
+          _this.toWatchValues()
+          dataLoadInit(this)
+        },
+        rinput: function () {
+          this.rvalue = this.rinput
+        },
+        rvalue: function () {
+          if ($.trim(this.rvalue) === '' && this.required) {
+            var rangeVerify = this.isInclude ? choiceEDate.valueOf() >= choiceSDate.valueOf() : choiceEDate.valueOf() > choiceSDate.valueOf()
+            if (rangeVerify) {
+              this.errMsg = '此项为必填项'
+            }
+          } else if (this.rvalue !== '') {
+            if (!/^(\-|\+)?\d+(\.\d+)?$/.test(this.rvalue)) {
+              this.errMsg = '只能填写数字'
+            }
+          }
+          this.toWatchValues()
+        },
+        'timeUsage.custom': function () {
+          this.toWatchValues()
+        }
+      },
+      computed: {
+        hasAuthority: function () {
+          var showStatus = false;
+          var gatherMode = this.$store.getters.getGatherModel;
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus;
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields;
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+    
+          if (!this.visible && !this.fromManage) {
+            return showStatus;
+          }
+          return true
+        },
+        visible: function () {
+          if (!this.widget.config.hasOwnProperty('visible')) {
+            this.widget.config.visible = true
+          }
+          return this.widget.config.visible
+        },
+        required: function () {
+          return this.widget.config.verify.required
+        },
+        readonly: function () {
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          return this.$store.getters.getReadonlyStatus
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          if (this.required) {
+            var timeRangeVerify = true
+            var choiceSDate = moment(this.sCalValue)
+            var choiceEDate = moment(this.eCalValue)
+            var startDate = this.sCalValue.split(' ')[0], endDate = this.eCalValue.split(' ')[0]
+            if (this.calculate) {
+              if ($.trim(this.rvalue) === '') {
+                timeRangeVerify = false
+              } else if (this.rvalue !== '') {
+                if (!/^(\-|\+)?\d+(\.\d+)?$/.test(this.rvalue)) {
+                  timeRangeVerify = false
+                }
+              }
+            }
+            return $.trim(this.sCalValue) !== '' && $.trim(this.eCalValue) !== '' && timeRangeVerify && (startDate === endDate) && (choiceSDate <= choiceEDate) && !this.isRepeat
+          }
+          return true
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        stitle: function () {
+          return this.widget.config.fields[0].label
+        },
+        sformat: function () {
+          return this.widget.config.fields[0].fieldType.format
+        },
+        etitle: function () {
+          return this.widget.config.fields[1].label
+        },
+        eformat: function () {
+          return this.widget.config.fields[1].fieldType.format
+        },
+        rtitle: function () {
+          var extra = ''
+          if (this.minUnit === 3 || this.minUnit === 4 || this.minUnit === 5) {
+            extra = '(小时)'
+            this.widget.config.fields[2].fieldType.unit = 'hour'
+          } else {
+            extra = '(天)'
+            this.widget.config.fields[2].fieldType.unit = 'day'
+          }
+          return this.widget.config.fields[2].label + extra
+        },
+        calculate: function () {
+          return this.widget.config.fields[2].fieldType.calculate
+        },
+        isInclude: function () {
+          return this.widget.config.verify.dateRange.isInclude
+        },
+        stip: {
+          get: function () {
+            if (this.svalue) {
+              return this.svalue
+            }
+            if (!(this.widget.config.fields[0].tip instanceof Object)) {
+              return this.widget.config.fields[0].tip
+            }
+            return this.widget.config.fields[0].tip.text
+          },
+          set: function (val) {
+          }
+        },
+        etip: {
+          get: function () {
+            if (this.evalue) {
+              return this.evalue
+            }
+            if (!(this.widget.config.fields[1].tip instanceof Object)) {
+              return this.widget.config.fields[1].tip
+            }
+            return this.widget.config.fields[1].tip.text
+          },
+          set: function (val) {
+          }
+        },
+        isShow: function () {
+          var showStatus = false
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          var svalue = [{val: this.svalue, timeType: this.minUnit, ampm: this.startAmpmVal}],
+              evalue = [{val: this.evalue, timeType: this.minUnit, ampm: this.endAmpmVal}],
+              rvalue = [{
+                val: this.rvalue,
+                ratio: this.ratio,
+                minUnit: this.minUnit,
+                calcuType: this.calcuType,
+                reduced: this.reduced,
+                figureAttend: this.figureAttendVo
+              }]
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: svalue},
+              {fidx: 1, values: evalue},
+              {fidx: 2, values: rvalue}
+            ],
+            errMsg: this.errMsg,
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        }
+      },
+      created: function () {
+        var _this = this
+        //获取加班套件配置数据
+        var svalues = _this.widget.config.fields[0].values
+        _this.svalue = svalues ? (svalues[0] && svalues[0].val) || '' : ''
+        _this.sCalValue = _this.svalue
+        var sArr = _this.svalue.split(' ')
+        if (sArr[1]) {
+          switch (sArr[1]) {
+            case '上午':
+              _this.startAmpmVal = 1
+              _this.sCalValue = sArr[0] + ' 00:00:00'
+              break
+            case '下午':
+              _this.startAmpmVal = 2
+              _this.sCalValue = sArr[0] + ' 12:00:00'
+              break
+          }
+        }
+        var evalues = _this.widget.config.fields[1].values
+        _this.evalue = evalues ? (evalues[0] && evalues[0].val) || '' : ''
+        _this.eCalValue = _this.evalue
+        var eArr = _this.evalue.split(' ')
+        if (eArr[1]) {
+          switch (eArr[1]) {
+            case '上午':
+              _this.endAmpmVal = 1
+              _this.eCalValue = eArr[0] + ' 12:00:00'
+              break
+            case '下午':
+              _this.endAmpmVal = 2
+              _this.eCalValue = eArr[0] + ' 23:59:59'
+              break
+          }
+        }
+        $.get('/overtimerule/data/get/info', {}).then(function (res) {
+          if (res.success && res.data.attendOvertimeRule) {
+            _this.groupId = res.data.groupId
+            _this.rangeReadonly = !res.data.groupId //没有组件信息，加班时长可手动修改
+            _this.attendOvertimeRule = res.data.attendOvertimeRule
+            if (_this.attendOvertimeRule.extension) {
+              _this.attendOvertimeRule.extension = JSON.parse(_this.attendOvertimeRule.extension)
+            }
+            _this.minUnit = _this.attendOvertimeRule.minUnit
+            _this.reduced = _this.attendOvertimeRule.reduced
+          }
+        }).then(function () {
+          _this.$verifyDatetimeRange(_this.sCalValue, _this.eCalValue)
+          _this.toWatchValues()
+        })
+      }
+    }
+  }
+})

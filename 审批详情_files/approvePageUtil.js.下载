@@ -1,0 +1,1477 @@
+/**
+ * 注:
+ * 此脚本为审批详情页公用js,注意三端不同返回和提示方式
+ * 所有定义方法只要用到全局变量第一个参数必须为_this,避免参数顺序混乱
+ * 开发新功能时三端定义参数名需一致
+ * 方法内部参数大多依赖于父页面this,优化和删除父页面属性时需告知相关功能研发人员讨论
+ */
+define(['jquery', 'moment', 'util', 'Vue', 'transformFactory', 'VueUtils', 'popup', 'cookies', 'fancybox', 'publicUtils', 'aprvUserDataTraceUtils'], function ($, moment, util, Vue, transformFactory, VueUtils, popup, Cookies, fancybox, publicUtils, userDataTraceUtils) {
+  
+  function operateData(url, data) {
+    return $.getJSON(url, data)
+  }
+  
+  /**
+   * 初始化审批详情页审批流程按钮
+   * @param _this
+   */
+  function initPageButtonConfig(_this){
+    if(!_this.buttonName || !_this.buttonName.length){
+      return
+    }
+    
+    //如果当前展示开始处理的按钮,则查看当前审批状态,如果为待处理按钮为正在审批,开始处理按钮为同意
+    var openProcessing = false, agreeButtonShow = false
+    //获取当前步中自己的状态
+    var currentStepUser = _this.aprvUsers[_this.aprvStep]
+    if (currentStepUser && currentStepUser.children && currentStepUser.children.length > 1) {
+      for (var n = _this.aprvOpinions.length - 1; n >= 0; n--) {
+        //该步骤上一审批人的操作不为撤回处理但为开始处理时，显示同意按钮
+        if (_this.aprvOpinions[n].aprvUserId == _this.userInfo.uid && _this.aprvOpinions[n].aprvStep == _this.aprvStep) {
+          if (_this.aprvOpinions[n].aprvStatusTypeId == 5) {
+            agreeButtonShow = true
+          }
+          break
+        }
+      }
+    } else {
+      //查看是否多角色
+      if (currentStepUser && currentStepUser.role) {
+        if (typeof currentStepUser.role.roleUserMap == 'string') {
+          currentStepUser.role.roleUserMap = eval('(' + currentStepUser.role.roleUserMap + ')')
+        }
+        if (currentStepUser.role.roleUserMap) {
+          roleBreak:
+              for (var i in currentStepUser.role.roleUserMap) {
+                for (var n = currentStepUser.role.roleUserMap[i].length; n >= 0; n--) {
+                  if (!currentStepUser.role.roleUserMap[i][n].hasOwnProperty("aprvStatusTypeId")) {
+                    continue
+                  }
+                  if (currentStepUser.role.roleUserMap[i][n].uid == _this.userInfo.uid) {
+                    if (currentStepUser.role.roleUserMap[i][n].aprvStatusTypeId == 5) {
+                      agreeButtonShow = true
+                    }
+                    break roleBreak
+                  }
+                }
+              }
+        }
+      }
+      if (!agreeButtonShow) {
+        agreeButtonShow = (_this.formsUser.aprvStatusTypeId == 5)
+      }
+    }
+  
+    for (var i = 0; i < _this.buttonName.length; i++) {
+      if (_this.buttonName[i].functionType == 4 && _this.buttonName[i].show == true) {
+        //当前步中自己状态为待处理则展示开始处理按钮
+        _this.buttonName[i].show = !agreeButtonShow
+        openProcessing = true
+      }
+      if (_this.aprvStep == 0 && _this.buttonName[i].functionType == 5 && _this.buttonName[i].show == true) {
+        _this.buttonName[i].show = false
+      }
+      if (_this.buttonName[i].functionType == 3) {
+        _this.isReturn = _this.buttonName[i].returnSwitch
+      }
+    }
+    //同意按钮展示根据处理状态变化
+    if (openProcessing) {
+      for (var i = 0; i < _this.buttonName.length; i++) {
+        if (_this.buttonName[i].functionType != 1) {
+          continue
+        }
+        if (_this.buttonName[i].show) {
+          //当前步骤中如果自己状态为开始处理则展示处理完成
+          _this.buttonName[i].show = agreeButtonShow
+        }
+      }
+    }
+  }
+  
+  //初始化审批详情页
+  function initFormAuthorityJson(_this) {
+    var formData = _this.formsUser ? _this.formsUser.formData : _this.forms.formConfig
+    //手动赋值verify
+    for (var n = 0; n < formData.length; n++) {
+      if (formData[n].verify) {
+        continue
+      }
+      for (var x = 0; x < _this.forms.formConfig.length; x++) {
+        if (_this.forms.formConfig[x].id == formData[n].id) {
+          formData[n]['verify'] = _this.forms.formConfig[x].verify
+          break
+        }
+      }
+    }
+    //处理审批权限,只读状态和没有审批权限的用户无法修改数据
+    if (!_this.processBtnEnable) {
+      for (var i in _this.formAuthorityJson) {
+        if (!_this.formAuthorityJson.hasOwnProperty(i)) {
+          continue
+        }
+        var _auth = _this.formAuthorityJson[i] instanceof Object ? _this.formAuthorityJson[i].authority : _this.formAuthorityJson[i]
+        if (_auth !== 1) {
+          continue
+        }
+        if (_this.formAuthorityJson[i] instanceof Object) {
+          _this.formAuthorityJson[i].authority = 2
+        } else {
+          _this.formAuthorityJson[i] = 2
+        }
+      }
+    }
+    _this.$store.commit('initApproveFieldConfig', {
+      defaultType: 2,
+      formAuthority: _this.formAuthorityJson
+    })
+    _this.$store.commit('initWidgets', {
+      compts: formData,
+      formConfig: _this.forms.formConfig,
+      isFormData: !$.isEmptyObject(_this.formsUser),
+      formBaseConfig: _this.forms.formConfig,
+      formType: 'approveForm'
+    })
+    _this.oldFormData = JSON.stringify(formData)
+    _this.formsUser.formData = JSON.parse(_this.oldFormData)
+    //转换数据
+    util.initAllCompts(_this, transformFactory, 'approve')
+    //加载审批数据日志
+    userDataTraceUtils.loadFormUserDataTrace(_this)
+    Vue.component('webFieldTab', VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/webFieldTab.vue'))
+  }
+  
+  //当前组件构建为{id:data}结构
+  function structureFormsJson(formData, formDataJson) {
+    for (var curIndex = 0; curIndex < formData.length; curIndex++) {
+      if (formData[curIndex].compt == 'detailcombox') {
+        structureFormsJson(formData[curIndex].compts[0], formDataJson)
+      }
+      formDataJson[formData[curIndex].id] = formData[curIndex]
+    }
+    return formDataJson
+  }
+  
+  //将当前页面编辑过得组件重新赋值
+  function assignmentNewData(oldFormData, formDataJson) {
+    for (var index = 0; index < oldFormData.length; index++) {
+      var value = formDataJson[oldFormData[index].id]
+      if (!value || $.isEmptyObject(value)) {
+        continue
+      }
+      if (!value.isShow && value.compt != 'detailcombox') {
+        continue
+      }
+      if (value.compt == 'detailcombox') {
+        assignmentNewData(value.compts[0], formDataJson)
+      }
+      oldFormData[index] = value
+    }
+    return oldFormData
+  }
+  
+  //更新抄送人
+  function updateCcUsers(_this) {
+    return operateData('data/approve/flow/approve/handle/ccusers/update', {
+      formId: _this.formsUser.formId,
+      aprvId: _this.aprvId,
+      aprvAppId: _this.formsUser.aprvAppId,
+      aprvTypeId: _this.aprvTypeId,
+      ccUsers: JSON.stringify(_this.ccUsers),
+      pageEnc: _this.pageEnc
+    })
+  }
+  
+  //撤回审批(未审批通过)
+  function cancel(_this) {
+    if (_this.submitStatus) {
+      return
+    }
+    _this.submitStatus = true
+    operateData('data/approve/flow/approve/handle/cancel', {formId: _this.formsUser.formId, aprvAppId: _this.formsUser.aprvAppId, aprvTypeId: _this.aprvTypeId, aprvId: _this.aprvId, pageEnc: _this.pageEnc})
+        .then(function (json) {
+          _this.submitStatus = false
+          if (json.success) {
+            window.location.reload()
+          } else {
+            _this.buttonClickEnable = true
+            approveAlert(json.msg, _this)
+          }
+        })
+  }
+  
+  //审批同意拒绝.aprvStatusTypeId 为2同意,为-1拒绝
+  function process(_this, aprvStatusTypeId, traceId) {
+    if (_this.processBtnEnable) {
+      if (aprvStatusTypeId != 3) {
+        updateFormsData(_this, aprvStatusTypeId).then(function (res) {
+          var dataTraceId = res && res.data && res.data.hasOwnProperty("traceId") ? res.data.traceId : 0
+          var formDataStr = res && res.hasOwnProperty("formData") ? res.formData : ''
+          if (_this.ccUserFree) {
+            updateCcUsers(_this).then(function () {
+              submitApproveData(_this, aprvStatusTypeId, dataTraceId, formDataStr)
+            })
+          } else {
+            submitApproveData(_this, aprvStatusTypeId, dataTraceId, formDataStr)
+          }
+        })
+      } else {
+        if (_this.ccUserFree) {
+          updateCcUsers(_this).then(function () {
+            submitApproveData(_this, aprvStatusTypeId, traceId)
+          })
+        } else {
+          submitApproveData(_this, aprvStatusTypeId, traceId)
+        }
+      }
+    }
+  }
+  
+  //修改表单有权限的字段
+  function updateFormsData(_this, aprvStatusTypeId) {
+    return new Promise(function (resolve, reject) {
+      var comptShow = false
+      for (var index in _this.formAuthorityJson) {
+        if (!_this.formAuthorityJson.hasOwnProperty(index)) {
+          continue
+        }
+        
+        var auth = (_this.formAuthorityJson[index] instanceof Object) ? _this.formAuthorityJson[index].authority : _this.formAuthorityJson[index]
+        if (auth === 1) {
+          comptShow = true
+          break
+        }
+      }
+      if (!comptShow) {
+        return resolve()
+      }
+      if (!_this.$store.state.sendable && (aprvStatusTypeId == 2 || aprvStatusTypeId == 5)) {
+        _this.buttonClickEnable = true
+        approveAlert(_this.$store.getters.getErrMsg,_this)
+        return reject()
+      }
+      //表单修改的数据触发验证
+      for (var i in _this.$store.state.verifieds) {
+        if (!_this.$store.state.verifieds[i].isShow
+            || !_this.$store.state.verifieds[i].hasAuthority
+            || _this.$store.state.verifieds[i].verified
+            || !_this.$store.state.verifieds[i].errMsg) {
+          continue
+        }
+        _this.buttonClickEnable = true
+        approveAlert(_this.$store.state.verifieds[i].errMsg,_this)
+        return reject()
+      }
+      if (_this.processBtnEnable) {
+        var formData = checkClient() !== 2 && aprvStatusTypeId === 3 ? _this.formData : _this.$store.getters.getFormData(false)
+        var oldFormData = JSON.parse(_this.oldFormData), formDataJson = structureFormsJson(formData, {})
+        var formData = assignmentNewData(oldFormData, formDataJson)
+        var newFormData = publicUtils.relatedDataTransform(_this, _this.$store.getters.getFormData(true)), formDataStr = JSON.stringify(newFormData)
+        if (formData && formData.length) {
+          $.post('data/approve/apps/forms/fore/update/form/data', {
+            aprvId: _this.formsUser.id,
+            aprvAppId: _this.formsUser.aprvAppId,
+            formId: _this.formsUser.formId,
+            formData: formDataStr,
+            uuid: uuid,
+            version: _this.formsUser.version,
+            pageEnc: _this.pageEnc
+          }).then(function (res) {
+            if (!res.success) {
+              _this.buttonClickEnable = true
+              approveAlert(res.msg,_this)
+              return reject()
+            }
+            res.formData = formDataStr
+            return resolve(res)
+          })
+        }
+      }
+    })
+  }
+  
+  
+  //更新当前页面审批人相关数据(转他人多人)
+  function submitMoreTurnToOthers(_this, formDataStr, approveUserList, traceId) {
+    if (_this.submitStatus) {
+      return
+    }
+    _this.submitStatus = true
+    $.post('data/approve/flow/approve/handle/approvers/update', {
+      formId: _this.formsUser.formId,
+      aprvAppId: _this.formsUser.aprvAppId,
+      aprvTypeId: _this.aprvTypeId,
+      aprvId: _this.aprvId,
+      signature: _this.signatureShow ? _this.signature : '',
+      electronicSignature: _this.electronicSignatureShow ? _this.electronicSignature : '',
+      formDataStr: formDataStr,
+      returnType: _this.isReturn ? 1 : 0,
+      approveWay: _this.approveWay,
+      approveUserList: JSON.stringify(approveUserList),
+      pageEnc: _this.pageEnc
+    }).then(function (json) {
+      _this.submitStatus = false
+      if (!json.success) {
+        approveAlert(json.msg,_this)
+        return
+      }
+      _this.userNames = json.data
+      if (checkClient() === 2) {
+        _this.uploadSignatureAndProcess(3, traceId)
+        _this.otherDialogShow = false
+        return
+      }
+      process(_this, 3, traceId)
+    })
+  }
+  
+  //更新当前审批人数据(转他人单人)
+  function submitOneTurnToOthers(_this, formDataStr, traceId) {
+    if (_this.submitStatus) {
+      return
+    }
+    _this.submitStatus = true
+    $.post('data/approve/flow/approve/handle/approvers/replace', {
+      aprvId: _this.aprvId,
+      aprvAppId: _this.formsUser.aprvAppId,
+      formId: _this.formsUser.formId,
+      replaceUser: JSON.stringify(_this.aprvUserList[0]),
+      opinion: _this.opinion,
+      file: JSON.stringify(_this.file),
+      picture: JSON.stringify(_this.picture),
+      signature: _this.signatureShow ? _this.signature : '',
+      electronicSignature: _this.electronicSignatureShow ? _this.electronicSignature : '',
+      buttonName: _this.buttonName[_this.clickButtonIndex].name,
+      formDataStr: formDataStr,
+      traceId: traceId,
+      pageEnc: _this.pageEnc
+    }).then(function (res) {
+      _this.submitStatus = false
+      if (!res.success) {
+        approveAlert(res.msg,_this)
+        return
+      }
+      toNextSuccess(_this, '处理成功，即将进入下一条')
+    })
+  }
+  
+  //处理当前选择转他人数据
+  function turnToOthers(_this) {
+    var aprvUsers = _this.aprvUserList
+    if (!aprvUsers.length) {
+      approveAlert('请选择处理人',_this)
+      return
+    }
+    if (_this.opinionTipsDisplay && _this.opinionTipsRequired && !_this.opinion) {
+      approveAlert("请填写审批意见", _this)
+      return
+    }
+    updateFormsData(_this, 3).then(function (res) {
+      var traceId = res && res.data && res.data.hasOwnProperty("traceId") ? res.data.traceId : 0
+      var formDataStr = res && res.hasOwnProperty("formData") ? res.formData : ""
+      if (!_this.multiple) {
+        submitOneTurnToOthers(_this, formDataStr, traceId)
+        return
+      }
+  
+      submitMoreTurnToOthers(_this, formDataStr, aprvUsers, traceId)
+    })
+  }
+  
+  //开始处理状态修改
+  function changeApproveToProcessing(_this) {
+    updateFormsData(_this, 5).then(function (res) {
+      var traceId = res && res.data && res.data.hasOwnProperty("traceId") ? res.data.traceId : 0
+      var formDataStr = res && res.hasOwnProperty("formData") ? res.formData : ""
+      if (_this.signatureShow && !_this.signature && checkClient() == 2) {
+        _this.uploadSignature().then(function () {
+          submitProcessing(_this, formDataStr, traceId)
+        }, function (error) {
+          _this.buttonClickEnable = true
+          approveAlert(error.msg,_this)
+        })
+      } else {
+        submitProcessing(_this, formDataStr, traceId)
+      }
+    })
+  }
+  
+  //提交审批数据(同意拒绝转他人)
+  function submitProcessing(_this, formDataStr, traceId) {
+    if (_this.submitStatus) {
+      return
+    }
+    _this.submitStatus = true
+    $.post('data/approve/flow/approve/handle/status/processing', {
+      formId: _this.formsUser.formId,
+      aprvId: _this.aprvId,
+      aprvAppId: _this.formsUser.aprvAppId,
+      formDataStr: formDataStr,
+      opinion: _this.opinion,
+      signature: _this.signatureShow ? _this.signature : '',
+      electronicSignature: _this.electronicSignatureShow ? _this.electronicSignature : '',
+      file: JSON.stringify(_this.file),
+      picture: JSON.stringify(_this.picture),
+      buttonName: _this.buttonName[_this.clickButtonIndex].name,
+      traceId: traceId,
+      pageEnc: _this.pageEnc
+    }).then(function (res) {
+      _this.submitStatus = false
+      if (!res.success) {
+        _this.buttonClickEnable = true
+        approveAlert(res.msg,_this)
+        return
+      }
+      // 第三方处理完成时删除localStorage中保存的signature值
+      if (checkClient() === 1) {
+        localStorage.removeItem(_this.aprvId + '_' + _this.aprvTypeId + 'signature')
+      }
+      toNextSuccess(_this, '处理成功，即将进入下一条')
+    })
+  }
+  
+  //回退审批流程
+  function backStep(_this, back) {
+    updateFormsData(_this, 9).then(function (res) {
+      if (_this.submitStatus) {
+        return
+      }
+      _this.submitStatus = true
+      $.post('data/approve/flow/approve/handle/status/back', {
+        aprvId: _this.aprvId,
+        aprvAppId: _this.formsUser.aprvAppId,
+        buttonObj: JSON.stringify(_this.buttonName[_this.clickButtonIndex]),
+        formId: _this.formsUser.formId,
+        opinion: _this.opinion,
+        signature: _this.signatureShow ? _this.signature : '',
+        electronicSignature: _this.electronicSignatureShow ? _this.electronicSignature : '',
+        file: JSON.stringify(_this.file),
+        picture: JSON.stringify(_this.picture),
+        traceId: res && res.data && res.data.hasOwnProperty("traceId") ? res.data.traceId : 0,
+        formDataStr: res && res.hasOwnProperty("formData") ? res.formData : '',
+        backIndex: back.backIndex,
+        backName: back.backName,
+        pageEnc: _this.pageEnc
+      }).then(function (res) {
+        _this.submitStatus = false
+        if (!res.success) {
+          _this.buttonClickEnable = true
+          approveAlert(res.msg,_this)
+          return
+        }
+        if (checkClient() === 0) {
+          var appUtils = require('appUtils')
+          appUtils.refreshStatus()
+        } else {
+          publicUtils.postMessageSend({from: 'assistant', data: {success: 1}})
+        }
+        toNextSuccess(_this, '处理成功，即将进入下一条')
+      })
+    })
+  }
+  
+  //提交当前页面数据
+  function submitApproveData(_this, aprvStatusTypeId, traceId, formDataStr) {
+    if (_this.submitStatus) {
+      return
+    }
+    _this.submitStatus = true
+    $.post('data/approve/flow/approve/handle/process', {
+      aprvStatusTypeId: aprvStatusTypeId,
+      aprvTypeId: _this.aprvTypeId,
+      aprvId: _this.aprvId,
+      opinion: _this.opinion,
+      formId: _this.formsUser.formId,
+      aprvAppId: _this.formsUser.aprvAppId,
+      signature: _this.signatureShow ? _this.signature : '',
+      electronicSignature: _this.electronicSignatureShow ? _this.electronicSignature : '',
+      file: JSON.stringify(_this.file),
+      picture: JSON.stringify(_this.picture),
+      userNames: _this.userNames,
+      buttonName: _this.buttonName[_this.clickButtonIndex].name,
+      traceId: traceId,
+      pageEnc: _this.pageEnc,
+      formDataStr: formDataStr
+    }).then(function (json) {
+      _this.submitStatus = false
+      if (!json.success) {
+        approveAlert(json.msg,_this)
+        _this.processBtnEnable = true
+        _this.buttonClickEnable = true
+        return
+      }
+      _this.processBtnEnable = false
+      if (checkClient() === 0) {
+        var appUtils = require('appUtils')
+        if (json.data.noticeIdList) {
+          for (var i = 0; i < json.data.noticeIdList.length; i++) {
+            appUtils.clientUpdateNoticeList(json.data.noticeIdList[i], 1)
+          }
+        }
+        appUtils.refreshStatus()
+      } else {
+        publicUtils.postMessageSend({from: 'assistant', data: {success: 1}})
+      }
+      toNextSuccess(_this, '处理成功，即将进入下一条')
+    })
+  }
+  
+  function doPrint(_this) {
+    var templates = _this.forms.printTemplates
+    var compts = _this.formsUser.formData
+    var fieldMap = {}
+    compts.forEach(function (compt) {
+      if (compt.compt === 'detailcombox') {
+        compt.compts[0].forEach(function (item) {
+          fieldMap[item.id] = item
+        })
+      } else {
+        fieldMap[compt.id] = compt
+      }
+    })
+    
+    var aprvUser = _this.approveUserList[_this.aprvStep]
+    fieldMap[-1] = {compt: 'contact', id: -1, fields: [{values: [{uname: _this.formsUser.uname, puid: _this.formsUser.uid}]}]}//发起人
+    if (aprvUser && aprvUser.model === 1) {// 当审批人是 个人 时
+      fieldMap[-2] = {compt: 'contact', id: -2, multiple: _this.aprvUserNum > 1, fields: [{values: [{uname: aprvUser.explain, puid: aprvUser.id}]}]}//审批人
+    }
+    fieldMap[-3] = {compt: 'dateinput', id: -3, fields: [{values: [{val: _this.formsUser.inserttime}]}]}//发起时间
+    fieldMap[-4] = {compt: 'dateinput', id: -4, fields: [{values: [{val: _this.formsUser.updatetime}]}]}//更新时间
+    fieldMap[-5] = {compt: 'editinput', id: -5, fields: [{values: [{val: _this.formsUser.aprvStatusType}]}]}//审批状态
+    
+    var matchedTemplates = []
+    if (templates && templates.length > 0) {
+      templates = JSON.parse(_this.forms.printTemplates)
+      for (var i = 0; i < templates.length; i++) {
+        if (templates[i].state % 2 // 支持前端
+            && publicUtils.dataMatchFilterCondition(fieldMap, templates[i].front, {serviceId: _this.forms.serviceId})) {
+          matchedTemplates.push(templates[i])
+        }
+      }
+    }
+    if (matchedTemplates.length <= 1) {
+      _this.downPrintFile(matchedTemplates[0])
+    } else {
+      _this.print.listShow = true
+      _this.print.templates = matchedTemplates
+    }
+  }
+  
+  //下载审批pdf文件
+  function downPrintFile(_this, template) {
+    // 判断是否正在打印
+    if (_this.print.isPrinting) {
+      return
+    }
+    _this.print.isPrinting = true
+    var data = {formUserId: _this.aprvId, formId: _this.formsUser.formId, aprvAppId: _this.formsUser.aprvAppId}
+    if (template) {
+      data['templateId'] = template.id
+    }
+    data['pageEnc'] = _this.pageEnc
+    operateData('data/approve/apps/forms/fore/down/pdf', data).then(function (json) {
+      if (!json.success) {
+        _this.print.isPrinting = false
+        approveAlert(json.msg, _this)
+        return
+      }
+      var file = json.data.result
+      var printFileName = json.data.printFileName
+      if (checkClient() === 0) {
+        _this.print.isPrinting = false
+        var appUtils = require('appUtils')
+        appUtils.clientOpenRes({
+          filename: file.name,
+          objectId: file.objectId,
+          suffix: file.suffix,
+          size: file.size
+        })
+        return
+      }
+      // 生成报告单和上传成功后转码需要时间，定时获取文件信息，文件转码成功后进行下载
+      var loadInterval = setInterval(function () {
+        operateData('data/common/resource/file/info', {objectId: file.objectId}).then(function (result) {
+          if (result.success) {
+            if (result.data.fileInfo.download) {
+              _this.print.isPrinting = false
+              clearInterval(loadInterval)
+              if ('https:' === window.location.protocol) {
+                result.data.fileInfo.download = result.data.fileInfo.download.replace('http://', 'https://')
+              }
+              window.location.href = result.data.fileInfo.download + '&fn=' + encodeURIComponent(printFileName)
+            }
+          }
+        })
+      }, 1000)
+    })
+  }
+  
+  //撤销审批
+  function revoke(_this) {
+    if (!_this.revokeCause) {
+      _this.buttonClickEnable = true
+      approveAlert('请输入撤销理由',_this)
+      return
+    }
+    if (_this.submitStatus) {
+      return
+    }
+    _this.submitStatus = true
+    operateData('data/approve/flow/approve/handle/task/revoke', {
+      formId: _this.formsUser.formId,
+      aprvAppId: _this.formsUser.aprvAppId,
+      aprvTypeId: _this.aprvTypeId,
+      aprvId: _this.aprvId,
+      cause: _this.revokeCause,
+      pageEnc: _this.pageEnc
+    }).then(function (json) {
+      _this.submitStatus = false
+      if (!json.success) {
+        _this.buttonClickEnable = true
+        approveAlert(json.msg,_this)
+        return
+      }
+      if (checkClient() === 2) {
+        if (!json.success) {
+          _this.buttonClickEnable = true
+          approveAlert(json.msg,_this)
+          return
+        }
+        window.location.reload()
+        return
+      }
+      if (checkClient() === 0) {
+        var appUtils = require('appUtils')
+        appUtils.refreshStatus()
+      }
+      openUrl('我的' + _this.formsUser.name + '撤销', window.location.origin + uniqueDomainPath + '/front/approve/apps/forms/fore/detail/approve?from=apply&id=' + json.data.aprvId + '&formId=' + _this.formsUser.formId + '&pageEnc=' + json.data.pageEnc)
+    })
+  }
+  
+  //提交评论
+  function submitComment(_this, type) {
+    var approveComment = type ? _this.editComment.commentData : _this.approveComment
+    if (approveComment.content.length > 220) {
+      approveAlert('评论字数超出限制',_this)
+      return
+    }
+    if (!approveComment.content && !approveComment.file.length && !approveComment.picture.length) {
+      approveAlert('请添加评论内容',_this)
+      return
+    }
+    if (!approveComment.id) {
+      approveComment['aprvId'] = _this.aprvId
+      approveComment['aprvTypeId'] = _this.aprvTypeId
+    }
+    $.post('data/approve/comment/edit', {approveCommentJson: JSON.stringify(approveComment)}).then(function (res) {
+      if (!res.success) {
+        approveAlert('提交失败',_this)
+        return
+      }
+      window.location.reload()
+    })
+  }
+  
+  //删除编辑状态的文件和图片
+  function removeCommentFile(_this, index, type, action) {
+    if (type === 'file') {
+      if (action !== 'add') {
+        _this.editComment.commentData.file.splice(index, 1)
+      } else {
+        _this.approveComment.file.splice(index, 1)
+      }
+    } else {
+      if (action !== 'add') {
+        _this.editComment.commentData.picture.splice(index, 1)
+      } else {
+        _this.approveComment.picture.splice(index, 1)
+      }
+    }
+  }
+  
+  //删除评论记录
+  function removeComment(_this, index) {
+    var id = _this.approveCommentList[index].id
+    operateData('data/approve/comment/delete', {id: id}).then(function () {
+      _this.approveCommentList.splice(index, 1)
+    })
+  }
+  
+  //根据获取当前评论数据
+  function findCurrentComment(_this, id) {
+    if (checkClient() !== 2) {
+      this.approveComment = {
+        content: '',
+        file: [],
+        picture: []
+      }
+      _this.approveCommentShow = true
+    } else {
+      _this.editComment.show = true
+    }
+    if (id) {
+      operateData('data/approve/comment/find', {id: id}).then(function (res) {
+        if (!res.success) {
+          approveAlert('无数据',_this)
+          return
+        }
+        if (checkClient() !== 2) {
+          _this.approveComment = res.data.approveComment
+          _this.approveComment.file = JSON.parse(_this.approveComment.file)
+          _this.approveComment.picture = JSON.parse(_this.approveComment.picture)
+          return
+        }
+        _this.editComment.commentData = res.data.approveComment
+        _this.editComment.commentData.file = JSON.parse(_this.editComment.commentData.file)
+        _this.editComment.commentData.picture = JSON.parse(_this.editComment.commentData.picture)
+      })
+    }
+  }
+  
+  //获取评论列表
+  function findCommentList(_this) {
+    operateData('data/approve/comment/list', {aprvId: _this.aprvId, aprvTypeId: _this.aprvTypeId}).then(function (res) {
+      if (!res.success) {
+        return
+      }
+      res.data.approveCommentList.forEach(function (value) {
+        value.file = JSON.parse(value.file)
+        value.picture = JSON.parse(value.picture)
+      })
+      _this.approveCommentList = res.data.approveCommentList
+    })
+  }
+  
+  //审批人撤回审批动作
+  function doApproveRevoke(_this){
+    operateData('data/approve/flow/approve/handle/user/revoke', {aprvId: _this.aprvId, formId: _this.formsUser.formId, aprvAppId: _this.formsUser.aprvAppId, pageEnc: _this.pageEnc}).then(function (res) {
+      if (!res.success) {
+        _this.buttonClickEnable = true
+        approveAlert(res.msg,_this)
+        return
+      }
+      window.location.reload()
+    })
+  }
+  
+  //初始化审批数据
+  function initApproveDetailData(_this) {
+    return operateData('data/approve/apps/forms/fore/approve/flow', {formId: formId, formUserId: _this.aprvId, pageEnc: _this.pageEnc}).then(function (json) {
+      if (!json.success) {
+        approveAlert('获取审批数据异常，请重试',_this)
+        return
+      }
+      _this.formsUser = json.data.formsUser
+      formId = _this.formsUser.formId
+      _this.$store.commit('setApproveFormId', _this.formsUser.formId)
+      _this.$store.commit('setCurrentUserDeptId', _this.formsUser.fidEnc)
+      _this.$store.commit('role/setCurrentUserDeptId', _this.formsUser.fidEnc)
+      _this.$store.commit('role/users/setCurrentUserDeptId', _this.formsUser.fidEnc)
+      _this.$store.commit('organize/setCurrentUserDeptId', _this.formsUser.fidEnc)
+      _this.$store.commit('organize/users/setCurrentUserDeptId', _this.formsUser.fidEnc)
+      _this.aprvOpinions = json.data.aprvOpinions
+      if(json.data.formAuthority){
+        _this.formAuthorityJson = JSON.parse(json.data.formAuthority)
+      }
+      if(json.data.buttonName && json.data.buttonName != '[]'){
+        _this.buttonName = JSON.parse(json.data.buttonName)
+      }
+      uuid = json.data.formsUser.uuid
+      var isDeletePage = window.location.pathname.indexOf('del/view') !== -1
+      if (!isDeletePage && _this.formsUser.aprvStatusTypeId === -3) {
+        _this.isApprvDeleted = true
+        _this.formsUser = ''
+        return
+      }
+      if (isDeletePage && _this.formsUser.aprvStatusTypeId !== -3) {
+        alert('当前审批未删除')
+        return
+      }
+      
+      //初始化当前表单数据
+      _this.forms = json.data.forms
+      if (json.data.forms.columnsNum) {
+        _this.$store.commit('setColumnsNum', json.data.forms.columnsNum)
+      }
+      if (json.data.forms.deptId) {
+        _this.$store.commit('setFormFid', json.data.forms.deptId)
+      }
+      if (json.data.leaveReturn) {
+        _this.leaveReturn = json.data.leaveReturn
+      }
+      if (_this.forms.serviceName) {
+        _this.$store.commit('setDeptStructure', {name: _this.forms.serviceName, serviceId: _this.forms.serviceId})
+      }
+      //获取审批提交设置
+      if (json.data.approveConfig) {
+        //提交不可撤回
+        _this.revokeSubmitted = json.data.approveConfig.revokeSubmitted == 1
+        //同意不可撤销
+        _this.revokeAgreed = json.data.approveConfig.revokeAgreed == 1
+        //签名设置
+        _this.signatureConfig = json.data.approveConfig.signatureConfig
+        //快捷语设置
+        _this.isShowShortcutIcon = json.data.approveConfig.shortcutRequired === 1
+        _this.shortcutTips = JSON.parse(json.data.approveConfig.shortcutTips)
+        _this.signatureShow = json.data.approveConfig.needSignature === 1
+        _this.electronicSignatureShow = json.data.approveConfig.needElectronicSignature === 1
+        _this.opinionTips = json.data.approveConfig.opinionTips
+        _this.opinionTipsDisplay = json.data.approveConfig.opinionTipsDisplay === 1
+        _this.opinionTipsRequired = json.data.approveConfig.opinionTipsRequired === 1
+        if (Number(Cookies.get('oa_uid')) === _this.formsUser.uid) {// 是自己发起的审批
+          if (json.data.approveConfig.sponsorNotVisible !== 1) {
+            _this.sponsorNotVisible = true
+          }
+        } else {
+          _this.sponsorNotVisible = true
+        }
+      }
+      
+      //为当前审批人uid和单位id赋值
+      launchUserId = json.data.approveStatus.applicantUserId
+      launchDeptId = json.data.approveStatus.deptId
+      _this.approveTitle = _this.formsUser.uname + '的' + _this.formsUser.name
+      if (json.data.title && _this.formsUser.name != json.data.title) {
+        _this.approveTitle = json.data.title
+      }
+      _this.isPowerUser = json.data.isPowerUser == 1
+      _this.userRevokePower = json.data.userRevokePower == 1
+      _this.isImport = json.data.isImport
+      setUpperRightMenu(_this)
+      // 判断是否可撤销
+      if (Number(Cookies.get('oa_uid')) === _this.formsUser.uid) {
+        if (_this.formsUser.aprvStatusTypeId === 2) {
+          var hasManager = false
+          for (var i = 0; json.data.aprvUsers && i < json.data.aprvUsers.length; i++) {
+            if (json.data.aprvUsers[i].t == 7) {
+              hasManager = true
+              break
+            }
+          }
+          operateData('data/approve/flow/approve/handle/find/revoke', {
+            formId: formId,
+            aprvId: _this.aprvId,
+            aprvTypeId: _this.aprvTypeId,
+            pageEnc: _this.pageEnc
+          }).then(function (json) {
+            if (json.success) {
+              _this.isRevoke = json.data.isRevoke && !hasManager
+            }
+          })
+        } else if ((_this.formsUser.aprvStatusTypeId === -1 || _this.formsUser.aprvStatusTypeId === -2) && !_this.formsUser.revokeId) {
+          _this.isReEdit = true
+        }
+        if (_this.formsUser.aprvStatusTypeId === 1 || _this.formsUser.aprvStatusTypeId === 5) {// 待处理，可撤回
+          _this.cancelBtnEnable = true
+        }
+      }
+      if (json.data.isImport) {//没有审批流的已保存审批默认为批量导入的数据
+        _this.$store.commit('initApproveFieldConfig', {
+          defaultType: 2,
+          formAuthority: {}
+        })
+        _this.$store.commit('initWidgets', {
+          compts: _this.formsUser.formData,
+          formConfig: _this.forms.formConfig,
+          isFormData: !$.isEmptyObject(_this.formsUser),
+          formBaseConfig: _this.forms.formConfig,
+          formType: 'approveForm'
+        })
+        //转换数据
+        util.initAllCompts(_this, transformFactory, 'approve')
+        Vue.component('webFieldTab', VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/webFieldTab.vue'))
+        return
+      }
+      _this.multiRoleApproval = json.data.multiRoleApproval === 'true'
+      _this.currentStepConfig = JSON.parse(json.data.approveStatus.currentStepConfig)
+      if (json.data.approveStatus.organizeData) {
+        _this.organizeData = JSON.parse(json.data.approveStatus.organizeData)
+      }
+      if (json.data.approveStatus.roleData) {
+        _this.roleData = JSON.parse(json.data.approveStatus.roleData)
+      }
+      _this.aprvSubmitUsers = json.data.aprvUsers
+      _this.aprvStep = json.data.approveStatus.aprvStep
+      _this.scopeSetting = json.data.aprvUsers[_this.aprvStep].scopeSetting
+      if (_this.scopeSetting) {
+        var individuallySetData = json.data.aprvUsers[_this.aprvStep].individuallySetData
+        if(typeof individuallySetData == 'string'){
+          individuallySetData = JSON.parse(individuallySetData)
+        }
+        _this.opinionTips = individuallySetData.opinionTips
+        _this.opinionTipsRequired = individuallySetData.opinionTipsRequired
+        _this.opinionTipsDisplay = $.isEmptyObject(individuallySetData) ? 1 : individuallySetData.opinionTipsDisplay
+        _this.signatureConfig = individuallySetData.signatureConfig
+        _this.isShowShortcutIcon = individuallySetData.shortcutRequired === 1
+        _this.signatureShow = individuallySetData.signature === 1
+        _this.electronicSignatureShow = individuallySetData.electronicSignature === 1
+      }
+      //获取当前审批的回退列表
+      _this.backButton.list = json.data.approveStepBackList
+      _this.aprvUser = json.data.currentUserName
+      _this.aprvUserNum = json.data.currentUserCount
+      
+      var aprvUsers = json.data.approveUserList
+      
+      for (var aprvUserIndex = 0; aprvUserIndex < aprvUsers.length; aprvUserIndex++) {
+        if (typeof aprvUsers[aprvUserIndex].file == 'string') {
+          aprvUsers[aprvUserIndex].file = JSON.parse(aprvUsers[aprvUserIndex].file)
+        }
+        if (typeof aprvUsers[aprvUserIndex].picture == 'string') {
+          aprvUsers[aprvUserIndex].picture = JSON.parse(aprvUsers[aprvUserIndex].picture)
+        }
+        if (!aprvUsers[aprvUserIndex].children) {
+          continue
+        }
+        aprvUsers[aprvUserIndex].children.forEach(function (user) {
+          if (typeof user.file == 'string') {
+            user.file = JSON.parse(user.file)
+          }
+          if (typeof user.picture == 'string') {
+            user.picture = JSON.parse(user.picture)
+          }
+        })
+      }
+      _this.aprvUsers = aprvUsers
+      _this.approveUserList = aprvUsers
+      operateData('data/approve/apps/forms/fore/all/departments', {pid: 0, deptId: _this.formsUser.deptId, serviceId: _this.formsUser.serviceId}).then(function (res) {
+        if (res.success) {
+          _this.deptPathMap = getDeptPathMap($.extend(true, [], res.data.departments))
+        }
+      })
+    }).then(function () {
+      //使用上次签名 查询当前是否有手写签名
+      operateData('data/approve/apps/forms/fore/user/find', {}).then(function (res) {
+        if (res.success) {
+          //签名设置
+          if (_this.signatureConfig === 0 && res.data.user.signature) {//0 使用上次签名 1 每次重新签名
+            var signArr = res.data.user.signature.split(':')
+            _this.signature = signArr.length > 1 ? document.location.protocol + signArr[1] : res.data.user.signature
+          }
+          _this.electronicSignature = res.data.user.electronicSignature
+        }
+      }).then(function () {
+        var key = _this.aprvId + '_' + _this.aprvTypeId + 'signature', signature = localStorage.getItem(key)
+        if (signature) {
+          _this.signature = signature
+          localStorage.removeItem(key)
+        }
+      })
+      return new Promise(function (resolve, reject) {
+        //如果是学习通并且cookies的uid为空时登陆
+        if (checkClient() === 0 && !Cookies.get('oa_uid')) {
+          var oauth = require('oauth')
+          oauth.loadInfo('${token!}').done(function () {
+            resolve()
+          })
+        } else {
+          resolve()
+        }
+      }).then(function () {
+        operateData('data/approve/flow/approve/task/exist', {aprvTypeId: _this.aprvTypeId, aprvId: _this.aprvId}).then(function (json) {
+          if (json.success) {
+            _this.processBtnEnable = json.data.exist
+            if (json.data.exist && _this.pageReadonly) {
+              _this.processBtnEnable = false
+            }
+          }
+        }).then(function () {
+          //同步当前审批人的表单权限
+          initPageButtonConfig(_this)
+          initFormAuthorityJson(_this)
+        })
+        //验证是否需要填写密码
+        operateData('data/approve/pwd/find', {}).then(function (json) {
+          if (json.success && json.data.userConfig) {
+            _this.isAprvPwd = json.data.userConfig.aprvPwdRequired === 1
+          }
+        })
+        //获取下一页配置
+        operateData('data/approve/apps/forms/fore/approve/skip/config', {}).then(function (json) {
+          if (json.success && json.data.approveSkipConfig) {
+            _this.approveSkipConfig = json.data.approveSkipConfig
+          }
+        })
+      })
+    })
+  }
+  
+  // 设置第三方、学习通审批详情页右上角按钮列表展示内容
+  function setUpperRightMenu(_this) {
+    if (checkClient() === 2) { // 若是pc端直接返回
+      return
+    }
+    // 手机端
+    if (checkClient() === 1) {
+      _this.upperRightMenuList = [] // 清空列表
+      var reEdit = {index: 1, name: '重新发起'}
+      var exportPdf = {index: 2, name: '下载打印文件'}
+      if (Number(Cookies.get('oa_uid')) === _this.formsUser.uid && (_this.formsUser.aprvStatusTypeId === -1 || _this.formsUser.aprvStatusTypeId === -2)
+          && !_this.formsUser.revokeId && !_this.isImport) {
+        _this.upperRightMenuList.push(reEdit)
+      }
+      if (_this.isPowerUser) {
+        _this.upperRightMenuList.push(exportPdf)
+      }
+      if (_this.upperRightMenuList && _this.upperRightMenuList.length > 0) {
+        _this.homeAddShow = true
+      }
+      return
+    }
+    // 学习通
+    var menuList = []
+    var AppUtils = require('appUtils')
+    var reEdit = {menu: '重新发起', option: 'reEdit()'}, exportPdf = {menu: '下载打印文件', option: 'exportPdf()'}, share = {menu: '转发', option: 'share()'}
+    if (Number(Cookies.get('oa_uid')) === _this.formsUser.uid && (_this.formsUser.aprvStatusTypeId === -1 || _this.formsUser.aprvStatusTypeId === -2)
+        && !_this.formsUser.revokeId && !_this.isImport) {
+      menuList.push(reEdit)
+    }
+    if (_this.isPowerUser) {
+      menuList.push(exportPdf)
+    }
+    menuList.push(share)
+    AppUtils.customMenu({
+      width: 19,
+      height: 19,
+      icon: window.location.origin + uniqueDomainPath + '/static/style/approve/flow/images/more.png',
+      children: menuList
+    })
+  }
+  
+  //获取审批状态class
+  function typefaceClass(_this, typeId, index, type) {
+    var classValue = ''
+    if (type == 1) {
+      classValue += 'pass_type_icon'
+      if(!_this.approveUserList.length){
+        return ""
+      }
+      //走过的抄送节点需要增加通过小小图标
+      if (index != undefined && _this.approveUserList[index].cardType == 2 && _this.approveUserList[index].hasOwnProperty("handleTime")) {
+        return classValue + ' agree'
+      }
+    }
+    
+    //正常审批流程
+    switch (typeId) {
+      case -1:
+        return classValue + ' reject'
+      case -2:
+        return classValue + ' recall'
+      case 1:
+        return classValue + ' wait'
+      case 2:
+      case 5:
+        return classValue + ' agree'
+      case 3:
+        return classValue + ' others'
+      case -5:
+        return classValue + ' recall'
+    }
+  }
+  
+  
+  //获取审批状态class
+  function aprvStatusType(aprvStatusTypeId) {
+    switch (aprvStatusTypeId) {
+      case -1:
+        return 'g_reject'
+      case -2:
+        return 'g_repeal'
+      case 1:
+        return 'g_wait'
+      case 2:
+        return 'g_agree'
+      case 3:
+        return 'g_by_other'
+    }
+  }
+  
+  //展示多角色的角色详情
+  function showRoleList(_this, role, index, userIndex) {
+    if (!role.clickable || !role.children) {
+      return
+    }
+    _this.roleDialog.name = role.title
+    _this.roleDialog.list = []
+    //不展示待审状态
+    role.children.forEach(function (value) {
+      //显示全部审批人时展示全部审批状态的审批人，显示实际审批人只展示非待处理审批状态的审批人
+      if (value.statusTypeId != 1 || role.clickable == 2) {
+        if (value.file && typeof value.file == 'string') {
+          value.file = JSON.parse(value.file)
+        }
+        if (value.picture && typeof value.picture == 'string') {
+          value.picture = JSON.parse(value.picture)
+        }
+        _this.roleDialog.list.push(value)
+      }
+    })
+    _this.roleDialog.index = userIndex
+    _this.roleDialog.show = true
+  }
+  
+  //角色审批修改roleUserMap数据,与审批流程对应
+  function updateRoleUserMap(_this, aprvUsers, userInfo, mySelfAprvStatusTypeId) {
+    //如果是多角色需要在roleUserMap加数据
+    var roleList = []
+    if (aprvUsers[_this.aprvStep].role && aprvUsers[_this.aprvStep].role.roleList) {
+      roleList = typeof aprvUsers[_this.aprvStep].role.roleList == 'string' ? JSON.parse(aprvUsers[_this.aprvStep].role.roleList) : aprvUsers[_this.aprvStep].role.roleList
+    }
+    if (aprvUsers[_this.aprvStep].t == 3 && roleList.length > 1) {
+      var role = aprvUsers[_this.aprvStep].role
+      //找出当前用户在哪个角色
+      var roleUserMap = role.roleUserMap, roleIndexArr = []
+      if (typeof role.roleUserMap == 'string') {
+        roleUserMap = eval('(' + role.roleUserMap + ')')
+      }
+      for (var a = 0; a < roleList.length; a++) {
+        var list = roleUserMap[roleList[a].roleId]
+        for (var x = 0; x < list.length; x++) {
+          //找到未进行过审批的用户进行匹配
+          if (list[x].hasOwnProperty("aprvStatusTypeId")) {
+            continue
+          }
+          if (list[x].uid == Cookies.get('oa_uid') && roleIndexArr.indexOf(roleList[a].roleId) === -1) {
+            //修改自身审批状态
+            if (mySelfAprvStatusTypeId) {
+              list[x]['aprvStatusTypeId'] = mySelfAprvStatusTypeId
+            }
+            roleUserMap[roleList[a].roleId].push(userInfo)
+            roleIndexArr.push(roleList[a].roleId)
+            break
+          }
+        }
+      }
+      aprvUsers[_this.aprvStep].role.roleUserMap = roleUserMap
+    }
+  }
+  
+  //页面跳转
+  function openUrl(title, url) {
+    if (checkClient()) {
+      window.location.href=url
+      return
+    }
+    var appUtils = require('appUtils')
+    appUtils.openUrl({
+      title: title,
+      webUrl: url
+    })
+  }
+  
+  //页面弹窗
+  function approveAlert(msg, _this=null) {
+    if (checkClient() === 0) {
+      var appUtils = require('appUtils')
+      appUtils.clientMessageDisplay(msg)
+    } else if (checkClient() === 1) {
+      popup.alert(msg)
+    } else {
+      if(_this && _this.$refs && _this.$refs.triggerAndEventDialogApproverRef){
+        _this.$refs.triggerAndEventDialogApproverRef.confirmDialog({type:"alert",txt:msg})
+      }
+      else{
+        alert(msg)
+      }
+    }
+  }
+  
+  //判断当前客户端
+  function checkClient() {
+    if (navigator.userAgent.indexOf('chaoxingStudyPc') !== -1) {//学习通pc
+      return 2
+    } else if (navigator.userAgent.indexOf('ChaoXingStudy') !== -1) {//学习通手机端
+      return 0
+    }
+    //第三方
+    var system = {}
+    var p = navigator.platform
+    system.win = p.indexOf('Win') === 0
+    system.mac = p.indexOf('Mac') === 0
+    system.x11 = (p === 'X11') || (p.indexOf('Linux') === 0)
+    if (system.win || system.mac || system.xll) {//电脑
+      return 2
+    } else {//手机
+      return 1
+    }
+  }
+  
+  //计算当前当前级别审批人个数
+  function computeUserCount(children, count) {
+    for (var i = 0; i < children.length; i++) {
+      if (children[i].children) {
+        count = computeUserCount(children[i].children, count)
+      }
+      if (children[i].model == 1) {
+        count++
+      }
+    }
+    return count
+  }
+  
+  function scanSignFile(file) {
+    if (!file) {
+      alert('没有附件信息')
+      return
+    }
+    var data = []
+    data.push({
+      src: file,
+      type: 'image',
+      opts: {
+        caption: file.name
+      }
+    })
+    var instance = $.fancybox.open(data, {
+      toolbar: false,
+      loop: false,
+      width: 800,
+      height: 600
+    })
+    
+    instance.jumpTo(0)
+  }
+  
+  //移动端选择快捷语复制到填写区域
+  function checkTip(_this, index) {
+    _this.activeNum = index
+    _this.opinion = _this.shortcutTips[index]
+    setTimeout(function () {
+      _this.closeShortcut()
+      _this.activeNum = null
+    }, 200)
+  }
+  
+  //跳转下一条
+  function toNext(_this, url) {
+    window.location.href = url + '&fidEnc=' + _this.fidEnc + '&layer=' + _this.layer
+  }
+  
+  //审批功能按钮点击之后触发
+  function toNextSuccess(_this, msg) {
+    //获取下一条地址
+    _this.layer++
+    var data = {}
+    if (_this.approveSkipConfig && !$.isEmptyObject(_this.approveSkipConfig) && _this.approveSkipConfig.order) {
+      data = {type: _this.approveSkipConfig.type, order: _this.approveSkipConfig.order}
+    } else {
+      //默认跳转下一页
+      data = {type: 2, order: 2}
+      _this.approveSkipConfig.type = 2
+      _this.approveSkipConfig.order = 2
+    }
+    $.get('data/approve/flow/approve/handle/next/approve', data).then(function (res) {
+      if (!res.success || !res.data) {
+        if (_this.approveSkipConfig.toOther) {
+          if (checkClient() == 0) {
+            var appUtils = require('appUtils')
+            appUtils.doReturnBackData({a:1});
+            appUtils.closeView();
+          } else if (checkClient() == 1) {
+            window.history.back()
+          } else {
+            window.location.reload()
+          }
+        } else {
+          window.location.reload()
+        }
+        return
+      }
+      var content = "处理成功,进入下一条"
+      if (checkClient() == 0) {
+        var appUtils = require('appUtils')
+        if($.isEmptyObject(_this.approveSkipConfig) || _this.approveSkipConfig.type == 2){
+          _this.successDialogShow(msg)
+          setTimeout(function () {
+            appUtils.openUrl({
+              title: '审批详情',
+              loadType: 0,
+              webUrl: res.data + '&fidEnc=' + _this.fidEnc + '&layer=' + _this.layer
+            })
+          }, 1000)
+          return
+        }
+        popup.confirm({
+          content: content,
+          btn: ['留在当前', '下一条'],
+          btn2: function () {
+            appUtils.openUrl({
+              title: '审批详情',
+              loadType: 0,
+              webUrl: res.data + '&fidEnc=' + _this.fidEnc + '&layer=' + _this.layer
+            })
+          },
+          btn1: function () {
+            if(_this.approveSkipConfig.toOther){
+              appUtils.doReturnBackData({a:1});
+              appUtils.closeView();
+            }else{
+              window.location.reload()
+            }
+            return
+          }
+        })
+        return
+      }
+      if (checkClient() == 1) {
+        if($.isEmptyObject(_this.approveSkipConfig) || _this.approveSkipConfig.type == 2){
+          popup.alert(content)
+          setTimeout(function () {
+            toNext(_this, res.data)
+          }, 1000)
+          return
+        }
+        popup.confirm({
+          content: content,
+          btn: ['留在当前', '下一条'],
+          btn2: function () {
+            toNext(_this, res.data)
+            return
+          },
+          btn1: function () {
+            if(_this.approveSkipConfig.toOther){
+              window.history.back()
+            }else{
+              window.location.reload()
+            }
+            return
+          }
+        })
+      } else {
+        //默认
+        if($.isEmptyObject(_this.approveSkipConfig) || _this.approveSkipConfig.type == 2){
+          if (_this.$refs && _this.$refs.triggerAndEventDialogApproverRef) {
+            _this.$refs.triggerAndEventDialogApproverRef.alertDialog({txt: content})
+          }
+          setTimeout(function () {
+            toNext(_this, res.data)
+          }, 1000)
+          return
+        }
+        //页面是否加载了弹窗组件
+        if(_this.$refs && _this.$refs.triggerAndEventDialogApproverRef){
+          _this.$refs.triggerAndEventDialogApproverRef.confirmDialog({type:"confirm",txt:content, cancelBtnTxt: '留在当前', okBtnTxt: '下一条'})
+              .done(function () {
+                toNext(_this, res.data)
+                return
+              }).fail(function () {
+                window.location.reload()
+                return
+          })
+        } else {
+          popup.confirm({
+            content: content,
+            btn2: function () {
+              toNext(_this, res.data)
+              return
+            }
+          })
+        }
+      }
+    })
+  }
+  
+  // 获取部门完整路径
+  function getDeptPathMap(departments) {
+    var lvMap = {}
+    // 相同level的放一起
+    for (var i = 0; i < departments.length; i++) {
+      var dept = departments[i]
+      if (!lvMap.hasOwnProperty(dept.level)) {
+        lvMap[dept.level] = []
+      }
+      lvMap[dept.level].push(dept)
+    }
+    var pathMap = {}
+    
+    // 逐级查父路径，拼装完整路径
+    for (var lv in lvMap) {
+      var depts = lvMap[lv]
+      var fathers = lvMap[lv - 1]
+      if (!fathers) {
+        for (var i = 0; i < depts.length; i++) {
+          pathMap[depts[i].id] = depts[i].name
+        }
+      } else {
+        for (var i = 0; i < depts.length; i++) {
+          for (var j = 0; j < fathers.length; j++) {
+            var father = fathers[j]
+            if (depts[i].ppath.indexOf(father.ppath) === 0) {
+              depts[i].name = father.name + '/' + depts[i].name
+              pathMap[depts[i].id] = depts[i].name
+            }
+          }
+        }
+      }
+    }
+    return pathMap
+  }
+  
+  //销假按钮是否展示
+  function leaveCancellationButtonShow(formsUser){
+    return formsUser.leaveCancellation == 1 && formsUser.aprvStatusTypeId == 2 && Cookies.get('oa_uid') == formsUser.uid
+  }
+  
+  //审批写入填写页需要的缓存,便于发起页回显
+  function writeApproveApplyCache(url, id){
+    //检测当前请假是否是未销假的状态
+    $.get('data/approve/apps/forms/fore/leavecancellation/unfinished/info', {formUserId: id}).then(function (res) {
+      if (!res.success || !res.data.formsKitLeave) {
+        approveAlert('当前请假无法销假,请确定当前请假数据的销假状态')
+        return
+      }
+      window.localStorage.setItem('leaveId', id)
+      openUrl("", url)
+    })
+  }
+  
+  function nextCardShow (_this, index){
+    var nextShow = false
+    for (var i = index + 1; i < _this.approveUserList.length; i++) {
+      if (_this.approveUserList[i].cardType == 1 || (_this.approveUserList[i].cardType == 2 && _this.approveUserList[i].show)) {
+        nextShow = true
+        break
+      }
+    }
+    return index < _this.approveUserList.length - 1 && nextShow
+  }
+  
+  return {
+    initFormAuthorityJson: initFormAuthorityJson,
+    structureFormsJson: structureFormsJson,
+    assignmentNewData: assignmentNewData,
+    updateCcUsers: updateCcUsers,
+    aprvStatusType: aprvStatusType,
+    checkClient: checkClient,
+    typefaceClass: typefaceClass,
+    cancel: cancel,
+    process: process,
+    backStep: backStep,
+    updateFormsData: updateFormsData,
+    submitMoreTurnToOthers: submitMoreTurnToOthers,
+    submitOneTurnToOthers: submitOneTurnToOthers,
+    changeApproveToProcessing: changeApproveToProcessing,
+    turnToOthers: turnToOthers,
+    submitApproveData: submitApproveData,
+    openUrl: openUrl,
+    downPrintFile: downPrintFile,
+    revoke: revoke,
+    submitComment: submitComment,
+    removeCommentFile: removeCommentFile,
+    removeComment: removeComment,
+    findCurrentComment: findCurrentComment,
+    findCommentList: findCommentList,
+    submitProcessing: submitProcessing,
+    initApproveDetailData: initApproveDetailData,
+    showRoleList: showRoleList,
+    scanSignFile: scanSignFile,
+    checkTip: checkTip,
+    computeUserCount: computeUserCount,
+    doPrint: doPrint,
+    doApproveRevoke: doApproveRevoke,
+    writeApproveApplyCache: writeApproveApplyCache,
+    leaveCancellationButtonShow: leaveCancellationButtonShow,
+    nextCardShow: nextCardShow
+  }
+})

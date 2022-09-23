@@ -1,0 +1,1137 @@
+define(['util', 'moment', 'iosSelectCmp', 'jquery', 'VueUtils', 'publicUtils'], function (util, moment, IosSelectCmp, $, VueUtils, publicUtils) {
+  'use strict'
+  return function (widget) {
+    function bodyScroll(event) {
+      event.preventDefault && event.preventDefault()
+      event.returnValue = false
+      event.stopPropagation && event.stopPropagation()
+      return false
+    }
+    function doRequest(url, data) {
+      return $.getJSON(url, data)
+    }
+    function setScroll(_this, type) {
+      if (type === 1) {
+        ///禁止页面滚动
+        $('#selectBoxOption' + _this.widget.id).on('touchmove', bodyScroll, {passive: false})
+        var top = $(window).scrollTop()
+        $('body').css({'position': 'fixed', 'width': '100%', top: top * -1, height: ''})
+      } else {
+        $('#selectBoxOption' + _this.widget.id).on('touchmove', bodyScroll, {passive: false})
+        var body = $('body'), top = body.offset().top
+        body.css({'position': '', width: ''})
+        $(window).scrollTop(0 - top)
+      }
+    }
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: $.trim(_this.value),
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+    
+    return {
+      id: widget.id,
+      template: [
+        '<div v-show="isShow">',
+          '    <div class="leave_tip" v-if="needLeaveCancellation" @click="changeLeaveUnFinishedDialogShow(true)">',
+          '      <span class="tip_icon"></span>',
+          '      <span class="tip_text">当前有请假记录未销假，请销假后再请假</span>',
+          '      <span class="enter_arrow"></span>',
+          '    </div>',
+          '    <div class="pop_mask" v-if="leaveUnFinishedDialogShow">',
+          '      <div class="set_pop leave_pop">',
+          '        <div class="pop_top">',
+          '          <h2 class="pop_title">',
+          '            <span class="tip_title">提示</span>',
+          '            <span>当前有请假记录未销假，请销假后再请假</span>',
+          '          </h2>',
+          '        </div>',
+          '        <div class="pop_cont">',
+          '          <div class="leave_set_cont">',
+          '            <ul class="leave_info_list">',
+          '              <li class="leave_info_item" v-for="leaveUnFinished in leaveUnFinishedList" @click.stop="openPage(leaveUnFinished.detailUrl)">',
+          '                <div class="info_wrap">',
+          '                  <div class="user_head">',
+          '                    <img :src="photoUrl + \'/p/\'+leaveUnFinished.uid+\'_50\'">',
+          '                  </div>',
+          '                  <div class="leave_detail">',
+          '                    <h2 class="leave_name">{{leaveUnFinished.customTitle}}</h2>',
+          '                    <p class="leave_push_time">{{leaveUnFinished.inserttime | format(\'YYYY-MM-DD HH:mm\')}}</p>',
+          '                    <p class="leave_info_type">',
+          '                      <span class="type_name">请假类型</span><span class="info_text">{{leaveUnFinished.leaveType}}</span>',
+          '                    </p>',
+          '                    <p class="leave_info_type">',
+          '                      <span class="type_name">开始时间</span><span class="info_text">{{leaveUnFinished.sdate | format(\'YYYY-MM-DD HH:mm\')}}</span>',
+          '                    </p>',
+          '                    <p class="leave_info_type">',
+          '                      <span class="type_name">结束时间</span><span class="info_text">{{leaveUnFinished.edate | format(\'YYYY-MM-DD HH:mm\')}}</span>',
+          '                    </p>',
+          '                    <p class="leave_info_type">',
+          '                      <span class="type_name">时长</span><span class="info_text">{{leaveUnFinished.duration}}</span>',
+          '                    </p>',
+          '                  </div>',
+          '                </div>',
+          '                <div class="oprate_area">',
+          '                  <div class="aprv_status agreed">',
+          '                    <span>{{leaveUnFinished.aprvStatusType}}</span>',
+          '                    <span class="enter_arrow"></span>',
+          '                  </div>',
+          '                  <div class="leave_btn" v-if="leaveUnFinished.leaveCancellation==1" @click.stop="toApplyPage(leaveUnFinished)">销假</div>',
+          '                </div>',
+          '              </li>',
+          '            </ul>',
+          '          </div>',
+          '        </div>',
+          '        <div class="pop_btm" @click="changeLeaveUnFinishedDialogShow(false)">关闭</div>',
+          '      </div>',
+          '    </div>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="time_range_forbid" v-if="readonly">',
+              '<!--请假类型-->',
+              '<div class="time_forbid_start">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+                '</div>',
+                '<div class="form_forbid_edit" :class="{form_forbid_nodata: !tip}">',
+                  '<p class="form_forbid_word">{{tip ? tip :\'暂无数据\'}}</p>',
+                '</div>',
+              '</div>',
+              '<!--开始时间-->',
+              '<div class="time_forbid_start">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{stitle}}</h2>',
+                '</div>',
+                '<div class="form_forbid_edit" :class="{form_forbid_nodata: !stip}">',
+                  '<p class="form_forbid_word">{{stip ? stip :\'暂无数据\'}}</p>',
+                '</div>',
+              '</div>',
+              '<!--结束时间-->',
+              '<div class="time_forbid_end mt20">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{etitle}}</h2>',
+                '</div>',
+                '<div class="form_forbid_edit" :class="{form_forbid_nodata: !etip}">',
+                  '<p class="form_forbid_word">{{etip ? etip :\'暂无数据\'}}</p>',
+                '</div>',
+              '</div>',
+              '<!--时长-->',
+              '<div class="time_forbid_length mt20" v-if="calculate">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{rtitle}}</h2>',
+                '</div>',
+                '<div class="form_forbid_edit" :class="{form_forbid_nodata: !rinput}">',
+                  '<p class="form_forbid_word">{{rinput ? rinput :\'暂无数据\'}}</p>',
+                '</div>',
+              '</div>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<!--请假类型-->',
+              '<div class="widget_time_length">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+                '</div>',
+                '<div class="temp_drop_down" @click.stop="selectType">',
+                  '<i class="drop_down icon-drop_down"></i>{{tip}}',
+                '</div>',
+                '<div class="form_widget_prompt">',
+                  '<div class="widget_right_tip" v-if="leaveType.balanceUse">',
+                    '<p class="tip_word">{{showBalance()}}</p>',
+                  '</div>',
+                '</div>',
+              '</div>',
+              '<!--开始时间-->',
+              '<div class="widget_time_start mt20">',
+                '<div class="form_widget_title">',
+                 '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{stitle}}</h2>',
+                '</div>',
+                '<div class="temp_icon_input" @click.stop="selectTime(0)">',
+                 '<i class="input_icon icon-date"></i>{{stip}}',
+                '</div>',
+              '</div>',
+              '<!--结束时间-->',
+              '<div class="widget_time_end mt20">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{etitle}}</h2>',
+                '</div>',
+                '<div class="temp_icon_input" @click.stop="selectTime(1)">',
+                  '<i class="input_icon icon-date"></i>{{etip}}',
+                '</div>',
+              '</div>',
+              '<!--时长-->',
+              '<div class="widget_time_length mt20" v-if="calculate">',
+                '<div class="form_widget_title">',
+                  '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{rtitle}}</h2>',
+                '</div>',
+                '<div class="temp_icon_input">{{rinput}}</div>',
+              '</div>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" style="display:none;">',
+             '<p class="must_word">开始时间不能晚于结束时间</p>',
+            '</div>',
+          '</div>',
+
+          '<!--遮罩-->',
+          '<div class="sub_mask" v-show="optionFrame.show" @click.stop="closeOption"></div>',
+          '<!--下拉框弹窗-->',
+          '<div class="droplist_pop" v-show="optionFrame.show" :id="\'selectBoxOption\'+widget.id" :class="{droplist_color_pop: widget.config.optionColor}">',
+            '<div class="drop_pop_top">',
+              '<div class="drop_pop_title">',
+                '<span class="drop_pop_clear">清空</span>',
+                '<span class="drop_pop_sure">确定</span>',
+              '</div>',
+              '<div class="dp_search">',
+                '<div class="dp_search_box">',
+                  '<input type="text" placeholder="搜索" class="dp_search_input" readonly>',
+                  '<span class="dp_search_icon icon-search"></span>',
+                '</div>',
+              '</div>',
+            '</div>',
+            '<div class="drop_search" style="display:none;">',
+              '<div class="dp_active_search">',
+                '<input type="text" class="active_search_input" v-model="search.sw" placeholder="搜索" @focus.stop="startSearch" @blur.stop="cancelSearch" @keyup.stop="doSearch"/>',
+                '<span class="active_search_icon icon-search"></span>',
+              '</div>',
+              '<span class="active_search_cal" @click.stop="clearSearch">取消</span>',
+            '</div>',
+            '<div :id="\'selectbox\'+widget.id" class="drop_data" v-show="!search.model">',
+              '<ul class="drop_data_list">',
+                '<li class="drop_per" v-for="option in leaveTypeList" @click.stop="selectVal(option)">',
+                '<span class="gradio icon-radio" :class="{\'icon-radiocheck\': option.checked}"></span>',
+                '<div class="drop_per_right">',
+                  '<p class="drop_per_word">{{option.title}}</p>',
+                '</div>',
+                '</li>',
+              '</ul>',
+            '</div>',
+            '<div :id="\'selectBoxForSearch\'+widget.id" class="drop_data" v-show="search.model">',
+            '<!--搜索无结果-->',
+            '<p class="drop_nodata" v-show="searchOptions.length == 0">搜索无结果</p>',
+              '<ul class="drop_data_list">',
+                '<li class="drop_per" v-for="option in searchOptions" @click.stop="selectVal(option)">',
+                '<span class="gradio icon-radio" :class="{\'icon-radiocheck\': option.checked}"></span>',
+                '<div class="drop_per_right">',
+                  '<p class="drop_per_word">{{option.title}}</p>',
+                '</div>',
+                '</li>',
+              '</ul>',
+            '</div>',
+            '<div class="drop_sure_btn" style="display:none;">确定</div>',
+          '</div>',
+        '<event-trigger :widget="widget" :compose="\'col\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event-type="triggerValueEventByType" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          tip: '',
+          searchOptions: [],
+          optionFrame: {
+            selAll: false,
+            show: false
+          },
+          search: {
+            model: false,
+            sw: ''
+          },
+          selOptionTimeType: 1,
+          svalue: '',
+          evalue: '',
+          sCalValue: '',
+          eCalValue: '',
+          startAmpmVal: 0,
+          endAmpmVal: 0,
+          rinput: '',
+          rvalue: '',
+          errMsg: '',
+          leaveTypeList: [],
+          userAttendGroup: {},
+          rangeReadonly: true,
+          rangeObjDay: 0,
+          balance: 0,
+          leaveType: {},
+          verifyIndex: 0,
+          holidayList: [],
+          leaveUnFinishedList: [],//待销假列表
+          needLeaveCancellation: false//是否需要
+        };
+      },
+      components: {
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEventByType: function (data) {
+          if (data && data.hasOwnProperty('val') && data.hasOwnProperty('type')) {
+            switch (data.type) {
+              case '1':
+                this.svalue = publicUtils.convertTimestampToFormatStr(data.val, this.format)
+                break
+              case '2':
+                this.evalue = publicUtils.convertTimestampToFormatStr(data.val, this.format)
+                break
+              default:
+                this.svalue = ''
+                this.evalue = ''
+            }
+          }
+          this.loadStatus = false
+        },
+        triggerGetValueEvent: function (callback) {
+          callback([{svalue: this.svalue, evalue: this.evalue}])
+        },
+        $verifyDatetimeRange: function (startValue, endValue) {
+          if(!(startValue && endValue)){
+            return
+          }
+          var choiceSDate = moment(startValue)
+          var choiceEDate = moment(endValue)
+          if (choiceEDate.valueOf() < choiceSDate.valueOf()) {
+            //popup.alert("开始时间必须小于结束时间");
+            this.rvalue = ''
+            this.rinput = ''
+            return
+          }
+          var rangeObj
+          var hoursOneDay = 24
+          if (!this.value || this.value.length === 0) {
+            return
+          }
+          if (this.value[0].timeType == 3) {
+            this.widget.config.fields[3].fieldType.unit = 'hour'
+          } else {
+            this.widget.config.fields[3].fieldType.unit = 'day'
+          }
+          if (this.value[0].calculateType == 1) {
+            rangeObj = this.$calculateTime(startValue, endValue)
+          } else {
+            if (!this.userAttendGroup || $.isEmptyObject(this.userAttendGroup)) {
+              rangeObj = this.$calculateTime(startValue, endValue)
+            } else {
+              //如果请假类型是按工作日计算 请假时长= ∑ (day==工作日?（请假结束时间-请假开始时间）∩ (下班时间-上班时间) : 0)
+              if (startValue == endValue) {
+                rangeObj = {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时', rangeObjDay: 0}
+                if (this.value[0].timeType === 1 && this.findTodayUserAttend(startValue.split(' ')[0])) {
+                  rangeObj = {rDay: 1, rHour: 0, rMinute: 0, duration: '1天0小时', rangeObjDay: 1}
+                }
+              } else {
+                var startDate = startValue.split(' ')[0], endDate = endValue.split(' ')[0]
+                //判断两个时间是否为一天
+                if (startDate == endDate) {
+                  //按天计算
+                  if (this.value[0].timeType == 1) {
+                    //按天计算时间为0
+                    rangeObj = {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时', rangeObjDay: 0}
+                  } else if (this.value[0].timeType == 2) {
+                    var userAttend = this.findTodayUserAttend(startDate)
+                    if (!userAttend) {
+                      rangeObj = {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时', rangeObjDay: 0}
+                    } else {
+                      rangeObj = this.$calculateTime(startValue, endValue)
+                    }
+                  } else if (this.value[0].timeType == 3) {
+                    rangeObj = this.computeLeaveTime(this.toDate(startValue), this.toDate(endValue), startDate)
+                    hoursOneDay = rangeObj.hoursOneDay
+                  }
+                } else {
+                  var dayArr = this.getAllDate(startDate, endDate)
+                  rangeObj = {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时', rangeObjDay: 0}
+                  for (var i = 0; i < dayArr.length; i++) {
+                    var userAttend = this.findTodayUserAttend(dayArr[i])
+                    if (!userAttend) {
+                      continue
+                    }
+                    //工作日和自然日区分
+                    var range
+                    if (this.value[0].timeType == 1) {
+                      //按天计算时间为0
+                      range = {rDay: 1, rHour: 0, rMinute: 0, duration: '1天0小时', rangeObjDay: 1}
+                    } else if (this.value[0].timeType == 2) {//特殊处理半天
+                      //当天开始
+                      if (dayArr[i] == startDate && startValue == dayArr[i] + ' 12:00:00') {
+                        range = {rDay: 0.5, rHour: 0, rMinute: 0, duration: '0.5天0小时', rangeObjDay: 0.5}
+                      } else if (dayArr[i] == endDate && endValue == dayArr[i] + ' 12:00:00') {//当天结束
+                        range = {rDay: 0.5, rHour: 0, rMinute: 0, duration: '0.5天0小时', rangeObjDay: 0.5}
+                      } else {
+                        range = {rDay: 1, rHour: 0, rMinute: 0, duration: '1天0小时', rangeObjDay: 1}
+                      }
+                    } else if (this.value[0].timeType == 3) {
+                      //计算当天班次总时间,请假时间
+                      if (dayArr[i] === startDate) {
+                        range = this.computeLeaveTime(this.toDate(startValue), this.toDate(dayArr[i] + ' 23:59:59'), dayArr[i])
+                      } else if (dayArr[i] === endDate) {
+                        range = this.computeLeaveTime(this.toDate(dayArr[i] + ' 00:00:00'), this.toDate(endValue), dayArr[i])
+                      } else {
+                        range = this.computeLeaveTime(this.toDate(dayArr[i] + ' 00:00:00'), this.toDate(dayArr[i] + ' 23:59:59'), dayArr[i])
+                      }
+                      hoursOneDay = range.hoursOneDay
+                    }
+                    rangeObj.rDay += range.rDay
+                    rangeObj.rHour += range.rHour
+                    rangeObj.rMinute += range.rMinute
+                    rangeObj.rangeObjDay += range.rangeObjDay
+                  }
+                  rangeObj.duration = rangeObj.rDay + '天' + rangeObj.rHour + '小时'
+                }
+              }
+            }
+          }
+          var unit = this.widget.config.fields[3].fieldType.unit
+          var result = 0;
+          if (unit === 'day') {
+            if(hoursOneDay){
+              result = rangeObj.rDay + Math.round(rangeObj.rHour / hoursOneDay * 100) / 100 + Math.round(rangeObj.rMinute / 60 / hoursOneDay * 100) / 100;
+            }
+          } else {
+            if(hoursOneDay){
+              result = rangeObj.rDay * hoursOneDay
+            }
+            result += (rangeObj.rHour + rangeObj.rMinute / 60);
+          }
+          this.rinput = parseFloat(result.toFixed(1));
+          this.rvalue = this.rinput;
+          this.rangeObjDay = rangeObj.rangeObjDay;
+          if (this.leaveType.balanceUse){
+            if (rangeObj.rangeObjDay === 0 && rangeObj.rMinute === 0) {
+              this.widget.config.verifyState = 2
+            } else {
+              this.verifyLeaveTimeRange({
+                sDate: startValue,
+                eDate: endValue,
+                duration: result
+              });
+            }
+          }
+        },
+        $calculateTime: function (startDate, endDate) {
+          return util.lengthOfTimeByStr(startDate, endDate)
+        },
+        verifyLeaveTimeRange: function(data) {
+          var _this = this
+          _this.widget.config.verifyState = -1
+          data.index = ++_this.verifyIndex
+          data.leave_type_id = _this.leaveType.id
+          data['deptId'] = this.$store.state.currentUserDeptId
+          doRequest("/data/web/approve/apps/forms/fore/leave/verify", data).then(function (res) {
+            if (res.success) {
+              if (res.data.index === _this.verifyIndex) {
+                _this.widget.config.verifyState = res.data.code
+              }
+            }
+          })
+        },
+        optionFrameToggle: function () {
+          var _this = this
+          if (_this.optionFrame.show) {
+            setScroll(_this, 2)
+            setTimeout(function () {
+              _this.optionFrame.show = !_this.optionFrame.show
+              _this.search.sw = ''
+              _this.search.model = false
+            }, 300)
+          } else {
+            setScroll(_this, 1)
+            _this.optionFrame.show = !_this.optionFrame.show
+          }
+        },
+        startSearch: function () {
+          this.search.model = true
+          this.searchOptions = []
+        },
+        closeOption: function () {
+          this.optionFrame.show = false
+          setScroll(this, 2)
+          this.search.sw = ''
+          this.search.model = false
+        },
+        clearSearch: function () {
+          this.search.sw = ''
+          this.search.model = false
+          var search_dom = $('#selectBoxOption' + widget.id)
+          search_dom.find('.drop_pop_top').show()
+          search_dom.find('.drop_search').hide()
+          search_dom.removeClass('drop_full')
+        },
+        cancelSearch: function () {
+          if ($.trim(this.search.sw) === '') {
+            this.search.model = false
+          }
+        },
+        doSearch: function () {
+          var _this = this
+          if ($.trim(_this.search.sw) === '') {
+            return
+          }
+          _this.searchOptions = []
+          for (var i = 0; i < _this.leaveTypeList.length; i++) {
+            if (_this.leaveTypeList[i].title.indexOf(_this.search.sw) !== -1) {
+              _this.searchOptions.push(_this.leaveTypeList[i])
+            }
+          }
+        },
+        selectType: function () { //选择类型
+          if (this.readonly) {
+            return
+          }
+          this.optionFrameToggle()
+        },
+        selectVal: function (option) {
+          if (this.readonly) {
+            return
+          }
+          for (var i = 0; i < this.leaveTypeList.length; i++) {
+            this.leaveTypeList[i].checked = option.id === this.leaveTypeList[i].id;
+          }
+          var val = [], tipArr = []
+          for (var i = 0; i < this.leaveTypeList.length; i++) {
+            if (this.leaveTypeList[i].checked) {
+              val.push({
+                id: this.leaveTypeList[i].id,
+                val: this.leaveTypeList[i].title,
+                timeType: this.leaveTypeList[i].timeType,
+                calculateType: this.leaveTypeList[i].calculateType
+              })
+              tipArr.push(this.leaveTypeList[i].title)
+            }
+          }
+          
+          this.value = val
+          this.tip = tipArr.join(',')
+          this.selOptionTimeType = parseInt(option.timeType)
+          this.svalue = ''
+          this.evalue = ''
+          this.sCalValue = ''
+          this.eCalValue = ''
+          this.rvalue = ''
+          this.rinput = ''
+          this.stip = ''
+          this.etip = ''
+          this.leaveType = option
+          
+          if (this.value[0].timeType === 3) {
+            this.widget.config.fields[3].fieldType.unit = 'hour'
+          } else {
+            this.widget.config.fields[3].fieldType.unit = 'day'
+          }
+          
+          this.getBalance(option)
+          this.optionFrameToggle()
+          this.$forceUpdate()
+        },
+        selectTime: function (type) {
+          if (this.readonly) {
+            return
+          }
+          var _this = this
+          var date = moment(), formatter = 'yyyy-MM-dd'
+          switch (_this.selOptionTimeType) {
+            case 1:
+              //按天计算
+              formatter = 'yyyy-MM-dd'
+              break
+            case 2:
+              //按半天
+              formatter = 'yyyy-MM-dd pm-am'
+              break
+            case 3:
+              //按小时
+              formatter = 'yyyy-MM-dd HH:mm'
+              break
+          }
+          if (type === 0) {
+            if (this.sCalValue) {
+              date = moment(this.sCalValue)
+            }
+          } else {
+            if (this.eCalValue) {
+              date = moment(this.eCalValue)
+            } else if (this.sCalValue) {
+              date = moment(this.sCalValue)
+            }
+          }
+          var year = parseInt(date.format('YYYY')),
+              month = parseInt(date.format('MM')),
+              day = parseInt(date.format('DD')),
+              hour = parseInt(date.format('HH')),
+              minute = parseInt(date.format('mm'))
+          IosSelectCmp.datePickerByFormat(year - 100, parseInt(year) + 100, {
+            title: '',
+            oneLevelId: year,
+            twoLevelId: month,
+            threeLevelId: day,
+            fourLevelId: hour,
+            fiveLevelId: minute,
+            itemHeight: 35,
+            format: formatter,
+            relation: [1, 1, 1, 0],
+            callback: function (selectOneObj, selectTwoObj, selectThreeObj, selectFourObj, selectFiveObj) {
+              var dateStr, dateStrTip
+              switch (formatter) {
+                case 'yyyy-MM-dd' :
+                  dateStr = selectOneObj.id + '-' + selectTwoObj.id + '-' + selectThreeObj.id
+                  dateStrTip = dateStr
+                  _this.startAmpmVal = 0
+                  _this.endAmpmVal = 0
+                  break
+                case 'yyyy-MM-dd HH:mm' :
+                  dateStr = selectOneObj.id + '-' + selectTwoObj.id + '-' + selectThreeObj.id + ' ' + selectFourObj.id + ':' + selectFiveObj.id
+                  dateStrTip = dateStr
+                  _this.startAmpmVal = 0
+                  _this.endAmpmVal = 0
+                  break
+                case 'yyyy-MM-dd pm-am':
+                  dateStr = selectOneObj.id + '-' + selectTwoObj.id + '-' + selectThreeObj.id
+                  dateStrTip = dateStr + ' ' + selectFourObj.id
+                  if (type === 0) {
+                    _this.startAmpmVal = 1
+                    if (selectFourObj.id === '下午') {
+                      _this.startAmpmVal = 2
+                    }
+                  } else {
+                    _this.endAmpmVal = 1
+                    if (selectFourObj.id === '下午') {
+                      _this.endAmpmVal = 2
+                    }
+                  }
+                  
+                  break
+              }
+              if (type === 0) {
+                var startHour = ''
+                if (selectFourObj.id === '下午') {
+                  startHour = ' 12:00:00'
+                } else if (selectFourObj.id === '上午') {
+                  startHour = ' 00:00:00'
+                }
+                dateStr += startHour
+                _this.svalue = dateStrTip
+                _this.sCalValue = dateStr
+              } else {
+                var startHour = ''
+                if (selectFourObj.id === '下午') {
+                  startHour = ' 23:59:59'
+                } else if (selectFourObj.id === '上午') {
+                  startHour = ' 12:00:00'
+                }
+                dateStr += startHour
+                _this.evalue = dateStrTip
+                _this.eCalValue = dateStr
+              }
+            }
+          })
+        },
+        showBalance: function() {
+          var _this = this
+          return '余额'+_this.balance+(this.leaveType.timeType===3?'小时':'天')
+        },
+        getBalance: function(leave){
+          var _this = this
+          if (!leave.balanceUse) {
+            return
+          }
+          doRequest("/data/web/approve/apps/forms/fore/leave/balance", {id: leave.id, deptId: this.$store.state.currentUserDeptId}).then(function (res) {
+            if (res.success) {
+              _this.balance = res.data.balance;
+            }
+          })
+        },
+        getAllDate: function (begin, end) {
+          var arr = []
+          var ab = begin.split('-')
+          var ae = end.split('-')
+          var db = new Date()
+          db.setUTCFullYear(ab[0], ab[1] - 1, ab[2])
+          var de = new Date()
+          de.setUTCFullYear(ae[0], ae[1] - 1, ae[2])
+          var unixDb = db.getTime() - 24 * 60 * 60 * 1000
+          var unixDe = de.getTime() - 24 * 60 * 60 * 1000
+          for (var k = unixDb; k <= unixDe;) {
+            k = k + 24 * 60 * 60 * 1000
+            arr.push(moment(new Date(parseInt(k))).format('YYYY-MM-DD'))
+          }
+          return arr
+        },
+        findCurDateIndex: function (date) {
+          var date = this.toDate(date)
+          var day = date.getDay()
+          var weeks = new Array('6', '0', '1', '2', '3', '4', '5')
+          var week = weeks[day]
+          return week
+        },
+        findTodayUserAttend: function (dateStr) {
+          if (this.userAttendGroup[dateStr]) {
+            return this.userAttendGroup[dateStr];
+          }
+          if (this.holidayList.indexOf(dateStr) != -1) {
+            return null
+          }
+          return this.userAttendGroup[this.findCurDateIndex(dateStr)]
+        },
+        toDate: function (date) {
+          if (!date) {
+            return ''
+          }
+          date = date.replace(/-/g, '/')
+          return new Date(date)
+        },
+        computeLeaveTime: function (startTime, endTime, dateStr) {
+          var userAttend = this.findTodayUserAttend(dateStr)
+          if (!userAttend) {
+            return {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时', rangeObjDay: 0}
+          }
+          var time = 0, rDay = 0, rHour = 0, rMinute = 0, duration = '', rangeObjDay = 0, end, totalHours = 0
+          if (userAttend.hasNoonBreak == 1) {
+            time += this.computeTimeRange(startTime, endTime, userAttend.startTime, userAttend.breakStartTime, dateStr)
+            time += this.computeTimeRange(startTime, endTime, userAttend.breakEndTime, userAttend.endTime, dateStr)
+            totalHours += this.$calculateTime(dateStr+' '+userAttend.startTime, dateStr+' '+userAttend.breakStartTime).rHour;
+            totalHours += this.$calculateTime(dateStr+' '+userAttend.breakEndTime, dateStr+' '+userAttend.endTime).rHour;
+          } else {
+            time += this.computeTimeRange(startTime, endTime, userAttend.startTime, userAttend.endTime, dateStr)
+            totalHours += this.$calculateTime(dateStr+' '+userAttend.startTime, dateStr+' '+userAttend.endTime).rHour;
+          }
+          end = userAttend.endTime
+          if (userAttend.scheduleNum > 1) {
+            time += this.computeTimeRange(startTime, endTime, userAttend.secondStartTime, userAttend.secondEndTime, dateStr)
+            end = userAttend.secondEndTime
+            totalHours += this.$calculateTime(dateStr+' '+userAttend.secondStartTime, dateStr+' '+userAttend.secondEndTime).rHour;
+          }
+          if (userAttend.scheduleNum > 2) {
+            time += this.computeTimeRange(startTime, endTime, userAttend.thirdStartTime, userAttend.thirdEndTime, dateStr)
+            end = userAttend.thirdEndTime
+            totalHours += this.$calculateTime(dateStr+' '+userAttend.thirdStartTime, dateStr+' '+userAttend.thirdEndTime).rHour;
+          }
+          if (time < 60000) {
+            return {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时', rangeObjDay: 0, hoursOneDay: totalHours}
+          }
+          //如果请假开始时间在上班时间之后或者请假结束时间在班次开始时间之前
+          if (startTime.getTime() > this.toDate(dateStr + ' ' + end).getTime() || endTime.getTime() < this.toDate(dateStr + ' ' + userAttend.startTime).getTime()) {
+            return {rDay: 0, rHour: 0, rMinute: 0, duration: '0天0小时', rangeObjDay: 0, hoursOneDay: totalHours}
+          }
+          if(totalHours){
+            rDay = parseInt(time / (1000 * 60 * 60 * totalHours))
+            rHour = parseInt((time % (1000 * 60 * 60 * totalHours)) / (1000 * 60 * 60))
+            rangeObjDay = rDay + Math.round(rHour / totalHours * 100) / 100 + Math.round(rMinute / 60 / totalHours * 100) / 100
+          }
+          rMinute = parseInt((time % (1000 * 60 * 60)) / (1000 * 60))
+          duration = rDay + '天' + rHour + '小时'
+          return {rDay: rDay, rHour: rHour, rMinute: rMinute, duration: duration, rangeObjDay: rangeObjDay, hoursOneDay: totalHours}
+        },
+        computeTimeRange: function (startTime, endTime, sTime, eTime, dateStr) {
+          sTime = this.toDate(dateStr + ' ' + sTime).getTime()
+          eTime = this.toDate(dateStr + ' ' + eTime).getTime()
+          startTime = startTime.getTime()
+          endTime = endTime.getTime()
+          //
+          if (startTime < sTime) {
+            startTime = sTime
+          }
+          if (endTime > eTime) {
+            endTime = eTime
+          }
+          return endTime > startTime ? endTime - startTime : 0
+        },
+        openPage: function (url) {
+          window.location.href = url
+        },
+        toApplyPage: function (data) {
+          $.get('data/approve/apps/forms/fore/leavecancellation/unfinished/info', {formUserId: data.formUserId}).then(function (res) {
+            if (!res.success || !res.data.formsKitLeave) {
+              approveAlert('当前请假无法销假,请确定当前请假数据的销假状态')
+              return
+            }
+            window.localStorage.setItem('leaveId', data.formUserId)
+            window.location.href = data.applyUrl
+          })
+        },
+        changeLeaveUnFinishedDialogShow: function (status){
+          this.$store.commit('setLeaveUnFinishedDialogShow', status)
+        }
+      },
+      watch: {
+        sCalValue: function (val) {
+          this.$verifyDatetimeRange(val, this.eCalValue)
+          var errMsg = ''
+          if (!this.verified) {
+            if (this.sCalValue && this.eCalValue) {
+              var choiceSDate = moment(this.sCalValue)
+              var choiceEDate = moment(this.eCalValue)
+              var rangeVerify = this.isInclude ? choiceEDate.valueOf() >= choiceSDate.valueOf() : choiceEDate.valueOf() > choiceSDate.valueOf()
+              if (!rangeVerify) {
+                if (!this.isInclude && choiceEDate.valueOf() === choiceSDate.valueOf()) {
+                  errMsg = '开始时间不能等于结束时间'
+                } else {
+                  errMsg = this.widget.config.verify.dateRange.errMsg
+                }
+              }
+            }
+          }
+          this.errMsg = errMsg
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            configId: this.widget.config.id,
+            fvalues: [
+              {fidx: 0, values: this.value},
+              {fidx: 1, values: [{val: this.svalue, timeType: this.selOptionTimeType, ampm: this.startAmpmVal}]},
+              {fidx: 2, values: [{val: this.evalue, timeType: this.selOptionTimeType, ampm: this.endAmpmVal}]},
+              {fidx: 3, values: [{val: this.rvalue, dayVal: this.rangeObjDay}]}
+            ],
+            errMsg: errMsg,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          dataLoadInit(this)
+        },
+        eCalValue: function (val) {
+          var errMsg = ''
+          if (!this.verified) {
+            if (this.sCalValue && this.eCalValue) {
+              var choiceSDate = moment(this.sCalValue)
+              var choiceEDate = moment(this.eCalValue)
+              var rangeVerify = this.isInclude ? choiceEDate.valueOf() >= choiceSDate.valueOf() : choiceEDate.valueOf() > choiceSDate.valueOf()
+              if (!rangeVerify) {
+                if (!this.isInclude && choiceEDate.valueOf() === choiceSDate.valueOf()) {
+                  errMsg = '开始时间不能等于结束时间'
+                } else {
+                  errMsg = this.widget.config.verify.dateRange.errMsg
+                }
+              }
+            }
+          }
+          this.$verifyDatetimeRange(this.sCalValue, val)
+          this.errMsg = errMsg
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            configId: this.widget.config.id,
+            fvalues: [
+              {fidx: 0, values: this.value},
+              {fidx: 1, values: [{val: this.svalue, timeType: this.selOptionTimeType, ampm: this.startAmpmVal}]},
+              {fidx: 2, values: [{val: this.evalue, timeType: this.selOptionTimeType, ampm: this.endAmpmVal}]},
+              {fidx: 3, values: [{val: this.rvalue, dayVal: this.rangeObjDay}]}
+            ],
+            errMsg: errMsg,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          dataLoadInit(this)
+        },
+        rinput: function () {
+          this.rvalue = this.rinput
+        }
+      },
+      computed: {
+        required: function () {
+          return this.widget.config.verify.required
+        },
+        readonly: function () {
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          return this.$store.getters.getReadonlyStatus
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          if (this.required) {
+            var timeRangeVerify = true
+            var choiceSDate = moment(this.sCalValue)
+            var choiceEDate = moment(this.eCalValue)
+            if (this.calculate) {
+              timeRangeVerify = $.trim(this.rvalue) !== ''
+            }
+            var rangeVerify = this.isInclude ? choiceEDate.valueOf() >= choiceSDate.valueOf() : choiceEDate.valueOf() > choiceSDate.valueOf()
+            return $.trim(this.sCalValue) !== '' && $.trim(this.eCalValue) !== '' && (this.leaveType.id || $.trim(this.tip) !== '') && timeRangeVerify && rangeVerify
+          }
+          return true
+        },
+        visible: function () {
+          if (!this.widget.config.hasOwnProperty('visible')) {
+            this.widget.config.visible = true
+          }
+          return this.widget.config.visible
+        },
+        hasAuthority: function () {
+          var showStatus = false;
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+    
+          if (!this.visible) {
+            return showStatus
+          }
+          return true
+        },
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        stitle: function () {
+          return this.widget.config.fields[1].label
+        },
+        sformat: function () {
+          return this.widget.config.fields[1].fieldType.format
+        },
+        etitle: function () {
+          return this.widget.config.fields[2].label
+        },
+        eformat: function () {
+          return this.widget.config.fields[2].fieldType.format
+        },
+        rtitle: function () {
+          var extra = ''
+          if (!this.value || !this.value.length) {
+            return this.widget.config.fields[3].label
+          }
+          if (this.value[0].timeType == 3) {
+            extra = '(小时)'
+          } else {
+            extra = '(天)'
+          }
+          return this.widget.config.fields[3].label + extra
+        },
+        calculate: function () {
+          return this.widget.config.fields[3].fieldType.calculate
+        },
+        isInclude: function () {
+          return this.widget.config.verify.dateRange.isInclude
+        },
+        stip: {
+          get: function () {
+            if (this.svalue) {
+              return this.svalue
+            }
+            if (!(this.widget.config.fields[1].tip instanceof Object)) {
+              return this.widget.config.fields[1].tip
+            }
+            return this.widget.config.fields[1].tip.text
+          },
+          set: function (val) {
+          }
+        },
+        etip: {
+          get: function () {
+            if (this.evalue) {
+              return this.evalue
+            }
+            if (!(this.widget.config.fields[2].tip instanceof Object)) {
+              return this.widget.config.fields[2].tip.trim()
+            }
+            return this.widget.config.fields[2].tip.text.trim()
+          },
+          set: function (val) {
+          }
+        },
+        isShow: function () {
+          var showStatus = false
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          var typeValue = this.value,
+              svalue = [{val: this.svalue, timeType: this.selOptionTimeType, ampm: this.startAmpmVal}],
+              evalue = [{val: this.evalue, timeType: this.selOptionTimeType, ampm: this.endAmpmVal}],
+              rvalue = [{val: this.rvalue, dayVal: this.rangeObjDay}]
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            configId: this.widget.config.id,
+            fvalues: [
+              {fidx: 0, values: typeValue},
+              {fidx: 1, values: svalue},
+              {fidx: 2, values: evalue},
+              {fidx: 3, values: rvalue}
+            ],
+            errMsg: this.errMsg,
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        leaveUnFinishedDialogShow: function (){
+          return this.$store.state.leaveUnFinishedDialogShow
+        }
+      },
+      filters: {
+        format: function (value, formater) {
+          return moment(value || new Date()).format(formater)
+        }
+      },
+      mounted: function () {
+        //下拉框弹窗交互
+        var search_dom = $('#selectBoxOption' + widget.id)
+        search_dom.find('.dp_search_input').on('click',function(){
+          search_dom.find('.drop_pop_top').hide()
+          search_dom.find('.drop_search').show()
+          search_dom.addClass('drop_full')
+          search_dom.find('.active_search_input').focus()
+        })
+      },
+      created: function () {
+        var _this = this
+        this.value = this.widget.config.fields[0].values || []
+        this.selOptionTimeType = this.value[0] ? this.value[0].timeType : 1
+        var svalues = _this.widget.config.fields[1].values
+        _this.svalue = svalues ? (svalues[0] && svalues[0].val) || '' : ''
+        var evalues = _this.widget.config.fields[2].values
+        _this.evalue = evalues ? (evalues[0] && evalues[0].val) || '' : ''
+        //获取当前单位的请假类型
+        $.getJSON('data/approve/apps/leave/type/list', {deptId: launchDeptId}).then(function (res) {
+          if (res.success) {
+            _this.leaveTypeList = res.data.leaveTypeList
+            for (var i = 0; i < _this.leaveTypeList.length; i++) {
+              _this.leaveTypeList[i]['checked'] = false
+              _this.leaveTypeList[i]['title'] = _this.leaveTypeList[i].tname
+            }
+          }
+        }).then(function () {
+          for (var i = 0; i < _this.leaveTypeList.length; i++) {
+            for (var j = 0; j < _this.value.length; j++) {
+              if (_this.value[j].val === _this.leaveTypeList[i].title) {
+                _this.leaveTypeList[i].checked = true
+                _this.leaveType = _this.leaveTypeList[i]
+                break
+              }
+            }
+          }
+        }).then(function () {
+          var tipArr = []
+          for (var i = 0; i < _this.leaveTypeList.length; i++) {
+            if (_this.leaveTypeList[i].checked) {
+              tipArr.push(_this.leaveTypeList[i].title)
+            }
+          }
+          if (tipArr.length > 0) {
+            _this.tip = tipArr.join(',')
+          } else {
+            _this.tip = _this.tipTextData
+          }
+        })
+        //获取考勤组和节假日
+        $.get('data/find/attend', {uid: launchUserId, deptId: launchDeptId}).then(function (res) {
+          if (res.success) {
+            if (res.data.userAttendGroup) {
+              res.data.userAttendGroup.forEach(function (value) {
+                if (value.index === -1) {
+                  _this.userAttendGroup[moment(value.punchDate).format('YYYY-MM-DD')] = value
+                } else {
+                  _this.userAttendGroup[value.index] = value
+                }
+              })
+            }
+            if (res.data.holiday) {
+              res.data.holiday.forEach(function(value){
+                if (value.type === 2) {
+                  _this.holidayList.push(moment(value.dates).format('YYYY-MM-DD'))
+                }
+              })
+            }
+          }
+        }).then(function () {
+          if ($.isEmptyObject(_this.userAttendGroup) || !_this.userAttendGroup) {
+            _this.rangeReadonly = false
+          }
+          _this.sCalValue = _this.svalue
+          var sArr = _this.svalue.split(' ')
+          if (sArr[1]) {
+            switch (sArr[1]) {
+              case '上午':
+                _this.startAmpmVal = 1
+                _this.sCalValue = sArr[0] + ' 00:00:00'
+                break
+              case '下午':
+                _this.startAmpmVal = 2
+                _this.sCalValue = sArr[0] + ' 12:00:00'
+                break
+            }
+          }
+          _this.eCalValue = _this.evalue
+          var eArr = _this.evalue.split(' ')
+          if (eArr[1]) {
+            switch (eArr[1]) {
+              case '上午':
+                _this.endAmpmVal = 1
+                _this.eCalValue = eArr[0] + ' 12:00:00'
+                break
+              case '下午':
+                _this.endAmpmVal = 2
+                _this.eCalValue = eArr[0] + ' 23:59:59'
+                break
+            }
+          }
+          //查看当前用户是否有未销假记录
+          setTimeout(function () {
+            $.get('data/approve/apps/forms/fore/leavecancellation/unfinished/list', {
+               deptId: _this.$store.state.currentUserDeptId,
+               aprvAppId: _this.$store.state.approveData.aprvAppId
+             })
+             .then(function (res) {
+               if (res.success) {
+                 _this.leaveUnFinishedList = res.data.leaveUnFinishedList
+                 _this.needLeaveCancellation = res.data.leaveUnFinishedList.length > 0
+               }
+             })
+          }, 1000)
+          _this.$store.commit('watchValues', {
+            id: _this.widget.id,
+            configId: _this.widget.config.id,
+            fvalues: [
+              {fidx: 0, values: _this.value},
+              {fidx: 1, values: [{val: _this.svalue, timeType: _this.selOptionTimeType, ampm: _this.startAmpmVal}]},
+              {fidx: 2, values: [{val: _this.evalue, timeType: _this.selOptionTimeType, ampm: _this.endAmpmVal}]},
+              {fidx: 3, values: [{val: _this.rvalue, dayVal: _this.rangeObjDay}]}
+            ],
+            verified: _this.verified,
+            isShow: _this.isShow,
+            hasAuthority: _this.hasAuthority
+          })
+        })
+      }
+    }
+  }
+})

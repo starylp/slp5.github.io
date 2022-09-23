@@ -1,0 +1,717 @@
+var defaultOpt = {
+  v: '1.4.12',//高德地图api版本号
+  jsAPIKey: 'c8b4db33b7714692ad93e07c7da3a2ba',//JavaScript API key
+  jsWebAPIKey: 'c314ccb1bc3d0800ff195bb8b52957a8',//此处的key，为Web服务API的key，与JavaScript API的key不是同一个
+  lng: 116.331398,//百度默认坐标
+  lat: 39.897445,//百度默认坐标
+  element: null,//地图显示所在dom元
+  locateStart: function () {
+  },//开始定位
+  locateSuccess: function (data) {
+  },//定位成功
+  locateError: function (data) {
+  }//定位失败
+}
+define(['jquery', 'util', 'popup', 'mapLoader', 'dropload', 'https://webapi.amap.com/maps?v=' + defaultOpt.v + '&key=' + defaultOpt.jsAPIKey + '&plugin=AMap.Geolocation,AMap.ToolBar,AMap.Geocoder,AMap.PlaceSearch,AMap.Autocomplete,AMap.Driving'], function ($, util, popup, mapLoader) {
+  'use strict'
+  var map
+  var isDrag = false/* 判断是否地图拖动事件 */
+  
+  /**
+   * 初始化地图对象并根据给定的lng,lat值进行定位
+   */
+  function mapLocateInit(lng, lat, vm) {
+    defaultOpt.locateStart()
+    //显示地图
+    map = new AMap.Map('container', {
+      resizeEnable: true,
+      zoom: 15
+    })
+    //查询远地点范围内可选择地点信息
+    doSearch(vm)
+    //输入提示
+    var placeSearch = new AMap.PlaceSearch({map: map})
+    map.on('complete', function () {
+      $('.amap-logo').remove()
+      $('.amap-copyright').remove()
+    })
+    vm.searchNearby = false
+    regeocoder(vm, lng, lat)
+  }
+  
+  /**
+   * 初始化自定义地图
+   */
+  function customizationMapLocateInit(_this) {
+    _this.$nextTick(function () {
+      //显示地图
+      map = new AMap.Map('containerCustomization' + _this.widget.id, {
+        resizeEnable: true,
+        touchZoomCenter: 1,//设置手势缩放以地图中心点
+        doubleClickZoom: false,//禁止双击缩放，手动实现
+        zoom: 14
+      })
+      initMarker()
+      AMap.plugin(['AMap.Geolocation', 'AMap.Autocomplete', 'AMap.PlaceSearch', 'AMap.Circle'], function () {
+        //获取定位
+        var geolocation = new AMap.Geolocation({
+          timeout: 5000,          //超过10秒后停止定位，默认：无穷大
+          showButton: false,        //显示定位按钮，默认：true
+          showCircle: false,        //定位成功后用圆圈表示定位精度范围，默认：true
+          zoomToAccuracy: true      //定位成功后调整地图视野范围使定位位置及精度范围视野内可见，默认：false
+        })
+        map.addControl(geolocation)
+        if (!$.isEmptyObject(_this.mapValue)) { // 直接加载已有定位
+          regeocoder(_this, _this.mapValue.lng, _this.mapValue.lat)
+          _this.currentLoc = _this.mapValue.address
+          _this.mapValueLoading = false
+        } else {
+          geolocation.getCurrentPosition(function (status, result) {
+            if (status === 'complete') {
+              onComplete(_this, result)
+            } else {
+              onError(_this, result)
+            }
+          })
+        }
+        //设置检索显示map实例
+        var placeSearch = new AMap.PlaceSearch({map: map})
+      })
+      var clickTimeId;//防止点击、双击事件冲突
+      //单击获取点击的经纬度
+      map.on('click', function (e) {
+        //清除上次延时未执行的方法
+        clearTimeout(clickTimeId)
+        clickTimeId = setTimeout(function () {
+          isDrag = false
+          _this.searchNearby = true
+          _this.isSearchSelected = false
+          _this.droploaderSearch = {pageIndex: 1, selectIndex: -1, locationList: []}
+          regeocoder(_this, e.lnglat.getLng(), e.lnglat.getLat())
+        }, 200)
+      })
+      //双击根据中心点放大地图
+      map.on('dblclick', function (e) {
+        //清除上次延时未执行的方法
+        clearTimeout(clickTimeId)
+        _this.searchNearby = true
+        isDrag = false
+        map.zoomIn()
+        map.setCenter(map.getCenter())
+      })
+      map.on('dragend', function () {// 监听地图拖拽，拖拽结束触发moveend监听中的逻辑
+        isDrag = true
+      })
+      map.on('moveend', function () {
+        if (!isDrag) {
+          return
+        }
+        _this.searchNearby = true
+        _this.isSearchSelected = false
+        _this.droploaderSearch = {pageIndex: 1, selectIndex: -1, locationList: []}
+        var position = map.getCenter()
+        regeocoder(_this, position.lng, position.lat)
+      })
+      map.on('complete', function () {
+        $('.amap-logo').remove()
+        $('.amap-copyright').remove()
+      })
+    })
+  }
+  
+  //在父组件根据选择结果创建显示map
+  function doInitMapForResultShow(_this) {
+    _this.$nextTick(function () {
+      var lng = _this.mapValue.lng, lat = _this.mapValue.lat
+      var resultMap = new AMap.Map('container' + _this.widget.id, {
+        resizeEnable: true,
+        zoom: 14,
+        dragEnable: false, //禁止拖动
+        zoomEnable: false //禁止缩放
+      })
+      resultMap.setZoomAndCenter(16, [lng, lat])
+      //在新中心点添加定位标记
+      var marker = new AMap.Marker({
+        map: resultMap,
+        position: [lng, lat]
+      })
+      resultMap.on('complete', function () {
+        $('.amap-logo').remove()
+        $('.amap-copyright').remove()
+      })
+    })
+  }
+  
+  //定位成功执行
+  function onComplete(_this, data) {
+    _this.mapValue = {
+      lat: data.position.lat,
+      lng: data.position.lng,
+      address: data.formattedAddress
+    }
+    _this.initLng = data.position.lng
+    _this.initLat = data.position.lat
+    _this.searchNearby = true
+    regeocoder(_this, data.position.lng, data.position.lat)
+  }
+  
+  //定位出错执行
+  function onError(_this, data) {
+    var msg = data.message
+    if (msg.indexOf('permission denied') !== -1) {
+      msg = '请开启定位权限后重试'
+    }
+    popup.alert(msg, '我知道了', function () {})
+  }
+  
+  //构建地图中央的marker控件，始终保持在地图中央
+  function initMarker() {
+    var iconStyle = {
+      url: 'https://webapi.amap.com/ui/1.1/ui/misc/PositionPicker/assets/position-picker.png',
+      size: [32, 32],
+      ancher: [16, 32]
+    };
+    var offx = -iconStyle.ancher[0], offy = -iconStyle.ancher[1], width = iconStyle.size[0] + "px", height = iconStyle.size[1] + "px";
+    var controlDom = document.createElement("div");
+    controlDom.className = "amap-ui-misc-positionpicker";
+    controlDom.style.width = '0';
+    controlDom.style.height = '0';
+    controlDom.style.overflow = 'visible';
+    controlDom.style.position = 'absolute';
+    controlDom.style.top = '50%';
+    controlDom.style.left = '50%';
+    controlDom.style.marginTop = offy + "px";
+    controlDom.style.marginLeft = offx + "px";
+    var image = document.createElement("img");
+    image.src = iconStyle.url;
+    image.className = "amap-ui-misc-positionpicker-pin";
+    image.style.width = width;
+    image.style.height = height;
+    image.style.top = offy + "px";
+    image.style.left = offx + "px";
+    controlDom.appendChild(image);
+    var customControl = {
+      dom: controlDom,
+      addTo: function() {
+        map.getContainer().appendChild(this.dom);
+      },
+      removeFrom: function() {
+        var mapContainer = map.getContainer();
+        this.dom.parentNode === mapContainer && mapContainer.removeChild(this.dom);
+      },
+      remove: function() {
+        var mapContainer = map.getContainer();
+        this.dom.parentNode === mapContainer && mapContainer.removeChild(this.dom);
+      }
+    };
+    map.addControl(customControl);
+  }
+  
+  /**
+   * 地理编码与逆地理编码服务，用于地址描述与坐标间的相互转换
+   */
+  function regeocoder(_this, lng, lat) {
+    var zoom = !_this.defaultValueConfig ? 16 : 14
+    var geocoder = new AMap.Geocoder({
+      radius: 1000,
+      extensions: 'all'
+    })
+    geocoder.getAddress([lng, lat], function (status, result) {
+      if (status === 'complete' && result.info === 'OK') {
+        _this.mapValue = {address: result.regeocode.formattedAddress, lng: lng, lat: lat}
+        _this.sw = result.regeocode.formattedAddress
+        map.clearMap()
+        if (!_this.defaultValueConfig) {
+          //在新中心点添加定位标记
+          map.setZoomAndCenter(zoom, [lng, lat])
+          var marker = new AMap.Marker({
+            position: [lng, lat]
+          })
+          map.add(marker)
+          return
+        }
+        if (!isDrag) {
+          map.setCenter([lng, lat])
+        }
+        _this.locationCity = result.regeocode.addressComponent.citycode
+        if (_this.searchNearby) {
+          searchForDroploaderBelow(_this)
+        }
+        for (var i = 0; i < _this.limitRangeList.length; i++) {
+          var range = _this.limitRangeList[i];
+          new AMap.Circle({
+            map: map,
+            center: [range.lng, range.lat],//中心点
+            radius: range.range || _this.defaultRange, //圆半径，单位:米
+            strokeColor: "#FF33FF",
+            strokeOpacity: 1,//轮廓线透明度
+            strokeWeight: 1,//轮廓线宽度
+            fillOpacity: 0.2,//圆形填充透明度
+            fillColor: '#1791fc',
+            bubble: true //是否将覆盖物的鼠标或touch等事件冒泡到地图上
+          })
+        }
+      } else {
+        defaultOpt.locateError({
+          resultMsg: '获取定位地址描述失败'
+        })
+      }
+    })
+  }
+  
+  function doSearch(vm) {
+    var pageIndex = 1, pageSize = 10, totalPage = 0
+    $('.adjustment_list').dropload({
+      scrollArea: $('.adjustment_list'),
+      threshold: 15,
+      domDown: {
+        domClass: 'isbottom',
+        domNoData: '已经到底啦~(&gt;_&lt;)~~'
+      },
+      loadDownFn: function (me) {
+        AMap.service(['AMap.PlaceSearch'], function () {
+          var placeSearch = new AMap.PlaceSearch({
+            pageIndex: pageIndex,  // 获取第一页
+            pageSize: pageSize   // 每页10条
+          })
+          placeSearch.searchNearBy('', [vm.initLng, vm.initLat], vm.widget.config.distanceRange, function (status, result) {
+            if (result.info === 'OK') {
+              totalPage = (result.poiList.count + pageSize - 1) / pageSize
+              //根据坐标获取省市县
+              var geocoder = new AMap.Geocoder({
+                radius: 1000,
+                extensions: 'all'
+              })
+              //循环拼接地址
+              result.poiList.pois.forEach(function (data) {
+                var addressArr = []
+                geocoder.getAddress([data.location.lng, data.location.lat], function (status, result) {
+                  addressArr.push({name: data.name, address: result.regeocode.formattedAddress, lng: data.location.lng, lat: data.location.lat})
+                  vm.droploader.locationList.push.apply(vm.droploader.locationList, addressArr) // 周边地标建筑列表
+                })
+              })
+              pageIndex++
+              if (totalPage === 1) {
+                $('.isbottom').hide()
+              }
+              vm.$nextTick(function () {
+                if (totalPage !== 0 && pageIndex > totalPage) {
+                  me.lock() // 锁定
+                  me.noData() // 无数据
+                }
+                me.delayResetload()
+              })
+            } else {
+              $('.isbottom').hide()
+              // 锁定
+              me.lock()
+              // 无数据
+              me.noData()
+            }
+          })
+        })
+      }
+    })
+  }
+  
+  function searchForDroploaderBelow(_this) {
+    if (_this.defaultValueConfig && _this.defaultValueConfig === 1) {
+      _this.droploaderBelow.pageIndex = 1
+      _this.droploaderBelow.locationList = []
+      _this.droploaderBelow.selectIndex = -1
+      //避免多次触发生成多个“下拉加载更多”
+      $(".isbottom").remove()
+      doSearchForDroploaderBelow(_this)
+    }
+  }
+
+  //查询当前坐标周边500m范围内所有地点
+  function doSearchForDroploaderBelow(vm) {
+    vm.$nextTick(function () {
+      var pageSize = 10, totalPage = 0
+      var dropDom = $('#droploaderBelow' + vm.widget.id)
+      dropDom.dropload({
+        scrollArea: dropDom,
+        threshold: 15,
+        domDown: {
+          domClass: 'isbottom',
+          domNoData: '已经到底啦~(&gt;_&lt;)~~'
+        },
+        loadDownFn: function (me) {
+          AMap.service(['AMap.PlaceSearch'], function () {
+            var placeSearch = new AMap.PlaceSearch({
+              pageIndex: vm.droploaderBelow.pageIndex,  // 获取第一页
+              pageSize: pageSize   // 每页10条
+            })
+            placeSearch.searchNearBy('', [vm.mapValue.lng, vm.mapValue.lat], 500, function (status, result) {
+              if (result.info === 'OK') {
+                totalPage = (result.poiList.count + pageSize - 1) / pageSize
+                //根据坐标获取省市县
+                var geocoder = new AMap.Geocoder({
+                  radius: 1000,
+                  extensions: 'all'
+                })
+                //首次请求时添加位置选中效果
+                if (vm.droploaderBelow.pageIndex === 1) {
+                  var clickMapValue = vm.mapValue
+                  vm.droploaderBelow.locationList.unshift({
+                    name: '[位置]', address: clickMapValue.address, lng: clickMapValue.lng, lat: clickMapValue.lat
+                  })
+                  vm.droploaderBelow.selectIndex = 0
+                }
+                //循环拼接地址
+                result.poiList.pois.forEach(function (data) {
+                  var addressArr = []
+                  geocoder.getAddress([data.location.lng, data.location.lat], function (status, result) {
+                    addressArr.push({name: data.name, address: result.regeocode.formattedAddress, lng: data.location.lng, lat: data.location.lat})
+                    vm.droploaderBelow.locationList.push.apply(vm.droploaderBelow.locationList, addressArr) // 周边地标建筑列表
+                  })
+                })
+                vm.droploaderBelow.pageIndex++
+                if (totalPage === 1) {
+                  $('.isbottom').hide()
+                }
+                vm.$nextTick(function () {
+                  if (totalPage !== 0 && vm.droploaderBelow.pageIndex > totalPage) {
+                    me.lock() // 锁定
+                    me.noData() // 无数据
+                  }
+                  me.delayResetload()
+                })
+              } else {
+                $('.isbottom').hide()
+                // 锁定
+                me.lock()
+                // 无数据
+                me.noData()
+              }
+            })
+          })
+        }
+      })
+    })
+  }
+  
+  /**
+   * 关键字检索相关位置信息
+   * @param vm
+   */
+  function doSearchBySw(vm, searchCount) {
+    vm.$nextTick(function () {
+      var pageSize = 10, totalPage = 0, sw = vm.sw
+      var dropDom = $('#droploaderSearch' + vm.widget.id)
+      dropDom.dropload({
+        scrollArea: dropDom,
+        threshold: 15,
+        domDown: {
+          domClass: 'isbottom',
+          domNoData: '已经到底啦~(&gt;_&lt;)~~'
+        },
+        loadDownFn: function (me) {
+          AMap.service(['AMap.PlaceSearch'], function () {
+            var placeSearch = new AMap.PlaceSearch({
+              pageIndex: vm.droploaderSearch.pageIndex,  // 获取第一页
+              pageSize: pageSize,  // 每页10条
+              city: vm.locationCity, // 兴趣点城市（该选项必须指定，否则只会搜索出城市列表而不是地址信息）
+              citylimit: false // 是否强制限制在该城市搜索
+            })
+            //关键字检索
+            placeSearch.search(sw, function (status, result) {
+              if (vm.searchCount === searchCount && result.info === 'OK') {
+                totalPage = (result.poiList.count + vm.droploader.pageSize - 1) / vm.droploader.pageSize
+                //根据坐标获取省市县
+                var geocoder = new AMap.Geocoder({
+                  radius: 1000,
+                  extensions: 'all'
+                })
+                //循环拼接地址
+                result.poiList.pois.forEach(function (data) {
+                  var addressArr = []
+                  geocoder.getAddress([data.location.lng, data.location.lat], function (status, result) {
+                    //结果中的关键词高亮显示
+                    var name = data.name.replace(new RegExp(sw, 'g'), '<font color="#6495ed">' + sw + '</font>')
+                    addressArr.push({name: name, address: result.regeocode.formattedAddress, lng: data.location.lng, lat: data.location.lat})
+                    vm.droploaderSearch.locationList.push.apply(vm.droploaderSearch.locationList, addressArr) // 周边地标建筑列表
+                  })
+                })
+                vm.droploaderSearch.pageIndex++
+                if (totalPage === 1) {
+                  $('.isbottom').hide()
+                }
+                vm.$nextTick(function () {
+                  if (totalPage !== 0 && vm.droploaderSearch.pageIndex > totalPage) {
+                    me.lock() // 锁定
+                    me.noData() // 无数据
+                  }
+                  me.delayResetload()
+                })
+              } else {
+                $('.isbottom').hide()
+                // 锁定
+                me.lock()
+                // 无数据
+                me.noData()
+              }
+            })
+          })
+        }
+      })
+    })
+  }
+  
+  return {
+    template: [
+      '<div>',
+        '<div class="address_adjustment" v-if="mapShow && defaultValueConfig === 0">',
+        '  <div class="adjustment_nodata" style="display:none;">暂无搜索地址</div>',
+        '  <div class="adjustment_top">',
+        '    <span class="adjustment_cal" @click.stop="confirmLocation(0)">取消</span>',
+        '    <span class="adjustment_sure" @click.stop="confirmLocation(1)">确定</span>',
+        '  </div>',
+        '  <div class="adjustment_cont" v-show="mapShow">',
+        '    <div class="adjustment_map" id="container"></div>',
+        '    <span class="adjustment_reload" @click.stop="geoLocate()"></span>',
+        '  </div>',
+        '  <ul class="adjustment_list" v-show="mapShow">',
+        '    <li class="adjustment_per" v-for="(data,index) in droploader.locationList" @click.stop="selectLocation(data,index)">',
+        '      <h6 class="adjustment_per_title">{{data.name}}</h6>',
+        '      <p class="adjustment_per_adr">{{data.address}}</p>',
+        '      <span :class="{adjustment_check_icon:index === selectIndex}"></span>',
+        '    </li>',
+        '    <!--避免“加载更多数据”div渲染在列表之前-->',
+        '    <div></div>',
+        '  </ul>',
+        '</div>',
+        '<div v-if="mapShow && defaultValueConfig === 1" class="loc-detail-set address_adjustment">',
+          '<div class="loc-search">',
+            '<div class="search-wrapper">',
+                '<span class="back" @click="goBack"></span>',
+                '<div class="search-inp icon-search field">',
+                  '<input text="input" placeholder="输入地址搜索或直接在下面选择定位" v-model="sw" @click.stop="searchDialogShow(1)">',
+                  '<span class="search-icon"></span>',
+                '</div>',
+            '</div>',
+          '</div>',
+          '<div class="loc-content" :class="{\'stretched\':isSearching}">',
+            '<div class="locate" @click.stop="geoLocate()"><img src="\\static\\images\\tpl\\locate.png"/></div>',
+            '<div class="location_map" :id="\'containerCustomization\'+widget.id" style="height: 100%"></div>',
+          '</div>',
+          '<div class="loc-choice" v-if="mapShow">',
+            '<ul class="loc-list adjustment_list" :id="\'droploaderSearch\'+widget.id" v-show="isSearchSelected || isSearching" style="height: 100%">',
+              '<li class="address adjustment_per" v-for="(data,index) in droploaderSearch.locationList" @click.stop="selectLocationSearch(data,index)">',
+                '<div class="address-info">',
+                    '<h6 class="address-title" v-html="data.name">{{data.name}}</h6>',
+                    '<span class="address-detail">{{data.address}}</span>',
+                '</div>',
+                '<span :class="{adjustment_check_icon:index === droploaderSearch.selectIndex}"></span>',
+              '</li>',
+              '<!--避免“加载更多数据”div渲染在列表之前-->',
+              '<div></div>',
+            '</ul>',
+            '<!--底部当前坐标周边500m内地点下拉列表-->',
+            '<ul class="loc-list adjustment_list" :id="\'droploaderBelow\'+widget.id" v-show="!isSearchSelected && !isSearching" style="height: 100%"">',
+              '<li class="address adjustment_per" v-for="(data,index) in droploaderBelow.locationList" @click.stop="selectLocationBelow(data,index)">',
+                '<div class="address-info">',
+                  '<h6 class="address-title" v-html="data.name">{{data.name}}</h6>',
+                  '<span class="address-detail">{{data.address}}</span>',
+                '</div>',
+              '<span :class="{adjustment_check_icon:index === droploaderBelow.selectIndex}"></span>',
+              '</li>',
+            '  <!--避免“加载更多数据”div渲染在列表之前-->',
+            '  <div></div>',
+            '</ul>',
+          '</div>',
+          '<div class="loc-confirm" @click.stop="confirmLocationSelect(1)">确定</div>',
+        '</div>',
+      '</div>'
+    ].join(''),
+    data: function () {
+      return {
+        mapValue: {},
+        initLng: 0,//初始经度
+        initLat: 0,//初始纬度
+        droploader: {
+          locationList: []//分页加载初始点范围内地点数据
+        },
+        sw: '',//搜索关键字
+        searchCount: 0,//关键字监听触发次数
+        isSearching: false,
+        isSearchSelected: false,//是否有选择搜索结果
+        droploaderSearch: {
+          pageIndex: 1,
+          selectIndex: -1,
+          locationList: []//分页加载初始点范围内地点数据
+        },
+        droploaderBelow: {
+          pageIndex: 1,
+          selectIndex: -1,
+          locationList: []//分页加载初始点范围内地点数据
+        },
+        selectLocationValue: '',//选中地点数据
+        selectIndex: -1,//选中地点下标
+        locationCity: "010",//关键词搜索时的首选城市，取定位城市，默认北京（支持名字、城市编码）
+        mapShow: false,//是否展示地图
+        searchNearby: false,//是否搜索附近地点
+        limitRangeList: []
+      }
+    },
+    watch: {
+      sw: function () {
+        var _this = this
+        if (!_this.isSearching) {
+          return
+        }
+        _this.searchCount++//计数器+1
+        _this.droploaderSearch.pageIndex = 1
+        _this.droploaderSearch.locationList = []
+        _this.droploaderSearch.selectIndex = -1
+        //避免多次触发生成多个“下拉加载更多”
+        $(".isbottom").remove()
+        doSearchBySw(_this, _this.searchCount)
+      }
+    },
+    props: ['widget', 'defaultValueConfig'],
+    computed: {
+      locationList: function () {
+        if(this.isFocus && this.sw){
+          return this.droploaderSearch.locationList
+        }
+        return this.droploaderBelow.locationList
+      },
+    },
+    methods: {
+      goBack: function () {
+        this.isSearching ? this.searchDialogShow(0) : this.confirmLocationSelect(0)
+      },
+      geoLocate: function () {
+        var _this = this
+        _this.searchNearby = true
+        regeocoder(_this, _this.initLng, _this.initLat)
+      },
+      selectLocation: function (data, index) {//选择地点
+        var _this = this
+        _this.selectIndex = index
+        _this.searchNearby = false
+        regeocoder(_this, data.lng, data.lat)
+        _this.selectLocationValue = {address: data.address + data.name, lng: data.lng, lat: data.lat}
+      },
+      selectLocationBelow: function (data, index) {
+        var _this = this
+        isDrag = false
+        _this.isSearching = false
+        _this.droploaderBelow.selectIndex = index
+        _this.searchNearby = false
+        _this.isSearchSelected = false
+        regeocoder(_this, data.lng, data.lat)
+      },
+      selectLocationSearch: function (data, index) {
+        var _this = this
+        isDrag = false
+        _this.isSearching = false
+        _this.sw = ''
+        _this.droploaderSearch.selectIndex = index
+        _this.searchNearby = false
+        _this.isSearchSelected = true
+        regeocoder(_this, data.lng, data.lat)
+      },
+      confirmLocation: function (i) {
+        var _this = this
+        if (i === 0) {//取消清空数据
+          _this.selectIndex = -1
+          _this.mapShow = false
+          _this.selectLocationValue = ''
+          return
+        }
+        if (!_this.selectLocationValue) {
+          popup.alert('请选择微调地点')
+          return
+        }
+        _this.mapShow = false
+        _this.$emit('getSelectLocation', _this.selectLocationValue)
+      },
+      select: function () {
+        var _this = this
+        if (_this.mapShow) {
+          return;
+        }
+        _this.mapShow = true
+        _this.droploader.locationList = []
+        _this.selectIndex = -1
+        //避免多次触发生成多个“下拉加载更多”
+        $(".isbottom").remove()
+        new mapLoader({//获取当前位置坐标
+          element: 'container',
+          locateStart: function () {
+          },
+          locateSuccess: function (data) {
+            _this.initLng = data.result.position.lng
+            _this.initLat = data.result.position.lat
+            //初始化地图
+            mapLocateInit(_this.initLng, _this.initLat, _this)
+          },
+          locateError: function (data) {
+            popup.alert(data.resultMsg, '我知道了', function () {
+            
+            })
+          }
+        })
+      },
+      customizationMapInit: function () {
+        var _this = this
+        //避免重复初始化
+        if (_this.mapShow) {
+          return
+        }
+        _this.mapShow = true
+        //初始化数据
+        _this.sw = ''
+        _this.initLat = 0
+        _this.initLng = 0
+        _this.mapValue = {}
+        _this.droploaderBelow = {pageIndex: 1, selectIndex: -1, locationList: []}
+        _this.droploaderSearch = {pageIndex: 1, selectIndex: -1, locationList: []}
+        //初始化自定义map容器
+        customizationMapLocateInit(_this)
+      },
+      confirmLocationSelect: function (index) {
+        var _this = this
+        _this.mapShow = false
+        _this.isSearching = false
+        _this.searchNearby = false
+        _this.isSearchSelected = false
+        //提交
+        if (index === 1) {
+          if ($.isEmptyObject(_this.mapValue)) {
+            popup.alert('请选择位置')
+            return
+          }
+          //在父组件根据选择结果创建显示map
+          _this.$emit('getSelectLocation', _this.mapValue)
+        }
+      },
+      //在父组件根据选择结果创建显示map, 由父组件调用
+      initMapForResultShow: function () {
+        var _this = this
+        doInitMapForResultShow(_this)
+      },
+      searchDialogShow: function (index) {
+        var _this = this
+        //不可重复打开
+        if (index === 1 && _this.isSearching) {
+          return
+        }
+        _this.isSearching = index === 1
+        _this.sw = index === 1 ? '' : _this.mapValue.address
+        $(".isbottom").remove()
+        if (index === 0 && _this.droploaderSearch.locationList.length === 0) {
+          _this.isSearchSelected = false
+          searchForDroploaderBelow(_this)
+        }
+      }
+    },
+    created: function () {
+      var value = this.widget.config.fields[0].values || []
+      this.mapValue = value.length > 0 ? value[0] : {}
+    }
+  }
+})

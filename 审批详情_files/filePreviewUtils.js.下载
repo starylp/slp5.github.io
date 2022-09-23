@@ -1,0 +1,282 @@
+define(['jquery', 'cookies', 'filePreview'], function ($, Cookies) {
+
+  function doRequest(url, data, async) {
+    return $.ajax({
+      url: url,
+      type: 'post',
+      data: data,
+      async: !async,
+      dataType: 'json'
+    })
+  }
+
+  function getRegExpObj(reg) {
+    return new RegExp(reg)
+  }
+  
+  function getType(file) {
+    if (!file.suffix) {
+      return 'inline'
+    }
+    var imgTypeReg = '(jpg|jpeg|gif|xbm|pcd|tif|tiff|svg|pnz|ief|dib|jpe|png|bmp|ico)$'
+    var officeTypeReg = '(pdf|doc|docx|xls|xlt|xlsm|xlsx|ppt|pptx)$'
+    var textTypeReg = '(txt)$'
+    var audioTypeReg = '(amr)$'
+    var videoTypeReg = '(avi|flv|mpg|mpeg|mpe|m1v|m2v|mpv2|mp2v|dat|ts|tp|tpr|pva' +
+        '|pss|mp4|m4v|m4p|m4b|3gp|3gpp|3g2|3gp2|ogg|mov|qt|amr|rm|ram|rmvb|rpm)$'
+    var imgReg = getRegExpObj(imgTypeReg)
+    var officeReg = getRegExpObj(officeTypeReg)
+    var textReg = getRegExpObj(textTypeReg)
+    var audioReg = getRegExpObj(audioTypeReg)
+    var videoReg = getRegExpObj(videoTypeReg)
+    var fileType = file.suffix ? file.suffix.toLowerCase() : file.suffix
+    if (audioReg.test(fileType)) {
+      return 'audio'
+    }
+    if (imgReg.test(fileType)) {
+      return 'image'
+    }
+    if (officeReg.test(fileType)) {
+      return 'office'
+    }
+    if (textReg.test(fileType)) {
+      return 'text'
+    }
+    if (videoReg.test(fileType)) {
+      return 'video'
+    }
+    return 'inline'
+  }
+
+  /**
+   * 学习通端，调取云盘方式打开文件
+   */
+  function downloadFile(file, AppUtils) {
+    return function() {
+      if (AppUtils) {
+        AppUtils.clientOpenRes({
+          filename: file.name,
+          objectId: file.objectId,
+          suffix: file.suffix,
+          size: fileSizeToByte(file.size)
+        })
+      }
+    }
+  }
+  
+  function openOfficeFile(file, file_arr, AppUtils, editFileOpen, puid) {
+    return function () {
+      var url = ''
+      if (getType(file) === 'office' && getType(file) !== 'text' && file.resid) {
+        var param = {
+          owner: file.puid ? file.puid : '',
+          resids: file.resid,
+          puid: puid
+        }
+        doRequest('data/common/wps/info', param, true).done(function (result) {
+          //同步请求
+          if (result.success) {
+            var data = result.data
+            if (data) {
+              var wpsInfo = data.wpsInfo
+              if (wpsInfo && wpsInfo.length > 0) {
+                url = editFileOpen ? wpsInfo[0].originEditUrl : wpsInfo[0].originPlayUrl
+              }
+            }
+          }
+        })
+        if (url !== '') {
+          return url
+        }
+        return 'https://officeonline.superlib.com/3rd/proxy.html?objectid=' + file.objectId + '&suffix=' + file.suffix
+      }
+    }
+  }
+  
+  /**
+   *  转换成文件大小的单位，如：1KB 转换成 1024，1MB 转换成 1048576
+   */
+  function fileSizeToByte(size) {
+    if (size === '') {
+      return 0
+    }
+    // 当前文件大小标准，B、KB、MB、GB、..
+    var sizeScale = size.replace(/[^a-zA-Z]/g,'').toUpperCase()
+    var unit = ['B','KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
+    // 当前文件数字大小
+    var sizeNum = size.replace(/[^\d.\d]/g,'')
+    var index = unit.indexOf(sizeScale)
+    // 当不包含任何单位时，直接返回当前数字
+    if (unit.indexOf(sizeScale) === -1) {
+      return Math.ceil(sizeNum)
+    }
+    return Math.ceil(sizeNum * Math.pow(1024, index))
+  }
+  
+  
+  function doFilePreview(file, files, index, editFileOpen, AppUtils, file_arr, nextIndex, fResolve) {
+    var suffix = file.suffix ? file.suffix.toLowerCase() : file.suffix
+    doRequest('data/export/get/download/url', {objectid: file.objectId, resid: file.resid, type: getType(file)}).done(function (result) {//获取"中心存储"下载地址
+      var downloadUrl//文件下载地址
+      if (result.success && result.data) {//若调用成功则使用"中心存储"下载地址
+        downloadUrl = result.data
+      } else {//若失败则使用项目封装下载接口，保证下载业务正常使用
+        downloadUrl = location.origin + uniqueDomainPath + '/data/export/download?fileName=' + encodeURIComponent(file.name) + '&objectid=' + file.objectId + '&suffix=' + file.suffix
+      }
+      if (getType(file) === 'image') {//图片
+        var src
+        if (file.objectId) {
+          src = panUrl + '/thumbnail/origin/' + file.objectId
+        } else {
+          src = file.fileUrl
+        }
+        if (AppUtils) {
+          file_arr.push({
+            name: file.name,
+            size: file.size,
+            url: src,
+            previewUrl: src,
+            downloadFn: downloadFile(file, AppUtils),
+            downloadUrl: downloadUrl
+          })
+        } else {
+          file_arr.push({
+            name: file.name,
+            size: file.size,
+            url: src,
+            previewUrl: src,
+            downloadUrl: downloadUrl
+          })
+        }
+      } else if (getType(file) === 'office' || getType(file) === 'text' || suffix === 'mp3') {//mp3使用downloadUrl
+        var puid
+        if (Cookies.get('oa_uid')) {
+          puid = Cookies.get('oa_uid')
+        } else {
+          puid = Cookies.get('_uid')
+        }
+        if (AppUtils) {
+          file_arr.push({
+            name: file.name,
+            size: file.size,
+            url: panUrl + '/thumbnail/origin/' + file.objectId,
+            downloadFn: downloadFile(file, AppUtils),
+            previewUrl: '',
+            fileNavFn: openOfficeFile(file, file_arr, AppUtils, editFileOpen, puid),
+            downloadUrl: downloadUrl
+          })
+        } else {
+          file_arr.push({
+            name: file.name,
+            size: file.size,
+            url: panUrl + '/thumbnail/origin/' + file.objectId,
+            previewUrl: '',
+            fileNavFn: openOfficeFile(file, file_arr, AppUtils, editFileOpen, puid),
+            downloadUrl: downloadUrl
+          })
+        }
+      } else if (getType(file) === 'video') {//视频（嵌套前台项目播放页面）
+        var videoSrc = location.origin + uniqueDomainPath + '/common/' + (!AppUtils ? 'third/' : '') + 'video/player?objectId=' + file.objectId
+        if (AppUtils) {
+          file_arr.push({
+            name: file.name,
+            size: file.size,
+            url: videoSrc,
+            previewUrl: videoSrc,
+            downloadFn: downloadFile(file, AppUtils),
+            downloadUrl: downloadUrl
+          })
+        } else {
+          file_arr.push({
+            name: file.name,
+            size: file.size,
+            url: videoSrc,
+            previewUrl: videoSrc,
+            downloadUrl: downloadUrl
+          })
+        }
+      } else {//其他
+        if (AppUtils) {
+          file_arr.push({
+            name: file.name,
+            size: file.size,
+            downloadFn: downloadFile(file, AppUtils),
+            downloadUrl: downloadUrl
+          })
+        } else {
+          file_arr.push({
+            name: file.name,
+            size: file.size,
+            downloadUrl: downloadUrl
+          })
+        }
+      }
+      if (nextIndex === files.length - 1) {
+        fResolve()
+      }
+      var nextFile = files[++nextIndex]
+      if (nextFile) {
+        doFilePreview(nextFile, files, index, editFileOpen, AppUtils, file_arr, nextIndex, fResolve)
+      }
+    })
+  }
+  
+  /**
+   * 前台改造图片、附件预览方式（editFileOpen是否可在线编辑）
+   */
+  function filePreview(files, index, editFileOpen, AppUtils) {
+    var file_arr = []
+    if (!files || files.length <= 0) {
+      return
+    }
+
+    new Promise(function (resolve, reject) {
+      var nextIndex = 0, nextFile = files[nextIndex]
+      if (nextFile) {
+        doFilePreview(nextFile, files, index, editFileOpen, AppUtils, file_arr, 0, resolve)
+      }
+    }).then(function () {
+      if (file_arr.length <= 0) {
+        return
+      }
+      new FP.FilePreview({
+        files: file_arr,
+        currentItem: index,
+        autoClose: !1,
+        height4Head: 120,
+        width4Side: 90
+      })
+    })
+  }
+  
+  function getClass(suffix) {
+    var videoTypeReg = '(avi|flv|mpg|mpeg|mpe|m1v|m2v|mpv2|mp2v|dat|ts|tp|tpr|pva|pss|mp4|m4v|m4p|m4b|3gp|3gpp|3g2|3gp2|ogg|mov|qt|amr|rm|ram|rmvb|rpm)$'
+    var videoReg = new RegExp(videoTypeReg)
+    suffix = suffix ? suffix.toLowerCase() : suffix
+    if (suffix === 'doc' || suffix === 'docx') {
+      return 'doc'
+    } else if (suffix === 'xls' || suffix === 'xlsx') {
+      return 'xls'
+    } else if (suffix === 'ppt' || suffix === 'pptx') {
+      return 'ppt'
+    } else if (suffix === 'pdf') {
+      return 'pdf'
+    } else if (suffix === 'txt') {
+      return 'txt'
+    } else if (suffix === 'rar' || suffix === 'zip') {
+      return 'rar'
+    } else if (suffix === 'mp3') {
+      return 'audio'
+    } else if (videoReg.test(suffix)) {
+      return 'video'
+    } else {
+      return 'other'
+    }
+  }
+  
+  return {
+    getType: getType,
+    filePreview: filePreview,//新改造图片、附件预览方式
+    getClass: getClass// 获取文件后缀名
+  }
+})

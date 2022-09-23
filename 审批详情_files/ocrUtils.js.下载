@@ -1,0 +1,431 @@
+define(['jquery', 'moment'], function ($, moment) {
+  
+  /**
+   * 构造当前ocr组件所在group组件ID与别名关系
+   * @param _this
+   */
+  function getIdAndAliasMap(_this) {
+    var idAndAliasMap = {}//组件ID与别名关系
+    function doGetIdAndAliasMap(rootWidgets, pid) {
+      for (var i = 0; i < rootWidgets.length; i++) {
+        var data = rootWidgets[i]
+        if (data.pid === pid || (data.config.compt === 'detailcombox' && data.pid === 0)) {
+          if (data.config.compt === 'dateinput') {
+            idAndAliasMap[data.config.id] = {
+              'alias': _this.widget.config.inDetailGroupIndex + '_' + data.config.alias,//填充值标识需要区分子表单inDetailGroupIndex
+              'format': data.config.fields[0].fieldType.format
+            }
+          } else if (data.config.compt === 'detailcombox' && data.id === pid) {
+            doGetIdAndAliasMap(data.children[0], data.id)
+          } else if (['editinput', 'edittextarea', 'imagebox', 'numberinput', 'radiobutton'].includes(data.config.compt)) {
+            idAndAliasMap[data.config.id] = {'alias': _this.widget.config.inDetailGroupIndex + '_' + data.config.alias}
+          }
+        }
+      }
+      return idAndAliasMap
+    }
+    
+    return doGetIdAndAliasMap(_this.$store.getters.rootWidgets, _this.widget.pid)
+  }
+  
+  /**
+   * ocr身份证识别结果解析及填充值
+   * @param _this
+   * @param type 0.正面；1.反面；
+   * @param ocrType 0.身份证；1.户口本；2.行程码；
+   * @param result
+   * @param imageData
+   */
+  function initComptValuesByOcr(_this, type, ocrType, result, imageData) {
+    var idAndAliasMap = getIdAndAliasMap(_this)//组件ID与别名关系
+    var fillFields = _this.widget.config.ocrConfig.fillFields
+    var datas = []//构造回填表单组件数据
+    switch (ocrType) {
+      case 0:
+        datas = handleIdCardValueFill(type, idAndAliasMap, fillFields, result, imageData)
+        break
+      case 1:
+        datas = handleAccountBookValueFill(type, idAndAliasMap, fillFields, result, imageData)
+        break
+      case 2:
+        datas = handleTravelCardValueFillByCx(idAndAliasMap, fillFields, result, imageData)
+        break
+      case 3:
+        datas = handleHealthCodeValueFillByCx(idAndAliasMap, fillFields, result, imageData)
+        break
+      case 4:
+        datas = handleFaceDetectValueFillByCx(idAndAliasMap, fillFields, result, imageData)
+        break
+      default:
+        datas = []
+    }
+    if (datas instanceof Array && datas.length > 0) {
+      _this.$store.commit('setOcrFieldValue', datas)//放入store中
+    }
+  }
+  
+  /**
+   * 构造身份证识别填充
+   */
+  function handleIdCardValueFill(type, idAndAliasMap, fillFields, result, imageData) {
+    //识别内容：配置枚举与返回数据key对应关系
+    var fillIdAndParam = {
+      2: 'name',
+      3: 'sex',
+      4: 'nation',
+      5: 'address',
+      6: 'cardno',
+      7: 'birthday',
+      8: 'yunPanDataRO',
+      11: 'signUnit',
+      12: 'validTimeStart',
+      13: 'validTimeEnd'
+    }
+    var datas = []//构造回填表单组件数据
+    fillFields.forEach(function (v) {
+      var data = {}, val = []
+      if (idAndAliasMap[v.id]) {
+        if (type === 0 && v.fillId <= 8) {//身份证人像面识别结果解析
+          switch (v.fillId) {
+            case 1://身份证人像面图片
+              val.push(imageData)
+              break
+            case 2://姓名
+            case 3://性别
+            case 4://民族
+            case 5://地址
+            case 6://身份证号
+            case 7://出生年月
+              var paramName = fillIdAndParam[v.fillId]
+              var value = result[paramName].words
+              if (idAndAliasMap[v.id].format) {//根据日期字段格式进行转换
+                //身份证ocr返回birthday格式为“20210101
+                if (!isNaN(value)) {
+                  val.push(moment(value).format(changeFormat(idAndAliasMap[v.id].format)))
+                }
+              } else {
+                val.push(value)
+              }
+              break
+            case 8://头像数据
+              var paramName = fillIdAndParam[v.fillId]
+              var value = result[paramName]
+              val.push(value)
+          }
+          data['alias'] = idAndAliasMap[v.id].alias
+          data['val'] = val
+          data['compt'] = v.compt
+          datas.push(data)
+        } else if (type === 1 && v.fillId >= 10) {//身份证国徽面识别结果解析
+          switch (v.fillId) {
+            case 10://身份证国徽面图片
+              val.push(imageData)
+              break
+            case 11://发证机关
+            case 12://证件签发日期
+            case 13://证件失效日期
+              var paramName = fillIdAndParam[v.fillId]
+              var value = result[paramName].words
+              if (idAndAliasMap[v.id].format) {//根据日期字段格式进行转换
+                //身份证ocr返回birthday格式为“20210101”
+                if (!isNaN(value)) {
+                  val.push(moment(value).format(changeFormat(idAndAliasMap[v.id].format)))
+                }
+              } else {
+                val.push(value)
+              }
+              break
+          }
+          data['alias'] = idAndAliasMap[v.id].alias
+          data['val'] = val
+          data['compt'] = v.compt
+          datas.push(data)
+        }
+      }
+    })
+    return datas
+  }
+  
+  /**
+   * 构造行程码识别填充
+   */
+  function handleTravelCardValueFill(idAndAliasMap, fillFields, result, imageData) {
+    //识别内容：配置枚举与返回数据key对应关系
+    var fillIdAndParam = {2: 'mobile', 3: 'byway', 4: 'updateTime', 5: 'risk'}
+    var datas = []//构造回填表单组件数据
+    fillFields.forEach(function (v) {
+      var data = {}, val = []
+      if (idAndAliasMap[v.id]) {
+        var paramName = fillIdAndParam[v.fillId]
+        switch (v.fillId) {
+          case 1://行程码图片
+            val.push(imageData)
+            break
+          case 2://手机
+          case 3://途经地
+          case 4://更新时间
+            var value = result[paramName][0].word
+            if (idAndAliasMap[v.id].format) {//根据日期字段格式进行转换
+              //接口返回格式“2022.01.18 17:09:48”
+              var time = (value.toString()).replace(/\./g, '-')//替换value中所有"."为"-"
+              val.push(moment(time).format(changeFormat(idAndAliasMap[v.id].format)))
+            } else {
+              val.push(value)
+            }
+            break
+          case 5://是否途经中高风险地区
+            var risk = result[paramName]
+            val.push({'isOther': false, 'val': risk ? '是' : '否'})
+            break
+        }
+        data['alias'] = idAndAliasMap[v.id].alias
+        data['val'] = val
+        data['compt'] = v.compt
+        datas.push(data)
+      }
+    })
+    return datas
+  }
+  
+  
+  /**
+   * 构造行程码识别填充（超星团队提供ocr识别接口解析方法）
+   */
+  function handleTravelCardValueFillByCx(idAndAliasMap, fillFields, result, imageData) {
+    //识别内容：配置枚举与返回数据key对应关系
+    //{"code":200,"data":[{"city":["上海市"],"phone":"139****4571","risk_area":true,"time":"2021.01.22 11:40:49"}]}
+    result = result.data[0]
+    var fillIdAndParam = {2: 'phone', 3: 'city', 4: 'time', 5: 'risk_area'}//超星接口
+    var datas = []//构造回填表单组件数据
+    fillFields.forEach(function (v) {
+      var data = {}, val = []
+      if (idAndAliasMap[v.id]) {
+        var paramName = fillIdAndParam[v.fillId]
+        switch (v.fillId) {
+          case 1://行程码图片
+            val.push(imageData)
+            break
+          case 2://手机
+          case 3://途经地
+          case 4://更新时间
+            var value = result[paramName]
+            if (idAndAliasMap[v.id].format) {//根据日期字段格式进行转换
+              //接口返回格式“2022.01.18 17:09:48”
+              val.push(moment(value).format(changeFormat(idAndAliasMap[v.id].format)))
+            } else {
+              val.push(value)
+            }
+            break
+          case 5://是否途经中高风险地区
+            var risk = result[paramName]
+            val.push({'isOther': false, 'val': risk ? '是' : '否'})
+            break
+        }
+        data['alias'] = idAndAliasMap[v.id].alias
+        data['val'] = val
+        data['compt'] = v.compt
+        datas.push(data)
+      }
+    })
+    return datas
+  }
+  
+  
+  /**
+   * 构造健康码识别填充（超星团队提供ocr识别接口解析方法）
+   */
+  function handleHealthCodeValueFillByCx(idAndAliasMap, fillFields, result, imageData) {
+    //识别内容：配置枚举与返回数据key对应关系
+    result = result.data[0]
+    var fillIdAndParam = {2: 'color', 3: 'queryDate', 4: 'nucleicAcid', 5: 'nucleicAcidDate', 6: 'vaccine'}//超星接口
+    var datas = []//构造回填表单组件数据
+    fillFields.forEach(function (v) {
+      var data = {}, val = []
+      if (idAndAliasMap[v.id]) {
+        var paramName = fillIdAndParam[v.fillId]
+        switch (v.fillId) {
+          case 1://健康码原图
+            val.push(imageData)
+            break
+          case 2://健康码颜色：green为绿码，red为红码，orange为橙码，yellow为⻩码
+            var color = result[paramName]
+            var value = '绿码'
+            if (color === 'red') {
+              value = '红码'
+            } else if (color === 'orange' || color === 'yellow') {
+              value = '黄码'
+            }
+            val.push({'isOther': false, 'val': value})
+            break
+          case 3://健康码日期
+          case 4://核酸结果
+          case 5://核酸日期
+          case 6://疫苗信息
+            var value = result[paramName]
+            if (idAndAliasMap[v.id].format) {//根据日期字段格式进行转换
+              var dateData = moment(value).format(changeFormat(idAndAliasMap[v.id].format))
+              if (dateData === 'Invalid date') { // 返回的时间不一定合法，如 2022-66-14
+                val.push(null)
+              } else {
+                val.push(dateData)
+              }
+            } else {
+              val.push(value)
+            }
+            break
+        }
+        data['alias'] = idAndAliasMap[v.id].alias
+        data['val'] = val
+        data['compt'] = v.compt
+        datas.push(data)
+      }
+    })
+    return datas
+  }
+  
+  /**
+   * 构造户口本识别填充
+   */
+  function handleAccountBookValueFill(type, idAndAliasMap, fillFields, result, imageData) {
+    //识别内容：配置枚举与返回数据key对应关系
+    var fillIdAndParam = {
+      2: 'householdType',
+      3: 'householderName',
+      4: 'householdNum',
+      5: 'address',
+      6: 'issueDate',
+      8: 'name',
+      9: 'relationship',
+      10: 'sex',
+      11: 'birthAddress',
+      12: 'nation',
+      13: 'birthday',
+      14: 'cardNo',
+      15: 'otherAddress',
+      16: 'formerName',
+      17: 'hometown',
+      18: 'belief',
+      19: 'height',
+      20: 'bloodType',
+      21: 'education',
+      22: 'maritalStatus',
+      23: 'veteranStatus',
+      24: 'workAddress',
+      25: 'career',
+      26: 'wWHere',
+      27: 'wWToCity',
+      28: 'date'
+    }
+    var datas = []//构造回填表单组件数据
+    fillFields.forEach(function (v) {
+      var data = {}, val = []
+      if (idAndAliasMap[v.id]) {
+        if (type === 1 && v.fillId <= 6) {//户主页识别结果解析
+          if (v.fillId === 1) {
+            val.push(imageData)
+          } else {
+            var paramName = fillIdAndParam[v.fillId]
+            if (result[paramName]) {
+              var value = result[paramName].words
+              val.push(value)
+            }
+          }
+        } else if (type === 0 && (v.fillId === 4 || v.fillId >= 7)) {//成员页
+          if (v.fillId === 7) {//成员页原件
+            val.push(imageData)
+          } else {
+            var paramName = fillIdAndParam[v.fillId]
+            if (result[paramName]) {
+              var value = result[paramName].words
+              if (idAndAliasMap[v.id].format) {//根据日期字段格式进行转换
+                if (!isNaN(value)) {
+                  val.push(moment(value).format(changeFormat(idAndAliasMap[v.id].format)))
+                }
+              } else {
+                val.push(value)
+              }
+            }
+          }
+        }
+        data['alias'] = idAndAliasMap[v.id].alias
+        data['val'] = val
+        data['compt'] = v.compt
+        datas.push(data)
+      }
+    })
+    return datas
+  }
+  
+  /**
+   * 构造人脸检测识别填充（超星团队提供ocr识别接口解析方法）
+   */
+  function handleFaceDetectValueFillByCx(idAndAliasMap, fillFields, result, imageData) {
+    //识别内容：配置枚举与返回数据key对应关系
+    result = result.data[0]
+    var fillIdAndParam = {2: 'success', 3: 'detail'}
+    var datas = []//构造回填表单组件数据
+    fillFields.forEach(function (v) {
+      var data = {}, val = []
+      if (idAndAliasMap[v.id]) {
+        var paramName = fillIdAndParam[v.fillId]
+        switch (v.fillId) {
+          case 1://原图
+            val.push(imageData)
+            break
+          case 2://是否人脸：success绿，false为红
+            var color = result[paramName]
+            var value = '否'
+            if (color === true) {
+              value = '是'
+            }
+            if (v.compt === 'editinput') {
+              val.push( value)
+            } else {
+              val.push({'isOther': false, 'val': value})
+            }
+            break
+          case 3://数量
+            var datail = result[paramName]
+            if (!datail) {
+              val.push('')
+            } else {
+              val.push(datail.faceNum)
+            }
+            break
+        }
+        data['alias'] = idAndAliasMap[v.id].alias
+        data['val'] = val
+        data['compt'] = v.compt
+        datas.push(data)
+      }
+    })
+    return datas
+  }
+  
+  //转换format格式
+  function changeFormat(format) {
+    var timeFormat = 'YYYY-MM-DD HH:mm'
+    switch (format) {
+      case 'yyyy':
+        timeFormat = 'YYYY'
+        break
+      case 'yyyy-MM' :
+        timeFormat = 'YYYY-MM'
+        break
+      case 'yyyy-MM-dd' :
+        timeFormat = 'YYYY-MM-DD'
+        break
+      case 'yyyy-MM-dd HH:mm' :
+        timeFormat = 'YYYY-MM-DD HH:mm'
+        break
+      case 'HH:mm':
+        timeFormat = 'HH:mm'
+        break
+    }
+    return timeFormat
+  }
+  
+  return {
+    initComptValuesByOcr: initComptValuesByOcr//ocr识别结果解析及填充值
+  }
+})

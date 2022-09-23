@@ -1,0 +1,768 @@
+define(['jquery', 'util', 'popup', 'cookies', 'publicUtils', 'VueUtils'], function ($, util, popup, Cookies, publicUtils, VueUtils) {
+  'use strict'
+  return function (widget) {
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: $.trim(_this.value),
+        compose: 'row',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+    
+    function promptMsg(_this, error) {
+      _this.noticeErrMsgObj.show = true
+      _this.noticeErrMsgObj.msg = error
+      setTimeout(function () {
+        _this.noticeErrMsgObj.show = false
+      }, 3000)
+    }
+  
+    return {
+      id: widget.id,
+      template: [
+        '<div>',
+        '<div class="cell_cont" v-show="isShow && hasAuthority">',
+          '<div class="fui_thumb_list">',
+            '<div class="thumb-list" v-for="(file, index) in value">',
+              '<div class="thumb-item">',
+                '<template v-if="getType(file) == \'image\'"><img :src="panUrl + \'/thumbnail/60,80,100/\'+file.objectId" alt="" /></template>',
+                '<template v-else><img :src="\'static/style/apps/forms/web/fore/images/icons/\'+file.suffix+\'.png\'" onerror="src=\'static/style/apps/forms/web/fore/images/icons/common.png\'" alt="" /></template>',
+              '</div>',
+            '</div>',
+          '</div>',
+          '<span class="cell_nodata" v-show="value.length<=0"></span>',
+        '</div>',
+        '<div style="display: none">{{relateFieldValueStatus}}</div>',
+        '<event-trigger :widget="widget" :compose="\'row\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event="triggerValueEvent" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+        '<field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+        '<detail-combox-field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="detailComboxLinkFieldValueStatus"></detail-combox-field-link-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          fileLocal: 0,
+          isUpload: false, //是否正在上传 false是未上传 true是上传中
+          uploadArr: [], //上传文件的集合
+          xhr: '',
+          errMsg: '',
+          limitTextInfo: '',
+          noticeErrMsgObj: {
+            show: false,
+            msg: ''
+          },
+          errorInfo: {
+            verifyMsg: '',
+            show: false
+          },
+          lastLinkValue: [],
+          fieldLinkCheck: true // 数据联动、缓存等文件格式校验标识，防止在缓存、数据联动的时候重复验证
+        }
+      },
+      components: {
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+        'detailComboxFieldLinkTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/detailcombox/detailComboxFieldLinkTrigger.vue'),
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue')
+      },
+      props: {
+        onlySetValue: {
+          //在明细内弹出iframe并加载当前组件时 只显示组件值设置区域标识值 横排明细时使用
+          type: Boolean,
+          default: function () {
+            return false
+          }
+        }
+      },
+      watch: {
+        value: function () {
+          if (this.onlySetValue) {
+            return
+          }
+        
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            errMsg: this.errorInfo.verifyMsg,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          // 检验文件分辨率、大小,...
+          publicUtils.verifyUploadDetail(this, this.value)
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if (!this.fieldLinkCheck || !publicUtils.getFileVerify(this, this.value.length)) {
+            return false
+          }
+          var find = false
+          for (var i = 0; i < this.value.length; i++) {
+            if (this.value[i].modifyDate === '') {
+              find = true
+              break
+            }
+          }
+          if (find) {
+            this.errMsg = '有文件正在上传，请稍后'
+            return false
+          }
+          if (this.required) {
+            return this.value.length !== 0
+          }
+          return true
+        },
+        min: function () {
+          var min = this.widget.config.fields[0].verify.minValue
+          if (!min) {
+            //老数据兼容
+            min = {'range': '', 'errMsg': '上传个数最小限制'}
+            min.range = this.widget.config.fields[0].verify.limitCount === 0 ? '' : 0
+          }
+          this.widget.config.fields[0].verify.minValue = min
+          return min.range
+        },
+        max: function () {
+          var max = this.widget.config.fields[0].verify.maxValue
+          if (!max) {
+            //老数据兼容
+            max = {'range': '', 'errMsg': '上传个数最大限制'}
+            max.range = this.widget.config.fields[0].verify.limitCount === 0 ? '' : this.widget.config.fields[0].verify.limitCount
+          }
+          this.widget.config.fields[0].verify.maxValue = max
+          return max.range
+        },
+        errorTip: function () {
+          if (!this.$store.state.verifieds[this.widget.id]) {
+            return ''
+          }
+          return this.$store.state.verifieds[this.widget.id].errorTip
+        },
+        fromManage: function () {
+          return this.$store.getters.getFromManageStatus
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = (!this.editable && !this.fromManage && !this.hasRoleId)
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') &&
+              ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === this.widget.config.inDetailGroupIndex) ||
+               !obj.hasOwnProperty('inDetailIndex')) && (!this.isPreview || !this.isInit)) {
+            this.value = obj.fields[0].values || []
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        formType: function () {
+          return this.$store.getters.getFormType
+        },
+        addFileOpen: function () {
+          if (this.formType === 'approveForm') {
+            var extEditAuthority = this.$store.getters.getApproveExtEditAuthority(this.widget.config.id, this.widget.config.compt)
+            if (extEditAuthority) {
+              return extEditAuthority.add
+            }
+            return false
+          }
+  
+          if (this.widget.config.hasOwnProperty('addFile')) {
+            return this.widget.config.addFile.open
+          }
+          return true
+        },
+        editFileOpen: function () {
+          if (this.formType === 'approveForm') {
+            var extEditAuthority = this.$store.getters.getApproveExtEditAuthority(this.widget.config.id, this.widget.config.compt)
+            if (extEditAuthority) {
+              return extEditAuthority.edit
+            }
+            return false
+          }
+  
+          if (this.widget.config.hasOwnProperty('editFile')) {
+            return this.widget.config.editFile.open
+          }
+          return true
+        },
+        deleteFileOpen: function () {
+          if (this.formType === 'approveForm') {
+            var extEditAuthority = this.$store.getters.getApproveExtEditAuthority(this.widget.config.id, this.widget.config.compt)
+            if (extEditAuthority) {
+              return extEditAuthority.delete
+            }
+            return false
+          }
+  
+          if (this.widget.config.hasOwnProperty('deleteFile')) {
+            return this.widget.config.deleteFile.open
+          }
+          return true
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+          
+          if (!this.visible && !this.fromManage && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类似web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail && this.$store.state.currOptionSel.inDetailGroupIndex !==
+                     this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          if (!this.onlySetValue) {
+            this.$store.commit('isShowWatchValues', {
+              id: this.widget.id,
+              fvalues: [
+                {fidx: 0, values: this.value}
+              ],
+              verified: this.verified,
+              errMsg: this.errorInfo.verifyMsg,
+              isShow: showStatus,
+              hasAuthority: this.hasAuthority
+            })
+          }
+          return showStatus
+        },
+        fileFormat: function () {
+          var _this = this
+          var fileFormat = ''
+          var limitType = _this.widget.config.fields[0].verify.limitType
+          var typeArr = []
+          if (limitType) {
+            limitType.split(';').forEach(function (value) {
+              typeArr.push('.' + value)
+            })
+            fileFormat = typeArr.join(',')
+          }
+          return fileFormat
+        },
+        temporary: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('temporary')){
+            return false
+          }
+          return this.widget.config.fields[0].temporary
+        }
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEvent: function (val) {
+          this.loadStatus = false
+        },
+        triggerGetValueEvent:function (callback) {
+          callback(this.value)
+        },
+        $reloadValueFun: function (vueObj) {
+          this.value = vueObj.value
+          return this.verified
+        },
+        setValueSetModeShow: function (event) {
+          if (this.onlySetValue) {
+            this.$refs.myOptions.typeShow = !this.$refs.myOptions.typeShow
+            return
+          }
+    
+          let _this = this
+          let timer = setInterval(function () {
+            clearInterval(timer)
+            _this.$refs.myOptions.typeShow = !_this.$refs.myOptions.typeShow
+            var data = {
+              vueObj: _this,
+              event: event,
+              defaultSetAreaShow: _this.$refs.myOptions.typeShow
+            }
+            //明细组件内子组件横排时用到 触发父级明细组件中iframe(加载当前组件默认值区域dom)弹窗显示或关闭
+            _this.$emit('gosetvalue', data)
+          }, 100)
+        },
+        getType: function (file) {
+          return publicUtils.getType(file)
+        },
+        filePreview: function (index) {
+          if (this.onlySetValue) {
+            return
+          }
+          publicUtils.filePreview(this.value, index, this.editFileOpen)
+        },
+        uploadFile: function (e) {
+          var _this = this
+          if (_this.readonly) {
+            return
+          }
+          _this.noticeErrMsgObj.show = false
+          if (_this.max > 1 && e.target.files.length + _this.value.length > _this.max) {
+            var msg = '上传图片个数范围限制' + (_this.min !=='' ? _this.min + '-' : '') + _this.max + '个,请重新上传。'
+            popup.alert(msg)
+            e.target.value = ''
+            return
+          }
+          var limitSize = _this.widget.config.fields[0].verify.limitSize
+          var limitType = _this.widget.config.fields[0].verify.limitType
+          
+          if (e.target.files.length + _this.value.length > 50) {
+            promptMsg(_this, '最多允许上传50个文件')
+            e.target.value = ''
+            return
+          }
+          for (var i = 0; i < e.target.files.length; i++) {
+            //校验类型
+            if (limitType) {
+              var type = e.target.files[i].name.substr(e.target.files[i].name.lastIndexOf('.') + 1)
+              var typeReg = '^(' + limitType.replace(/\;/g, '|') + ')$'
+              var reg = new RegExp(typeReg, 'i')
+              if (!reg.test(type)) {
+                promptMsg(_this, '文件格式不符合要求')
+                e.target.value = ''
+                return
+              }
+            }
+            if (2048 < e.target.files[i].size / 1024 / 1024) {
+              promptMsg(_this, '文件大小超出最大限制2G')
+              e.target.value = ''
+              return
+            }
+            //校验大小
+            if (limitSize > 0 && limitSize < e.target.files[i].size / 1024 / 1024) {
+              promptMsg(_this, '文件大小不符合要求')
+              e.target.value = ''
+              return
+            }
+          }
+          var formData
+          //支持多文件上传
+          for (var i = 0; i < e.target.files.length; i++) {
+            formData = new FormData()
+            formData.append('file', e.target.files[i])
+            var fileDate = {
+              modifyDate: '',
+              name: e.target.files[i].name,
+              objectId: '',
+              size: '',
+              suffix: e.target.files[i].type.split('/')[1],
+              thumbnail: ''
+            }
+            if (_this.max == 1) {
+              _this.value = $.extend(true, [], [fileDate])//替换
+            } else {
+              _this.value.splice(_this.value.length, 0, fileDate)
+            }
+            _this.uploadArr.push(formData)
+          }
+          if (!_this.isUpload) {
+            formData = new FormData()
+            formData.append('file', e.target.files[0])
+            _this.doUpload(formData)
+          }
+        },
+        doUpload: function (upData) {
+          var _this = this
+          if (_this.readonly) {
+            return
+          }
+          if (!upData) {
+            return
+          }
+          if (_this.temporary){
+            //【临时存储】开关，勾选后， 该字段上传接口里会打上临时存储标记， 中心存储服务会2年后自动删除；
+            formData['uploadtype'] = 'temp'
+          } else {
+            formData['uploadtype'] = 'normal'
+          }
+          _this.xhr = new XMLHttpRequest()
+          _this.xhr.upload.addEventListener('progress', _this.uploadProgress, false)
+          _this.xhr.addEventListener('load', _this.uploadComplete, false)
+          _this.xhr.addEventListener('error', _this.uploadFailed, false)
+          _this.xhr.addEventListener('abort', _this.uploadCanceled, false)
+          _this.xhr.open('POST', 'data/filedata/web/file/upload')//接口地址
+          _this.xhr.send(upData)
+          _this.$forceUpdate()
+          publicUtils.verifyUploadDetail(_this, _this.value)
+        },
+        uploadProgress: function (evt) {
+          if (this.readonly) {
+            return
+          }
+          var _this = this, percentComplete = 0
+          var fObj = $('#fileUpload' + _this.widget.id)
+          var progressNumObj = $(fObj.find('.progressNumber').get(_this.fileLocal))
+          var grateObj = $(fObj.find('.grate').get(_this.fileLocal))
+          if (evt.lengthComputable) {
+            _this.isUpload = true
+            percentComplete = Math.round(evt.loaded * 100 / evt.total)
+            if (percentComplete === 100) {
+              percentComplete = 99
+            }
+            if (progressNumObj) {
+              progressNumObj.html(percentComplete.toString() + '%')
+            }
+            
+            if (grateObj) {
+              grateObj.css({height: percentComplete / 100 * 52 + 'px'})
+            }
+          } else {
+            if (percentComplete < 100) {
+              if (progressNumObj) {
+                progressNumObj.html('unable to compute')
+              }
+              if (grateObj) {
+                grateObj.css({height: percentComplete.toString() / 100 * 52 + 'px'})
+              }
+            } else {
+              if (progressNumObj) {
+                progressNumObj.html('')
+              }
+              if (grateObj) {
+                grateObj.css({opacity: 0})
+              }
+            }
+          }
+          var find = false
+          for (var i = 0; i < _this.value.length; i++) {
+            if (_this.value[i].modifyDate === '') {
+              find = true
+              break
+            }
+          }
+          _this.$store.commit('watchValues', {
+            id: _this.widget.id,
+            fvalues: [
+              {fidx: 0, values: _this.value}
+            ],
+            errMsg: find ? '有文件正在上传，请稍后' : '',
+            verified: !find,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        },
+        uploadComplete: function (evt) {
+          var _this = this
+          if (this.readonly) {
+            return
+          }
+          var fObj = $('#fileUpload' + _this.widget.id)
+          var progressNumObj = $(fObj.find('.progressNumber').get(_this.fileLocal))
+          var grateObj = $(fObj.find('.grate').get(_this.fileLocal))
+          /* 服务器端返回响应时候触发event事件*/
+          var resultData = JSON.parse(evt.target.response)
+          if (resultData.success) {
+            _this.isUpload = false
+            if (_this.value[_this.value.length - 1].modifyDate === '') {
+              if (progressNumObj) {
+                progressNumObj.html('100%')
+              }
+              if (grateObj) {
+                grateObj.css({height: 100 / 100 * 52 + 'px'})
+              }
+              setTimeout(function () {
+                if (progressNumObj) {
+                  progressNumObj.html('')
+                }
+                if (grateObj) {
+                  grateObj.css({opacity: 0})
+                }
+                $.extend(true, _this.value[_this.fileLocal], resultData.data.result)
+                $('#file' + _this.widget.id).val('')
+                _this.fileLocal++
+                var find = false
+                for (var i = 0; i < _this.value.length; i++) {
+                  if (_this.value[i].modifyDate === '') {
+                    _this.fileLocal = i
+                    _this.doUpload(_this.uploadArr[i])
+                    find = true
+                    break
+                  }
+                }
+  
+                if (_this.onlySetValue) {
+                  _this.$refs.myOptions.typeShow = false
+                  //明细组件内子组件横排时用到 触发父级明细组件中iframe(加载当前组件默认值区域dom)弹窗显示或关闭
+                  var data = {
+                    values: [_this.value],
+                    defaultSetAreaShow: _this.$refs.myOptions.typeShow
+                  }
+                  _this.$emit('callbackvalue', data)
+                } else {
+                  _this.$refs.myOptions.typeShow = false
+                }
+  
+                _this.$store.commit('watchValues', {
+                  id: _this.widget.id,
+                  configId: _this.widget.config.id,
+                  fvalues: [
+                    {fidx: 0, values: _this.value}
+                  ],
+                  errMsg: find ? '有文件正在上传，请稍后' : '',
+                  verified: !find,
+                  isShow: _this.isShow,
+                  hasAuthority: _this.hasAuthority
+                })
+                publicUtils.verifyUploadDetail(_this, _this.value)
+                dataLoadInit(_this)
+              }, 1000)
+            }
+          } else {
+            _this.isUpload = false
+            _this.value.splice(_this.value.length - 1, 1)
+            alert(resultData.msg || '上传失败')
+  
+            // 关闭上传窗口
+            _this.setValueSetModeShow()
+          }
+        },
+        uploadFailed: function (evt) {
+          //alert("附件上传出错");
+        },
+        uploadCanceled: function (evt) {
+          //alert("用户已取消上载，或者浏览器已断开连接");
+        },
+        remove: function (img) {
+          var _this = this
+          if (this.readonly) {
+            return
+          }
+          var valueIndex = this.value.indexOf(img)
+          var fObj = $('#fileUpload' + _this.widget.id)
+          var progressNumberO = $(fObj.find('.progressNumber').get(_this.fileLocal))
+          var grateO = $(fObj.find('.grate').get(_this.fileLocal))
+          if (img.modifyDate === '') {
+            _this.isUpload = false
+            $('#file' + _this.widget.id).val('')
+            
+            if (this.xhr) {
+              this.xhr.abort()
+            }
+            if (progressNumberO) {
+              progressNumberO.html('')
+            }
+            if (grateO) {
+              grateO.css({height: 0})
+            }
+            this.value.splice(valueIndex, 1)
+            this.uploadArr.splice(valueIndex, 1)
+            this.$forceUpdate()
+            var find = false
+            for (var i = 0; i < _this.value.length; i++) {
+              if (_this.value[i].modifyDate === '') {
+                _this.fileLocal = i
+                _this.doUpload(_this.uploadArr[i])
+                find = true
+                break
+              }
+            }
+  
+            if (_this.onlySetValue) {
+              //明细组件内子组件横排时用到 触发父级明细组件中iframe(加载当前组件默认值区域dom)弹窗显示或关闭
+              var data = {
+                values: [_this.value],
+                defaultSetAreaShow: _this.$refs.myOptions.typeShow
+              }
+              _this.$emit('callbackvalue', data)
+            }
+  
+            _this.$store.commit('watchValues', {
+              id: _this.widget.id,
+              fvalues: [
+                {fidx: 0, values: _this.value}
+              ],
+              errMsg: find ? '有文件正在上传，请稍后' : '',
+              verified: !find,
+              isShow: this.isShow,
+              hasAuthority: this.hasAuthority
+            })
+          } else {
+            if (this.fileLocal > 0) {
+              this.fileLocal--
+            }
+            if (grateO) {
+              grateO.css({opacity: 1})
+            }
+            this.value.splice(valueIndex, 1)
+            this.uploadArr.splice(valueIndex, 1)
+  
+            if (_this.onlySetValue) {
+              //明细组件内子组件横排时用到 触发父级明细组件中iframe(加载当前组件默认值区域dom)弹窗显示或关闭
+              var data = {
+                values: [_this.value],
+                defaultSetAreaShow: _this.$refs.myOptions.typeShow
+              }
+              _this.$emit('callbackvalue', data)
+            }
+          }
+          // 检验文件分辨率、大小,...
+          publicUtils.verifyUploadDetail(_this, _this.value)
+          dataLoadInit(_this)
+        },
+        linkFieldValueStatus: function (result) {
+          if (this.isPreview && this.isInit) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+
+          if (hasNullCondVal) {
+            this.value = []
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          if (result && JSON.stringify(this.lastLinkValue) === JSON.stringify(result) &&
+              (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+            this.value = []
+          }
+          if (result && JSON.stringify(this.lastLinkValue) !== JSON.stringify(result) && !this.$store.getters.getReadonlyStatus) {
+            this.value = result
+            this.lastLinkValue = result
+            if (this.value.length > 0) {
+              dataLoadInit(this)
+            }
+          }
+          // 检验文件分辨率、大小,...
+          publicUtils.verifyUploadDetail(this, this.value)
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        detailComboxLinkFieldValueStatus: function (result) {
+          if (this.isPreview && this.isInit) {
+            return
+          }
+          if (result && JSON.stringify(this.lastLinkValue) === JSON.stringify(result) && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+            this.value = []
+          }
+          if (result && JSON.stringify(this.lastLinkValue) !== JSON.stringify(result) && !this.$store.getters.getReadonlyStatus) {
+            this.value = result
+            this.lastLinkValue = result
+            if (this.value.length > 0) {
+              dataLoadInit(this)
+            }
+          }
+          // 检验文件分辨率、大小,...
+          publicUtils.verifyUploadDetail(this, this.value)
+        }
+      },
+      filters: {
+        sizeFormat: function (size) {
+          return util.sizeFormat(size)
+        }
+      },
+      created: function () {
+        // 去除不符合文件规则的文件
+        var _this = this
+        if (_this.widget.config.fields[0].values) {
+          for (var i = 0; i < _this.widget.config.fields[0].values.length; i++) {
+            if (_this.widget.config.fields[0].values[i].objectId) {
+              _this.value.push(_this.widget.config.fields[0].values[i])
+            }
+          }
+        }
+        this.fileLocal = this.value.length
+        for (var i = 0; i < this.value.length; i++) {
+          this.uploadArr.push(null)
+        }
+        // 文件上传提示信息
+        publicUtils.setUploadFileNotice(this)
+        this.$store.commit('watchValues', {
+          id: this.widget.id,
+          fvalues: [
+            {fidx: 0, values: this.value}
+          ],
+          verified: this.verified,
+          errMsg: this.errorInfo.verifyMsg,
+          isShow: this.isShow,
+          hasAuthority: this.hasAuthority
+        })
+      }
+    }
+  }
+})

@@ -1,0 +1,607 @@
+var defaultOpt = {
+  v: '1.4.12',//高德地图api版本号
+  jsAPIKey: 'c8b4db33b7714692ad93e07c7da3a2ba',//JavaScript API key
+  jsWebAPIKey: 'c314ccb1bc3d0800ff195bb8b52957a8',//此处的key，为Web服务API的key，与JavaScript API的key不是同一个
+  lng: 116.331398,//百度默认坐标
+  lat: 39.897445,//百度默认坐标
+  element: null,//地图显示所在dom元
+  locateStart: function () {
+  },//开始定位
+  locateSuccess: function (data) {
+  },//定位成功
+  locateError: function (data) {
+  }//定位失败
+}
+define(['jquery', 'util', 'VueUtils', 'popup', 'tipImgs', 'mapLoader', 'locationSelect', 'https://webapi.amap.com/maps?v=' + defaultOpt.v + '&key=' + defaultOpt.jsAPIKey + '&plugin=AMap.GeometryUtil'], function ($, util, VueUtils, popup, tipImgs, mapLoader, locationSelect) {
+  'use strict'
+  return function (widget) {
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: $.trim(_this.value),
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+  
+    function checkLimitRange(locationScope, dependentLocationValue, mapValue) {
+      var limitRangeList = [] /*存放检测范围信息*/, locationScopeInfo = $.extend(true, {}, locationScope)/*限制范围信息*/;
+      var dependentLocationValueInfo = $.extend(true, {}, dependentLocationValue), now = $.extend(true, {}, mapValue);
+      if ($.isEmptyObject(now) || $.isEmptyObject(locationScopeInfo) || !locationScopeInfo.select
+          || (locationScopeInfo.type === 1 && $.isEmptyObject(dependentLocationValueInfo))
+          || (locationScopeInfo.type === 0 && (!locationScopeInfo.mapValue || locationScopeInfo.mapValue.length <= 0))) {
+        return true;
+      }
+      // 获取限制范围信息，创建范围圆
+      limitRangeList = getLimitScopeInfo(locationScope, dependentLocationValue);
+      // 调用高德API校验
+      for (var i = 0; i < limitRangeList.length; i++) {
+        var range = limitRangeList[i];
+        var dis = Math.round(AMap.GeometryUtil.distance([now.lng, now.lat], [range.lng, range.lat])); // 坐标间距离
+        if (dis <= range.range) {
+          return true;
+        }
+      }
+      return false;
+    }
+    function getLimitScopeInfo(locationScope, dependentLocationValue) {
+      var limitRangeList = [] /*存放检测范围信息*/,
+          locationScopeInfo = $.extend(true, {}, locationScope)/*限制范围信息*/,
+          dependentLocationValueInfo = $.extend(true, {}, dependentLocationValue);/*依赖的其他定位组件位置信息*/
+      if ((locationScopeInfo.type === 1 && $.isEmptyObject(dependentLocationValueInfo))
+          || (locationScopeInfo.type === 0 && (!locationScopeInfo.mapValue || locationScopeInfo.mapValue.length <= 0))) {
+        return limitRangeList
+      }
+      // 获取限制范围信息，创建范围圆
+      if (locationScopeInfo.type === 0 && locationScopeInfo.mapValue.length > 0) {
+        var rangeList = locationScopeInfo.mapValue;
+        for (var i = 0; i < rangeList.length; i++) {
+          limitRangeList.push({lng: rangeList[i].lng, lat: rangeList[i].lat, range: rangeList[i].range});
+        }
+      } else if (locationScopeInfo.type === 1 && !$.isEmptyObject(locationScopeInfo.linkedInfo)) {
+        limitRangeList.push({
+          lng: dependentLocationValueInfo.lng,
+          lat: dependentLocationValueInfo.lat,
+          range: locationScopeInfo.linkedInfo.range
+        });
+      }
+      return limitRangeList;
+    }
+
+    function initMap(_this) {
+      setTimeout(function () {
+        if (_this.mapValueLoading) {
+          //定位超时
+          _this.mapValueLoading = false
+          popup.alert('定位超时')
+        }
+      }, 10000)
+      _this.mapValueLoading = true//显示“正在定位……”
+      _this.mapLoader = new mapLoader({//获取当前位置坐标
+        element: 'container' + _this.widget.id,
+        locateStart: function () {
+        },
+        locateSuccess: function (data) {
+          _this.mapValue = {
+            lat: data.result.position.lat,
+            lng: data.result.position.lng,
+            address: data.result.formattedAddress,
+            street: data.result.addressComponent.street,
+            country: data.result.addressComponent.country,
+            province: data.result.addressComponent.province,
+            city: data.result.addressComponent.city,
+            district: data.result.addressComponent.district,
+            township: data.result.addressComponent.township
+          }
+          _this.value.push(_this.mapValue)
+          dataLoadInit(_this)
+          _this.mapValueLoading = false
+        },
+        locateError: function (data) {
+          popup.alert(data.resultMsg, '我知道了', function () {
+            _this.mapValueLoading = false
+          })
+          _this.showLocation = false
+        }
+      })
+    }
+  
+    function doRemove(_this) {
+      _this.errorInfo.show = true
+      _this.$nextTick(function () {
+        _this.mapValue = {}
+        _this.value = []
+        _this.$refs.locationSelect.confirmLocation(0)
+        _this.showLocation = false
+        dataLoadInit(this)
+      })
+    }
+  
+    function loadMapEcho(_this) {
+      if ($.isEmptyObject(_this.mapValue)) {
+        return
+      }
+      _this.showLocation = true
+      if (_this.defaultValueConfig && _this.defaultValueConfig === 1) {
+        _this.$refs.locationSelect.mapValue = _this.mapValue
+        _this.$refs.locationSelect.initMapForResultShow()
+      } else {
+        _this.mapLoader = new mapLoader({//获取当前位置坐标
+          element: 'container' + _this.widget.id,
+          center: {lng: _this.mapValue.lng, lat: _this.mapValue.lat},
+          locateStart: function () {},
+          locateSuccess: function (data) {},
+          locateError: function (data) {
+            popup.alert(data.resultMsg, '我知道了', function () {})
+          }
+        })
+      }
+    }
+    
+    function canGetValue(_this) {
+      var result = true
+      if (!$.isEmptyObject(_this.locationScope) && _this.locationScope.select && !$.isEmptyObject(_this.locationScope.linkedInfo)
+          && $.isEmptyObject(_this.dependentLocationValue)) {
+        result = false
+        var comptArr = _this.$store.getters.getComptArrWidgetByConfigId(_this.locationScope.linkedInfo.comptId)
+        _this.$store.commit('setLocationErrMsg', {
+          id: _this.locationScope.linkedInfo.comptId,
+          inDetailGroupGeneralId: comptArr && comptArr.length > 0 && comptArr[0].pid !== 0 ? _this.widget.config.inDetailGroupGeneralId : -1,
+          msg: '请先填写该字段'
+        });
+      }
+      return result
+    }
+
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{noClick:readonly, widget_error: errorTip || (errorInfo.show&&errorInfo.errMsg)}"  v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+            '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_forbid_edit" :class="{form_forbid_nodata: !mapValue.address}" v-if="readonly">',
+              '<p class="form_forbid_word">{{mapValue.address ? mapValue.address :\'暂无数据\'}}</p>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<div class="from_location">',
+                '<div class="location_data" v-show="showLocation">',
+                  '<p class="location_word owt1">',
+                    '<span v-if="mapValueLoading">正在定位……</span>',
+                    '<span v-else-if="mapValue.address">{{mapValue.address}}</span>',
+                    '<span v-else>暂无定位地址</span>',
+                  '</p>',
+                  '<div class="location_map" :id="\'container\'+widget.id"></div>',
+                  '<div class="location_trimming" @click.stop="doSelect" v-if="widget.config.distanceRange && defaultValueConfig === 0">',
+                    '<p class="location_trimming_btn">',
+                      '点击地图微调地址<span class="trimming_icon icon-pagelast"></span>',
+                    '</p>',
+                  '</div>',
+                  '<span class="location_del icon-userdel" @click.stop="remove()"></span>',
+                '</div>',
+                '<div class="temp_button" v-show="!showLocation && defaultValueConfig === 0" @click.stop="doPosition">' +
+                '<span class="button_icon icon-location"></span>点击获取定位</div>',
+                '<div class="temp_button" v-show="!showLocation && defaultValueConfig === 1" @click.stop="openPositionCustomization">' +
+                '<span class="button_icon icon-location"></span>选择位置</div>',
+              '</div>',
+              '<location-select :widget="widget" :default-value-config="defaultValueConfig" @getSelectLocation="getSelectLocation" ' +
+              'ref="locationSelect"></location-select>',
+              '<div class="temp_button" v-show="loadStatus && !showLocation"><div class="sub_loading" v-show="loadStatus">' +
+              '<span class="loading_icon"></span></div></div>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorInfo.show&&errorInfo.errMsg">',
+             '<p class="must_word">{{errorTip ? \'此项为必填项\' : errorInfo.errMsg}}</p>',
+            '</div>',
+          '</div>',
+        '<div style="display: none">{{locationErrMsg}}</div>',
+          '<event-trigger :widget="widget" :compose="\'col\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event="triggerValueEvent" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+          '<field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+          '<detail-combox-field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="detailComboxLinkFieldValueStatus"></detail-combox-field-link-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          mapValueLoading: false,
+          mapValue: {},
+          mapLoader: null,
+          showLocation: false,
+          isStretchChoice: false,
+          loadStatus: false, // 正在加载数据（数据联动
+          errorInfo: {
+            errMsg: '',
+            show: false
+          }
+        }
+      },
+      components: {
+        'tip-imgs': tipImgs,
+        'location-select': locationSelect,
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue'),
+        'detailComboxFieldLinkTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/detailcombox/detailComboxFieldLinkTrigger.vue')
+      },
+      watch: {
+        value: function () {
+          var nowValue = this.value.slice(-1)[0] || {}
+          this.$store.commit('setLocationComptValue', {
+            id: this.widget.config.id,
+            inDetailGroupGeneralId: this.widget.config.inDetailGroupGeneralId,
+            value: nowValue
+          });
+          var isInScope = true
+          if (!this.isFormReadOnly) {
+            isInScope = checkLimitRange(this.locationScope, this.dependentLocationValue, nowValue) // 判断是否在范围内
+            this.$store.commit('setLocationErrMsg', {
+              id: this.widget.config.id,
+              inDetailGroupGeneralId: this.widget.config.inDetailGroupGeneralId,
+              msg: !$.isEmptyObject(nowValue) && !isInScope ? '未在定位范围内' : ''
+            });
+            // 获取关联此定位的其他定位组件id
+            var relatedList = this.$store.getters.getLocationRelatesById(this.widget.config.id)
+            for (var i = 0; i < relatedList.length; i++) {// 对依赖此组件的其他定位组件值重新校验
+              var compt = relatedList[i]
+              // 获取组件对应值
+              var data = this.$store.getters.getLocationComptValueForInspect(compt.id, this.widget.config.inDetailGroupGeneralId) || []
+              for (var j = 0; j < data.length; j++) {
+                var result = checkLimitRange(compt.locationScope, nowValue, data[j].value)
+                this.$store.commit('setLocationErrMsg', {
+                  id: compt.id,
+                  inDetailGroupGeneralId: data[j].inDetailGroupGeneralId,
+                  msg: !result ? '未在定位范围内' : ''
+                });
+              }
+            }
+          }
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            errMsg: isInScope ? '' : '未在定位范围内',
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            this.errorInfo.show = false
+            return true
+          }
+          var result = true;
+          if (this.required && this.value.length === 0) {
+            result = false
+            this.errorInfo.errMsg = '此项为必填项'
+          }
+          var nowValue = this.value.slice(-1)[0] || {}
+          result = result && checkLimitRange(this.locationScope, this.dependentLocationValue, nowValue) // 判断是否在范围内
+          if (result) {
+            this.errorInfo.show = false
+          }
+          return result
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+            this.errorInfo.show = true
+          }
+          return status
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+          
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        defaultValueConfig: function () {
+          //默认值，定位获取方式， 0-获取当前位置（原逻辑），1-自定义
+          return this.widget.config.defaultValueConfig || 0
+        },
+        locationValue: function () {
+          return this.widget.config.locationValue || 0
+        },
+        locationScope: function () {
+          return this.widget.config.locationScope || {}
+        },
+        dependentLocationValue: function () { // 限制当前组件定位范围的其他组件的定位值
+          var data = {}, scope = this.locationScope
+          if (!$.isEmptyObject(scope) && scope.select && scope.type === 1 && !$.isEmptyObject(scope.linkedInfo)) {
+            data = this.$store.getters.getLocationComptValueByIdGeneralId(scope.linkedInfo.comptId, this.widget.config.inDetailGroupGeneralId) || {}
+            if ($.isEmptyObject(data) && this.value && this.value.length > 0 && !this.isFormReadOnly) {
+              doRemove(this)
+            }
+          }
+          return data
+        },
+        locationErrMsg: function () {
+          var errMsg = this.$store.getters.getLocationErrMsgByIdGeneralId(this.widget.config.id, this.widget.config.inDetailGroupGeneralId)
+          if (errMsg) {
+            this.errorInfo.errMsg = errMsg
+            this.errorInfo.show = true
+          }
+          return errMsg
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        isFormReadOnly: function () {// 当前表单是否只读
+          return this.$store.getters.getReadonlyStatus
+        }
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEvent: function (val) {
+          this.loadStatus = false
+        },
+        triggerGetValueEvent:function (callback) {
+          callback(this.value)
+        },
+        //点击定位
+        doPosition: function () {
+          var _this = this
+          if (this.readonly) {
+            return
+          }
+          if (_this.mapValueLoading) {
+            return
+          }
+          _this.mapValue = {}
+          _this.value = []
+          // 若该定位依赖其他定位字段确定范围，且依赖的字段值为空，添加错误状态
+          if (!canGetValue(this)) {
+            return
+          }
+          _this.errorInfo.show = true
+          _this.showLocation = true
+          _this.$store.commit('setInitStatus', false)
+          initMap(_this)
+        },
+        //加载自定义位置地图map
+        openPositionCustomization: function() {
+          var _this = this
+          if (this.readonly) {
+            return
+          }
+          _this.mapValue = {}
+          _this.value = []
+          // 若该定位依赖其他定位字段确定范围，且依赖的字段值为空，添加错误状态
+          if (!canGetValue(this)) {
+            return
+          }
+          _this.errorInfo.show = true
+          _this.$refs.locationSelect.limitRangeList = getLimitScopeInfo(this.locationScope, this.dependentLocationValue)
+          _this.$refs.locationSelect.customizationMapInit()
+        },
+        //清除定位信息
+        remove: function () {
+          var _this = this
+          if (this.readonly) {
+            return
+          }
+          popup.confirm({
+            content: '确定要清除定位信息吗？',
+            btn2: function () {
+              _this.$store.commit('setInitStatus', false)
+              doRemove(_this)
+            }
+          })
+        },
+        doSelect: function () {
+          var _this = this
+          _this.errorInfo.show = true
+          _this.$store.commit('setInitStatus', false)
+          _this.$refs.locationSelect.select()
+        },
+        //子组件将选中数据传给父组件
+        getSelectLocation: function (data) {
+          var _this = this
+          _this.errorInfo.show = true
+          _this.$store.commit('setInitStatus', false)
+          _this.mapValue = {
+            address: data.address,
+            lng: data.lng,
+            lat: data.lat
+          }
+          if (_this.defaultValueConfig && _this.defaultValueConfig === 1) {
+            _this.showLocation = true
+            _this.$refs.locationSelect.initMapForResultShow()
+          } else {
+            _this.mapLoader.geoLocate(data.lng, data.lat)
+          }
+          _this.value = []
+          _this.value.push(_this.mapValue)
+          dataLoadInit(this)
+        },
+        linkFieldValueStatus: function (result) {
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+
+          if (hasNullCondVal) {
+            doRemove(this)
+            dataLoadInit(this)
+            this.$store.commit('removeCurrFormValueFieldVerify', {
+              id: this.widget.config.id,
+              type: 1,
+              inDetailGroupIndex: this.widget.config.inDetailGroupIndex
+            })
+            return
+          }
+
+          if (result && result.length > 0 && (!this.isPreview || !this.isInit)) {
+            if ($.isEmptyObject(result[0]) || !canGetValue(this)) {
+              doRemove(this)
+            } else {
+              this.mapValue = result[0]
+              this.value.push(result[0])
+              // 根据定位方式加载地图
+              this.$nextTick(function () {
+                loadMapEcho(this)
+              })
+              dataLoadInit(this)
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {
+            id: this.widget.config.id,
+            type: 1,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex
+          })
+        },
+        detailComboxLinkFieldValueStatus: function (result) {
+          if (result && result.length > 0 && (!this.isPreview || !this.isInit)) {
+            if (!canGetValue(this)) {
+              this.mapValue = {}
+              this.value = []
+            } else {
+              this.mapValue = result[0]
+              this.value.push(result[0])
+              dataLoadInit(this)
+            }
+          }
+        }
+      },
+      mounted: function () {},
+      created: function () {
+        var value = this.widget.config.fields[0].values || []
+        if (value.length > 0) {
+          this.value = value
+          this.mapValue = this.value.length > 0 ? this.value[0] : {}
+          this.$nextTick(function () {
+            loadMapEcho(this)
+          })
+        }
+        // 初始化时清空之前记录的错误信息
+        this.$store.commit('setLocationErrMsg', {
+          id: this.widget.config.id,
+          inDetailGroupGeneralId: this.widget.config.inDetailGroupGeneralId,
+          msg: ''
+        });
+      }
+    }
+  }
+})

@@ -1,0 +1,263 @@
+define(['jquery', 'popup', 'jSignature'], function ($, popup) {
+  'use strict'
+
+  function getJSON(url, data) {
+    return $.getJSON(url, data);
+  }
+
+  function doRequest(url, data) {
+    return $.ajax({
+      url: url,
+      type: 'post',
+      data: data,
+      dataType: 'json'
+    })
+  }
+
+  function submitData(vm, url, data) {
+    doRequest(url, data).then(function (res) {
+      if (!res.success) {
+        if (vm.signatureParam.useType === 1) {
+          vm.errorMsg = res.data.msg
+          vm.errorDialogShow = true
+          return
+        }
+        popup.alert(res.data.msg)
+        return
+      }
+      if (vm.signatureParam.useType === 1) {
+        vm.successDialogShow = true
+        return
+      }
+      vm.$emit('getsignresult', {url: data.sign})
+    })
+  }
+
+  function getSignatureInfo(_this) {
+    getJSON('front/sign/find/user/signature', {signType: _this.signatureParam.signType}).then(function (res) {
+      if (res.success) {
+        if (typeof res.data.sign === 'string') {
+          res.data.sign = JSON.parse(res.data.sign)
+        }
+        _this.nextUse = res.data.sign.nextUse === 1
+        if (!res.data.sign || $.isEmptyObject(res.data.sign) || res.data.sign.nextUse === 0 || !res.data.sign.signature || !_this.useLastSignature) {
+          _this.$loadSignature()
+          return
+        }
+        var signArr = res.data.sign.signature.split(':')
+        _this.signatureUrl = signArr.length > 1 ? document.location.protocol + signArr[1] : res.data.sign.signature
+        // 判断当前图片是否上传成功，图片不存在时，将签名状态设置为新增
+        if (_this.signatureUrl) {
+          var imgObj = new Image()
+          imgObj.src = _this.signatureUrl
+          if (imgObj.fileSize <= 0 || (imgObj.width <= 0 && imgObj.height <= 0)) {
+            _this.$loadSignature()
+          }
+        }
+        _this.$forceUpdate()
+      }
+    })
+  }
+
+  return {
+    template: [
+      '<div style="height:100%;">',
+      '<div class="signature">',
+      '<!--手写签名-横-->',
+      '<img v-show="loading" class="loading_page" src="static/style/apps/forms/web/fore/images/loading.gif">',
+      '<div class="sign_hor" v-show="!successDialogShow && !errorDialogShow">',
+      '<div class="sign_left">',
+      '<p class="sl_check" v-show="signatureParam.signType != 2">',
+      '<span :class="{\'check\':nextUse}" @click="nextUse=!nextUse"></span>',
+      '<em>保</em>',
+      '<em>存</em>',
+      '<em>签</em>',
+      '<em>名</em>',
+      '<em>以</em>',
+      '<em>备</em>',
+      '<em>下</em>',
+      '<em>次</em>',
+      '<em>调</em>',
+      '<em>用</em>',
+      '</p>',
+      '<div class="sl_cal" @click="afreshSig">重写</div>',
+      '<div class="sl_sure" @click="submit" v-show="!isThird">确定</div>',
+      '</div>',
+      '<div class="sign_mid">',
+      '<img class="gw_img" :src="signatureUrl" v-show="signatureUrl!=\'\'" @load="$loadSignature" />',
+      '<div class="sm_cont" :id="\'signature_\'+id"></div>',
+      '<!--<div class="sm_rotate" @click="rotateScreen(0)">旋转<br/>屏幕</div>-->',
+      '</div>',
+      '<div class="sign_right">',
+      '<span>请</span>',
+      '<span>在</span>',
+      '<span>下</span>',
+      '<span>方</span>',
+      '<span>区</span>',
+      '<span>域</span>',
+      '<span>横</span>',
+      '<span>向</span>',
+      '<span>作</span>',
+      '<span>答</span>',
+      '</div>',
+      '</div>',
+      '<!--成功弹窗-->',
+      '<div class="sign_suc_pop" v-show="successDialogShow">',
+      '<span class="suc_icon"></span>',
+      '<p class="suc_tip">操作成功</p>',
+      '</div>',
+      '<!--失败弹窗-->',
+      '<div class="sign_lose_pop" v-show="errorDialogShow">',
+      '<span class="lose_icon"></span>',
+      '<p class="lose_tip">操作失败<br/>请重新扫码添加签名</p>',
+      '<p class="lose_btn">{{errorMsg}}</p>',
+      '</div>',
+      '</div>',
+      '</div>'
+    ].join(''),
+    data: function () {
+      return {
+        loading: true,
+        useLastSignature: true,
+        signatureUrl: '',
+        successDialogShow: false,
+        errorDialogShow: false,
+        errorMsg: '',
+        nextUse: true
+      }
+    },
+    props: {
+      id: {
+        type: Number,
+        default: 1
+      },
+      isThird: {
+        type: Boolean,
+        default: false
+      },
+      signatureParam: {
+        type: Object,
+        default: {}
+      },
+      formId: {
+        type: Number,
+        default: function() {
+          return 0
+        }
+      },
+      pageEnc: {
+        type: String,
+        default: function() {
+          return ''
+        }
+      }
+    },
+    watch: {},
+    computed: {},
+    methods: {
+      submit: function () {
+        var _this = this, signatureObj = $('#signature_' + _this.id)
+        if (!_this.signatureUrl && !signatureObj.jSignature('getData', 'native').length) {
+          popup.alert('请先签字')
+          return
+        }
+        var url = 'front/sign/submit/signature/'
+        var data = {
+          nextUse: _this.nextUse ? 1 : 0,
+          uid: _this.signatureParam.uid,
+          randomKey: _this.signatureParam.randomKey,
+          enc: _this.signatureParam.enc,
+          signType: _this.signatureParam.signType
+        }
+        if (_this.signatureParam.useType === 1) {
+          url += 'web'
+          data['time'] = _this.signatureParam.time
+        } else {
+          url += 'mobile'
+        }
+        if (_this.signatureUrl) {
+          var signArr = _this.signatureUrl.split(':')
+          data['sign'] = signArr.length > 1 ? document.location.protocol + signArr[1] : _this.signatureUrl
+          submitData(_this, url, data)
+          return
+        }
+        // 使用formdata上传图片 data[1]是svg图片的base64
+        var signatureData = signatureObj.jSignature('getData', 'image')
+        var f = new FormData()
+        f.append('fileData', signatureData[1])
+        f.append('fileName', new Date().getTime() + '.png')
+        f.append('rotate', '1')
+        f.append('uid', _this.signatureParam.uid)
+        $.ajax({
+          url: 'data/filedata/file/base64/upload',
+          method: 'post',
+          data: f,
+          contentType: false,
+          processData: false
+        }).then(function (value) {
+          if (!value.success) {
+            popup.alert(value.msg)
+            return false
+          }
+          data['sign'] = panUrl + '/thumbnail/origin/' + value.data.result.objectId
+          submitData(_this, url, data)
+        })
+      },
+      afreshSig: function () {
+        this.signatureUrl = ''
+        $('#signature_' + this.id).jSignature('clear')
+      },
+      $loadSignature: function () {
+        var width = 230
+        if ($(document).width()) {
+          width = $(document).width() - 104
+        }
+        if (width < 232) {
+          width = 230
+        }
+        var argument = {
+          width: width,
+          height: window.innerHeight,
+          'decor-color': 'transparent',//去除默认画布上那条横线
+          lineWidth: '8'
+        }
+        $('#signature_' + this.id).jSignature(argument)
+        this.loading = false
+        this.$emit('loadcomplete')
+      }
+    },
+    mounted: function () {
+      var _this = this
+      //如果是第一次写签名 进入填写页就会调用mounted
+      if (!this.signatureParam.aprvId) {// aprvId不存在，走表单逻辑
+        _this.$nextTick(function () {
+          setTimeout(function () {
+            getSignatureInfo(_this)
+          }, 1000)
+        })
+        return
+      }
+      var param = {
+        formId: _this.formId,
+        formUserId: this.signatureParam.aprvId,
+        pageEnc: _this.pageEnc || this.signatureParam.enc,
+        randomKey: this.signatureParam.randomKey,
+        uid: this.signatureParam.uid
+      }
+      // aprvId存在，查询审批手写签名配置
+      getJSON('data/approve/apps/forms/fore/user/form/info', param).then(function (json) {
+        if (json.data.scopeSetting === 0) {
+          _this.useLastSignature = !json.success || $.isEmptyObject(json.data.approveConfig) || json.data.approveConfig.signatureConfig === 0
+        } else {
+          _this.useLastSignature = !json.success || $.isEmptyObject(json.data.aprvSetData) || json.data.aprvSetData.signatureConfig === 0
+        }
+      }).then(function () {
+        _this.$nextTick(function () {
+          setTimeout(function () {
+            getSignatureInfo(_this)
+          }, 1000)
+        })
+      })
+    }
+  }
+})

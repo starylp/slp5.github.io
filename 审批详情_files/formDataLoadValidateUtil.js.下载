@@ -1,0 +1,281 @@
+define(['jquery', 'eventTriggerUtils', 'cacheUtils', 'cookies'], function ($, eventTriggerUtils, cacheUtils, Cookies) {
+  
+  /**
+   * 触发数据联动
+   */
+  function doLinkFieldValueByDefaultFun(context, payload) {
+    context.dispatch('operateLinkFiledData', {
+      id: payload.widget.id,
+      compt: payload.widget.config.compt,
+      configId: payload.widget.config.id,
+      inDetailGroupIndex: payload.widget.config.inDetailGroupIndex,
+      value: $.trim(payload.value),
+      values: payload.hasOwnProperty('values') ? payload.values : [],
+      dataType: payload.dataType
+    })
+  }
+  
+  /**
+   * 子表单整体数据联动
+   * @param _this
+   */
+  function doDeatailComboxLinkFieldValueByDefaultFun(context, payload) {
+    context.dispatch('operateDetailComboxLinkFiledData', {
+      id: payload.widget.id,
+      compt: payload.widget.config.compt,
+      configId: payload.widget.config.id,
+      inDetailGroupIndex: payload.widget.config.inDetailGroupIndex,
+      value: $.trim(payload.value),
+      dataType: payload.dataType
+    })
+  }
+  
+  
+  /**
+   * 触发公式编辑、常用公式
+   */
+  function doReloadFieldValueByFormulaFun(context, payload) {
+    var value = ''
+    switch (payload.widget.config.compt) {
+      case 'contact':
+      case 'department':
+      case 'belonger':
+      case 'numberinput':
+        value = payload.values
+        break
+      case 'areamultiselect':
+      case 'multipleselect':
+        value = payload.value
+        break
+      default:
+        value = $.trim(payload.value)
+        break
+    }
+    //存在当前字段被做为公式编辑条件字段
+    context.dispatch('operateFormulaFiledData', {
+      id: payload.widget.id,
+      configId: payload.widget.config.id,
+      inDetailGroupIndex: payload.widget.config.inDetailGroupIndex,
+      value: value,
+      values: payload.hasOwnProperty('values') ? payload.values : [], // 勿删，部分组件传递的时数组值
+      otherValue: payload.hasOwnProperty('otherValue') ? payload.otherValue : '',// 勿删，选项类组件传递的其他选项
+      dataType: payload.dataType
+    })
+  }
+  
+  /**
+   *  设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+   * @param context
+   * @param payload
+   */
+  function dataLoadInit(context, payload) {
+    if (!payload.hasOwnProperty('dataType')) {
+      payload['dataType'] = context.state.comptDataType['blurChange']
+    }
+    context.state.comptDataTypeValue[payload.widget.config.id] = payload.dataType
+    new Promise(function (resolve, reject) {
+      linkFieldValueInit(context, payload)
+      formulaValueInit(context, payload)
+      // 子表单内部组件不能触发子表单数据联动
+      if (payload.widget.config.inDetailGroupIndex === -1) {
+        deatailComboxLinkFieldValueInit(context, payload)
+      }
+      resolve()
+    }).then(function () {
+      // 前端事件的数据优先级大于默认值（数据联动、公式编辑、常用公式，自定义默认值，...），等默认值触发机制触发结束后，如果存在前端事件，则执行
+      if (context && eventTriggerUtils.getTriggerEvent(context, payload)) {
+        context.dispatch('triggerEvent', {widget: payload.widget, compose: payload.compose ?  payload.compose : 'col'})
+      }
+    })
+  }
+  
+  /**
+   * 可触发数据联动的组件，请勿随便删除与添加
+   */
+  function linkFieldValueInit(context, payload) {
+    switch (payload.widget.config.compt) {
+      case 'areacheckbox':
+      case 'areamultiselect':
+      case 'belonger':
+      case 'computeinput':
+      case 'contact':
+      case 'dateinput':
+      case 'department':
+      case 'editinput':
+      case 'fileupload':
+      case 'imagebox':
+      case 'location':
+      case 'numberinput':
+      case 'radiobutton':
+      case 'selectbox':
+      case 'selectmultibox':
+      case 'videobox':
+        doLinkFieldValueByDefaultFun(context, payload)
+        break
+      default:
+        break
+    }
+  }
+  
+  /**
+   * 可触发公式编辑、常用公式的组件，请勿随便删除与添加
+   */
+  function formulaValueInit(context, payload) {
+    switch (payload.widget.config.compt) {
+      case 'areamultiselect':
+      case 'belonger':
+      case 'checklist':
+      case 'computeinput':
+      case 'contact':
+      case 'dateinput':
+      case 'department':
+      case 'editinput':
+      case 'edittextarea':
+      case 'multipleselect':
+      case 'numberinput':
+      case 'radiobutton':
+      case 'selectbox':
+      case 'selectmultibox':
+      case 'slider':
+        doReloadFieldValueByFormulaFun(context, payload)
+        break
+      default:
+        break
+    }
+  }
+  
+  /**
+   * 可触发子表单数据联动的组件，rows下的组件不可触发子表单数据联动，请勿随便删除与添加
+   */
+  function deatailComboxLinkFieldValueInit(context, payload) {
+    switch (payload.widget.config.compt) {
+      case 'areamultiselect':
+      case 'belonger':
+      case 'computeinput':
+      case 'contact':
+      case 'dateinput':
+      case 'department':
+      case 'editinput':
+      case 'fileupload':
+      case 'imagebox':
+      case 'numberinput':
+      case 'radiobutton':
+      case 'selectbox':
+      case 'selectmultibox':
+      case 'videobox':
+        doDeatailComboxLinkFieldValueByDefaultFun(context, payload)
+        break
+      default:
+        break
+    }
+  }
+  
+  /**
+   * 根据comptID获取组件信息
+   */
+  function getComptWidgetByConfigId(formInNum, context, cid, detailRowIndex) {
+    if (detailRowIndex === undefined) {
+      detailRowIndex = 0
+    }
+    var widgets = context.getters.rootWidgets
+    for (var i = 0; i < widgets.length ; i++) {
+      var widget = widgets[i]
+      if (widget.config.id === cid) {
+        return widget
+      }
+      if (widget.config.compt === 'detailcombox') {
+        if (detailRowIndex > (widget.children.length - 1)) {
+          continue
+        }
+        if (detailRowIndex > -1) {
+          // 子表单内部触发
+          for (var j = 0; j < widget.children[detailRowIndex].length; j++ ) {
+            var subWidget = widget.children[detailRowIndex][j]
+            if (subWidget.config.id === cid) {
+              return subWidget
+            }
+          }
+        } else {
+          // 外部组件触发子表单内部单个组件
+          // 只要组件当前列存在一个有值，则不进行修改
+          var allNull = true, currentCompt = null
+          for (var j = 0; j < widget.children.length; j++ ) {
+            var comptArr = widget.children[j]
+            for (var z = 0; z < comptArr.length; z++) {
+              var subWidget = widget.children[j][z]
+              if (subWidget.config.id === cid) {
+                var valStr = getComptValue(formInNum, subWidget)
+                if ($.trim(valStr) !== '' && $.trim(valStr) !== '[]') {
+                  allNull = false
+                } else {
+                  currentCompt = subWidget
+                }
+              }
+            }
+            
+          }
+          // 由子表单外部触发的子表单内部组件，一列的值，只有当前列全部为空时，才可以进行触发的，
+          if (allNull) {
+            return currentCompt
+          }
+        }
+      }
+    }
+    return null
+  }
+  
+  /**
+   * 获取组件的值
+   */
+  function getComptValue(formInNum, compt) {
+    var valStr = formInNum > 1 ? 'default' : ''
+    if (!$.isEmptyObject(compt)) {
+      var values = compt.config.fields[0].values
+      if (!values || values.length === 0) {
+        return ''
+      }
+      switch (compt.config.compt) {
+        case 'radiobutton':
+        case 'selectbox':
+        case 'checklist':
+        case 'selectmultibox':
+        case 'department':
+        case 'belonger':
+        case 'contact':
+          valStr = JSON.stringify(values)
+          break
+        default:
+          valStr = values[0].val
+      }
+    }
+    return valStr
+  }
+  
+  /**
+   * 数据联动、公式编辑，数据赋值优先级判断
+   *  数据设置优先级设定规则：
+   *  1. 新增进入表单后，前端事件已经赋值的后，自动赋值的改值不进行覆盖，仅手动触发可修改
+   *  1. 修改进入表单后，已保存的数据最大，前端事件、默认值改值（数据联动、公式编辑、自定义默认值、...）不进行赋值，尽在手动修改后可修改
+   */
+  function priorityJudgment(payload, context) {
+    var formInNum = cacheUtils.getFormInNum()
+    var compt = getComptWidgetByConfigId(formInNum, context, payload.configId, payload.inDetailGroupIndex)
+    // 开启缓存页面初始化后，根据组件未赋值前的值，空字符串或者空数组均可继续被覆盖
+    var valStr = getComptValue(formInNum, compt)
+    // 数据值设置优先级设定，前端事件赋值优先级大于默认值（数据联动、公式编辑、自定义默认值， ...）
+    if ((!$.isEmptyObject(context.state.launchFillValues) && context.state.launchFillValues.indexOf(payload.configId) !== -1) // 发起填报、发起审批，发起填报、发起审批存在赋空值
+        // 当前数据被标记为前端事件赋值的数据，不可覆盖
+        || (payload.dataType !== context.state.comptDataType['blurChange'] && context.state.comptDataTypeValue[payload.configId] === context.state.comptDataType['eventEnter'])
+        // 不是第一次进入页面、不是手动触发、存在缓存的情况下，不触发数据联动
+        || (payload.dataType === context.state.comptDataType['init'] && context.state.formCache && formInNum && formInNum > 1 && $.trim(valStr) !== '' && $.trim(valStr) !== '[]')) {
+      return true
+    }
+    return false
+  }
+  
+  return {
+    dataLoadInit: dataLoadInit,
+    priorityJudgment: priorityJudgment,
+    getComptCache: cacheUtils.getComptCache
+  }
+})

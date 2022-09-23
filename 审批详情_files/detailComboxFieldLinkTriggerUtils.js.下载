@@ -1,0 +1,304 @@
+define(['Vue', 'jquery', 'cookies', 'formDataLoadValidateUtil'], function (Vue, $, Cookies, formDataLoadValidateUtil) {
+  'use strict'
+
+  var detailComboxLinkConfig = {
+    linkFormConditionFieldObj: {},//所有有数据联动绑定关系的条件字段对象conditionId:[linkInfo]
+    linkResultFieldCondObjs: {},//数据联动自动联动的值所依赖的条件对象集对象configId:{condFieldId:{id: 1, compt: '', val: ''}}
+    linkFieldIdAndVueObjs: {},//数据联动相关组件id-vue实例对象 {configId: {inDetailGroupIndex: {id: 1, vueObj: vueObj}}}
+  }
+
+  function doRequest(url, data) {
+    return $.ajax({
+      url: url,
+      type: 'post',
+      data: data,
+      dataType: 'json'
+    })
+  }
+
+  /**
+   * 提取表单结构里所有数据联动字段
+   */
+  /**
+   * 提取表单结构里所有数据联动字段
+   */
+  function acquireLinkFormField(compts) {
+    
+    function doAcquireLinkFormField(compts) {
+      for (var i = 0; i < compts.length; i++) {
+        var ele = compts[i]
+        if (ele.config.linkInfo && ele.config.linkInfo.linked && ele.config.linkInfo.linkSubComptId > 0) {
+          var linkInfo = ele.config.linkInfo
+          //按条件将所有依赖此条件的字段组装在此对象linkFormConditionFieldObj中形成一个数组集合
+          var linkedObj = detailComboxLinkConfig.linkFormConditionFieldObj, condFields = linkInfo.condFields, condFieldObj = {}
+          for (var j = 0; j < condFields.length; j++) {
+            var condField = condFields[j], key = condField.currFormCondFieldId
+            if (!linkedObj[key]) {
+              linkedObj[key] = []
+            }
+            linkInfo['currFormValueFieldId'] = ele.config.id
+            linkInfo['currFormValueFieldCompt'] = ele.config.compt
+            var find = false
+            for (var k = 0; k < linkedObj[key].length; k++) {
+              var subEle = linkedObj[key][k]
+              if (subEle.currFormValueFieldId === ele.config.id) {
+                //判断当前 ele.config.id要联动值的组件是否已在linkedObj[key]中增加过
+                find = true
+                break
+              }
+            }
+            if (!find) {
+              //未增加过才新增配置
+              linkedObj[key].push(linkInfo)
+            }
+            var tempObj = {id: condField.linkFormCondFieldId, compt: condField.linkFormCondFieldCompt, val: '', hasVal: false}
+            if (!condFieldObj.hasOwnProperty(key)) {
+              condFieldObj[key] = []
+            }
+            condFieldObj[key].push(tempObj)
+          }
+          //将所有要通过联动显示值的字段的所有依赖的条件对象组存到此对象中
+          detailComboxLinkConfig.linkResultFieldCondObjs[ele.config.id] = condFieldObj
+        }
+      }
+    }
+    
+    doAcquireLinkFormField(compts)
+  }
+
+  function getLinkResultFieldCondArrByFieldId(id) {
+    var condFieldObjs = detailComboxLinkConfig.linkResultFieldCondObjs[id], arr = []
+    for (var condFieldId in condFieldObjs) {
+      var condFields = condFieldObjs[condFieldId]
+      for (var i = 0; i < condFields.length; i++) {
+        var condField = condFields[i]
+        //将有值的条件值配置字段信息组装到数组里作为联动查询条件使用
+        if (condField.compt === 'contact' || condField.compt === 'belonger') {
+          var uids = []
+          if (condField.val) {
+            uids = condField.val.split(',')
+          }
+          arr.push([{id: condField.id, compt: condField.compt, val: condField.val, uids: uids, logicType: 0}])
+        }
+        else if (condField.compt === 'department') {
+          var userList = []
+          if (condField.val) {
+            var deptIds = condField.val.split(',')
+            userList = deptIds.map(function (item) {
+              return {id: item}
+            })
+          }
+          arr.push([{id: condField.id, compt: condField.compt, val: condField.val, userList: userList, logicType: 0}])
+        }
+        else {
+          arr.push([{id: condField.id, compt: condField.compt, val: condField.val, logicType: 0}])
+        }
+      }
+    }
+    return arr
+  }
+
+  function autoFillFieldValue(context, linkFormFields, payload, index) {
+    var linkFormFieldObj = linkFormFields[index]
+    var arr = getLinkResultFieldCondArrByFieldId(linkFormFieldObj.currFormValueFieldId), hasNullCondVal = false
+    for (var i = 0; i < arr.length; i++) {
+      var ele = arr[i][0]
+      if (!ele.val) {
+        hasNullCondVal = true
+        break
+      }
+    }
+    if (arr.length <= 0 || hasNullCondVal || (detailComboxLinkConfig.isPreview && detailComboxLinkConfig.isInit)) {
+      //如果某个要联动请求值的字段所依赖的条件中有一个没有值 则不去请求获取值
+      var detailComboxObj = detailComboxLinkConfig.linkFieldIdAndVueObjs[linkFormFieldObj.currFormValueFieldId][-1]
+      detailComboxObj.vueObj.triggerDetailEvent(0)
+      var nextIndex = index
+      linkFormFieldObj = linkFormFields[++nextIndex]
+      if (linkFormFieldObj) {
+        autoFillFieldValue(context, linkFormFields, payload, ++index)
+      }
+      return
+    }
+  
+    var url = 'data/web/apps/forms/fore/forms/user/data/list'
+    var searchStr = {'model': 0, 'filters': []}
+    var params = {
+      formId: linkFormFieldObj.linkFormId,
+      enc: linkFormFieldObj.linkFormIdEnc,
+      cpage: 1,
+      pageSize: 10,
+      searchStr: JSON.stringify(searchStr),
+      andOrType: 1,
+      screenStr: JSON.stringify(arr)
+    }
+    if (linkFormFieldObj.linkFormType === 'approveForm') {
+      url = 'data/approve/apps/forms/fore/list'
+      params.aprvAppId = aprvAppId
+      params.pageEnc = pageEnc
+    }
+    
+    doRequest(url, params).then(function (res) {
+      var nextIndex = index
+      var result = []
+      var detailComboxObj = detailComboxLinkConfig.linkFieldIdAndVueObjs[linkFormFieldObj.currFormValueFieldId][-1]
+      if (res.data.resultList && res.data.resultList.length === 0) {
+        detailComboxObj.vueObj.triggerDetailEvent(0)
+      }
+      if (res.data.resultList[0] && res.data.resultList[0].formData) {
+        var formData = res.data.resultList[0].formData
+        var linkDetail = null
+        for (var i = 0; i < formData.length; i++) {
+          if (formData[i].id === linkFormFieldObj.linkSubComptId) {
+            linkDetail = formData[i].compts
+            break
+          }
+        }
+        if (detailComboxObj && linkDetail) {
+          var promise = new Promise(function(resolve, reject) {
+            context.state.currFormValueFieldVerify.linkFiled[linkFormFieldObj.currFormValueFieldId] = {
+              id: linkFormFieldObj.currFormValueFieldId,
+              type: 1,
+              compt: 'detailcombox',
+              inDetailGroupIndex: payload.inDetailGroupIndex
+            }
+            detailComboxObj.vueObj.triggerDetailEvent(linkDetail.length)
+            resolve(linkFormFieldObj);
+          });
+          promise.then(function(linkFormFieldObj){
+            try{
+              triggerLoading({configId: linkFormFieldObj.currFormValueFieldId, inDetailGroupIndex: payload.inDetailGroupIndex}, false)
+              for (var k = 0; k < linkDetail.length; k++) {
+                for(var i = 0; i< linkFormFieldObj.linkValueFields.length; i++) {
+                  var linkdataVal = res.data.resultList[0].formIdValueData[linkFormFieldObj.linkValueFields[i].linkFormCondFieldId]
+                  var groupData = []
+                  if (linkdataVal) {
+                    groupData = linkdataVal.groupValues[k].values[0]
+                  }
+                  triggerFieldValues(context,{configId: linkFormFieldObj.linkValueFields[i].currFormCondFieldId, inDetailGroupIndex: k, dataType: payload.dataType}, groupData)
+                }
+              }
+            }  catch (e) {
+              console.log(e)
+            }
+            delete context.state.currFormValueFieldVerify.linkFiled[linkFormFieldObj.currFormValueFieldId]
+          });
+        }
+      } else {
+        triggerLoading({configId: linkFormFieldObj.currFormValueFieldId, inDetailGroupIndex: payload.inDetailGroupIndex}, false)
+        triggerFieldValues(context,{configId: linkFormFieldObj.currFormValueFieldId, inDetailGroupIndex: payload.inDetailGroupIndex, dataType: payload.dataType}, result)
+      }
+      linkFormFieldObj = linkFormFields[++nextIndex]
+      if (linkFormFieldObj) {
+        autoFillFieldValue(context, linkFormFields, payload, ++index)
+      }
+    })
+  }
+
+  /**获取联动组件vue对象*/
+  function getLinkValueFieldObj(payload) {
+    var objs = detailComboxLinkConfig.linkFieldIdAndVueObjs
+    if (objs.hasOwnProperty(payload.configId)) {
+      return objs[payload.configId]
+    }
+    return null
+  }
+
+  /**触发修改组件值*/
+  function triggerFieldValues(context, payload, result) {
+    var comptVueObj = getLinkValueFieldObj(payload)
+    if (!comptVueObj) {
+      return
+    }
+    // 数据值设置优先级设定，前端事件赋值优先级大于默认值（数据联动、公式编辑、自定义默认值， ...）
+    if (formDataLoadValidateUtil.priorityJudgment(payload, context)) {
+      // 如果是已有进入前端事件赋值的组件，删除数据联动未加载完标识
+      delete context.state.currFormValueFieldVerify.linkFiled[payload.configId]
+      // 数据设置优先级设定规则：
+      // 1. 新增进入表单后，前端事件已经赋值的后，自动赋值的改值不进行覆盖，仅手动触发可修改
+      // 1. 修改进入表单后，已保存的数据最大，前端事件、默认值改值（数据联动、公式编辑、自定义默认值、...）不进行赋值，尽在手动修改后可修改
+      return
+    }
+    if (payload.inDetailGroupIndex !== -1) {
+      //触发字段为子表单内的字段
+      if (comptVueObj.hasOwnProperty(payload.inDetailGroupIndex)) {
+        comptVueObj[payload.inDetailGroupIndex].vueObj.setFieldValue(result)
+      }
+    } else {
+      //触发字段为子表单外的字段
+      for (var indexKey in comptVueObj) {
+        comptVueObj[indexKey].vueObj.setFieldValue(result)
+      }
+    }
+  }
+  
+  
+
+  /**触发相应组件是否在加载数据中*/
+  function triggerLoading(payload, isLoading) {
+    var comptVueObj = getLinkValueFieldObj(payload)
+    if (!comptVueObj) {
+      return
+    }
+    if (payload.inDetailGroupIndex !== -1) {
+      //触发字段为子表单内的字段
+      if (comptVueObj.hasOwnProperty(payload.inDetailGroupIndex)) {
+        comptVueObj[payload.inDetailGroupIndex].vueObj.setLoadingStatus(isLoading)
+      }
+    } else {
+      //触发字段为子表单外的字段
+      for (var indexKey in comptVueObj) {
+        comptVueObj[indexKey].vueObj.setLoadingStatus(isLoading)
+      }
+    }
+  }
+  
+
+  return {
+    /**初始化数据联动配置信息*/
+    initFieldLinkConfig: function (compts) {
+      acquireLinkFormField(compts)
+    },
+    /**初始化组装数据联动相关组件id-vueObj*/
+    createdFieldLinkTrigger: function (state, payload) {
+      var objs = detailComboxLinkConfig.linkFieldIdAndVueObjs
+      var widget = payload.widget
+      if (!objs.hasOwnProperty(widget.config.id)) {
+        objs[widget.config.id] = {}
+      }
+      objs[widget.config.id][widget.config.inDetailGroupIndex] = {id: payload.widget.id, vueObj: payload.vueObj}
+    },
+    /** 执行联动操作 */
+    operateLinkFiledData: function (context, payload) {
+      //自动填充数据联动字段值
+      var linkFormFields = detailComboxLinkConfig.linkFormConditionFieldObj[payload.configId]
+      if (linkFormFields && linkFormFields.length > 0) {
+        // 数据未加载完禁止提交校验添加
+        for (var i = 0; i < linkFormFields.length; i++) {
+          var linkFormFieldObj = linkFormFields[i]
+          var compt = linkFormFieldObj.currFormValueFieldCompt
+          if (compt !== 'selectbox' && compt !== 'selectmultibox') {
+            triggerLoading({configId: linkFormFieldObj.currFormValueFieldId, inDetailGroupIndex: payload.inDetailGroupIndex}, true)
+          }
+        }
+        //补全所有联动显示值的字段的条件值
+        for (var resultFieldId in detailComboxLinkConfig.linkResultFieldCondObjs) {
+          var condFields = detailComboxLinkConfig.linkResultFieldCondObjs[resultFieldId][payload.configId]
+          if (condFields && condFields.length > 0) {
+            for (var i = 0; i < condFields.length; i++) {
+              var condField = condFields[i]
+              condField.hasVal = true
+              condField.val = payload.value
+            }
+          }
+        }
+        setTimeout(function () {
+          autoFillFieldValue(context, linkFormFields, payload, 0, '')
+        }, 200)
+      }
+    },
+    /** 获取联动条件组件列表 */
+    getLinkResultFieldCondArrByFieldId: function (id) {
+      return getLinkResultFieldCondArrByFieldId(id)
+    }
+  }
+})

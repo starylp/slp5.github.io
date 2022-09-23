@@ -1,0 +1,315 @@
+define(['jquery', 'util', 'popup', 'tipImgs', 'publicUtils', 'publicUpload'], function ($, util, popup, tipImgs, publicUtils, publicUpload) {
+  'use strict'
+  
+  return function (widget) {
+    
+    //修改上传按钮样式及文案
+    function setClassObj(classObj, value, type, ocrType) {
+      classObj.class = value
+      var frontText, backText
+      switch (ocrType) {
+        case 0:
+          frontText = '识别身份证人像面'
+          backText = '识别身份证国徽面'
+          break
+        case 2:
+          frontText = '识别行程码'
+          break
+        case 3:
+          frontText = '识别健康码'
+          break
+        case 4:
+          frontText = '人脸检测'
+          break
+        default:
+      }
+      classObj.text = type === 0 ? frontText : backText
+    }
+    
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{widget_error: errorTip || (errorInfo.show&&errorInfo.verifyMsg)}" v-show="isShow && hasAuthority">',
+        '<!--标题-->',
+        '<div class="form_widget_title">',
+        '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+        '</div>',
+        '<!--标题描述-->',
+        '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+        '<!--填写区域-->',
+        '<div class="form_widget_data">',
+        '<!--禁止编辑-->',
+        '<div class="form_img_forbid" v-if="readonly"></div>',
+        '<!--可编辑-->',
+        '<div class="form_widget_cont" v-if="!readonly">',
+        '<!--身份证识别-->',
+        '<div class="identity_verify">',
+        '<p class="identity_verify_btn mb10" v-if="widget.config.front">',
+        '<input type="file" class="dentity_verify_input" @change="uploadFile($event, 0)"/>',
+        '<span class="identity_verify_icon" :class="front.class"></span>{{front.text}}',
+        '</p>',
+        '<p class="identity_verify_btn mb10" v-if="widget.config.back">',
+        '<input type="file" class="dentity_verify_input" @change="uploadFile($event, 1)"/>',
+        '<span class="identity_verify_icon" :class="back.class"></span>{{back.text}}',
+        '</p>',
+        '</div>',
+        '</div>',
+        '</div>',
+        '<!--提示文本-->',
+        '<div class="form_widget_prompt">',
+        '<div class="widget_error_tip" v-show="errorInfo.show&&errorInfo.verifyMsg">',
+        '<p class="must_word">{{errorInfo.verifyMsg}}</p>',
+        '</div>',
+        '</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          errorInfo: {
+            verifyMsg: '',
+            show: false
+          },
+          front: {class: 'rxm', text: '识别身份证人像面'},
+          back: {class: 'ghm', text: '识别身份证国徽面'},
+          temporary: true//文件识别组件上传图片默认增加临时标记，若需要填充图片组件，则根据被填充的图片组件判断是否增加临时标记
+        }
+      },
+      components: {'tip-imgs': tipImgs},
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if (this.required && this.value && this.value.length === 0) {
+            this.errorInfo.verifyMsg = '此项为必填项'
+          }
+          if (this.required) {
+            return this.value.length !== 0
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            this.errorInfo.show = true
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        limitSize: function () {
+          return this.widget.config.fields[0].verify.limitSize
+        },
+        limitCount: function () {
+          return this.widget.config.fields[0].verify.limitCount
+        },
+        limitType: function () {
+          return this.widget.config.fields[0].verify.limitType
+        },
+        limitWidth: function () {
+          if (!this.widget.config.fields[0].verify.limitWidth) {
+            return ''
+          }
+          return parseInt(this.widget.config.fields[0].verify.limitWidth)
+        },
+        limitHeight: function () {
+          if (!this.widget.config.fields[0].verify.limitHeight) {
+            return ''
+          }
+          return parseInt(this.widget.config.fields[0].verify.limitHeight)
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus = false
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs
+        },
+        uploadModeData: function () {
+          return this.widget.config.uploadMode
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+          
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        }
+      },
+      methods: {
+        uploadFile: function (e, type) {
+          var _this = this
+          if (_this.readonly) {
+            return
+          }
+          _this.$store.commit('setInitStatus', false)
+          //校验图片格式
+          var f = e.target.files[0].name.split('.')
+          var imgTypeReg = '^(jpg|jpeg|png|bmp)$'
+          var imgReg = new RegExp(imgTypeReg, 'i')
+          if (f.length > 0 && !imgReg.test(f[f.length - 1])) {
+            alert('请上传jpg/jpeg/png/bmp格式图片')
+            e.target.value = ''
+            return
+          }
+          //校验大小
+          if (5 < e.target.files[0].size / 1024 / 1024) {
+            alert('请上传5M以内图片')
+            return
+          }
+          var formData = new FormData()
+          formData.append('file', e.target.files[0])
+          // <!--人像面：rxm 国徽面：ghm 识别成功：verify_suc 识别失败：verify_error 识别中：verify_loading-->
+          var classObj = type === 0 ? _this.front : _this.back
+          classObj.class = 'verify_loading'
+          classObj.text = '正在识别'
+          //上传图片
+          var ocrType = _this.widget.config.ocrConfig.type//ocr识别类型
+          publicUpload.setTemporary(_this, type, ocrType)//根据当前组件判断是否增加"云盘临时标记"
+          publicUpload.commonUpload(_this, formData).then(function (response) {
+            if (response.success && response.data) {
+              var imageData = response.data
+              // 调用ocr接口
+              _this.errorInfo.verifyMsg = ''
+              _this.errorInfo.show = false
+              var aprvAppId = _this.$store.getters.getApproveModel ? aprvAppId : 0
+              publicUpload.ocrUpload(_this, '', response.previewUrl, null, formId, type, ocrType, aprvAppId)
+                          .then(function (res) {
+                            if (res.success && res.data && res.data.wordsResult) {
+                              //识别成功
+                              var result = res.data.wordsResult
+                              setClassObj(classObj, 'verify_suc', type, ocrType)
+                              publicUtils.initComptValuesByOcr(_this, type, ocrType, result, imageData)
+                            } else {
+                              setClassObj(classObj, 'verify_error', type, ocrType)
+                              _this.errorInfo.show = true
+                              _this.errorInfo.verifyMsg = res.msg || '识别失败'
+                            }
+                          })
+            } else {
+              setClassObj(classObj, 'verify_error', type, ocrType)
+              _this.errorInfo.show = true
+              _this.errorInfo.verifyMsg = '上传失败'
+            }
+            e.target.value = ''
+          })
+        }
+      },
+      created: function () {
+        //动态赋值上传按钮对象数据
+        switch (this.widget.config.ocrConfig.type) {
+          case 2:
+            this.front = {class: 'xcm', text: '识别行程码'}
+            break
+          case 3:
+            this.front = {class: 'jkm', text: '识别健康码'}
+            break
+          case 4:
+            this.front = {class: 'rlsb', text: '人脸检测'}
+            break
+          default:
+        }
+      }
+    }
+  }
+})

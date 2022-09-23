@@ -1,0 +1,757 @@
+define(['jquery', 'moment', 'fancybox', 'cookies'], function ($, moment, fancybox, Cookies) {
+  
+  function reSetDateFormat(dateTimeFormat) {
+    if (typeof dateTimeFormat === 'undefined' || dateTimeFormat === undefined || dateTimeFormat == null) {
+      return 'YYYY-MM-DD'
+    }
+    var dateFormateObj = {
+      'HH:mm': 'HH:mm',
+      'yyyy': 'YYYY',
+      'yyyy-MM': 'YYYY-MM',
+      'yyyy-MM-dd HH:mm': 'YYYY-MM-DD HH:mm',
+      'yyyy-MM-dd': 'YYYY-MM-DD'}
+    for (var key in dateFormateObj) {
+      if (dateTimeFormat === key) {
+        return dateFormateObj[key]
+      }
+    }
+    return 'YYYY-MM-DD'
+  }
+
+  function addFormDataCache(id, formData) {
+    var key = 'custom_forms_apply_' + id
+    for (var i = 0; i < formData.length; i++) {
+      if (formData[i].compt === 'autonumber') {
+        formData.splice(i, 1)
+      }
+    }
+    window.localStorage.removeItem(key)
+    window.localStorage.setItem(key, JSON.stringify(formData))
+  }
+  
+  function getFormDataCache(id) {
+    var key = 'custom_forms_apply_' + id
+    var val = window.localStorage.getItem(key)
+    return val ? eval('(' + val + ')') : []
+  }
+  
+  function delFormDataCache(id) {
+    var key = 'custom_forms_apply_' + id
+    window.localStorage.removeItem(key)
+  }
+
+  function addApproveFormDataCache(id, formData) {
+    var key = 'approve_forms_apply_' + id
+    for (var i = 0; i < formData.length; i++) {
+      if (formData[i].compt === 'autonumber') {
+        formData.splice(i, 1)
+      }
+    }
+    window.localStorage.removeItem(key)
+    window.localStorage.setItem(key, JSON.stringify(formData))
+  }
+  
+  function getApproveFormDataCache(id) {
+    var key = 'approve_forms_apply_' + id
+    var val = window.localStorage.getItem(key)
+    return val ? eval('(' + val + ')') : []
+  }
+  
+  function delApproveFormDataCache(id) {
+    var key = 'approve_forms_apply_' + id
+    window.localStorage.removeItem(key)
+  }
+  
+  function acquireOption(vm, formsUserDetailList) {
+    var optionData = {}, isOther = {}, otherChecked
+    for (var i = 0; i < formsUserDetailList.length; i++) {
+      var formUserData = formsUserDetailList[i]
+      var values = formUserData.formValue
+      if (values) {
+        if (formUserData.comptName === 'leavekit' || formUserData.comptName === 'datetimerange') {
+          var index = vm.widget.config.optionBindInfo.bindFieldIdx
+          if (index >= 0 && values[index].hasOwnProperty('val') && !optionData[values[index].val]) {
+            optionData[values[index].val] = values[index].val
+          }
+        } else {
+          for (var k = 0; k < values.length; k++) {
+            if (values[k].hasOwnProperty('val') && !optionData[values[k].val]) {
+              //当val为数字时，对象会自动排序，导致排序会失效，无法控制排序问题，
+              var keyStr = values[k].val + ' '
+              if (values[k].isOther) {
+                keyStr = values[k].val + '  ' //如果是手动追加的"其他"选项, 用'  '标识, 防止手动追加的"其他"覆盖了查出来的结果中名称为其他的选项。
+              }
+              optionData[keyStr] = values[k].val
+              isOther[keyStr] = !!values[k].isOther
+              if (values[k].isOther) {
+                otherChecked = values[k].checked
+              }
+            } else if (values[k].hasOwnProperty('uname') && !optionData[values[k].uname]) {
+              optionData[values[k].uname] = values[k].uname
+            } else if (values[k].hasOwnProperty('departmentName') && !optionData[values[k].departmentName]) {
+              optionData[values[k].departmentName] = values[k].departmentName
+            }
+          }
+        }
+      }
+    }
+    var tipArr = []
+    for (var key in optionData) {
+      var result = $.trim(key)
+      if (result === '') {
+        continue
+      }
+      if (!/^1[3456789]\d{9}$/.test(result)
+          && !/^[0-9]{6}$/.test(result)
+          && !/(^\d{15}$)|(^\d{18}$)|(^\d{17}(\d|X|x)$)/.test(result)
+          && /^(\-|\+)?\d+(\.\d+)?$/.test(result)
+          && result.indexOf('.') !== -1) {
+        result = parseFloat(result)
+      }
+  
+      if (isOther[key]) {
+        //当前key是由于开启了"其他"选项功能后,手动追加的"其他", 记录追加的索引位置,目的是分页时候保证此选项必须在最后
+        vm.options.push({'title': result, 'isOther': true, 'checked': !!otherChecked})
+        vm.$store.commit('setAppendOtherOptionIndex', {id: vm.widget.config.id, index: vm.options.length - 1})
+        break
+      }
+      
+      var find = false
+      for (var i = 0; i < vm.options.length; i++) {
+        if (vm.options[i].title === result) {
+          find = true
+          break
+        }
+      }
+      if (!find) {
+        vm.options.push({'title': result, 'isOther': false, 'checked': false})
+      }
+    }
+    for (var i = 0; i < vm.options.length; i++) {
+      for (var j = 0; j < vm.value.length; j++) {
+        // 都是其他  ||   (值相等 && 都是其他或者都不是其他)
+        if ((vm.value[j].isOther && vm.options[i].isOther) || (vm.value[j].val === vm.options[i].title && vm.value[j].isOther === vm.options[i].isOther)) {
+          if (!vm.options[i].isOther || (otherChecked || otherChecked === undefined)) {
+              vm.options[i].checked = true
+              tipArr.push(vm.options[i].title)
+              break
+          }
+        }
+      }
+    }
+  }
+  
+  function acquireSearchOption(vm, formsUserDetailList) {
+    var optionData = {}
+    for (var i = 0; i < formsUserDetailList.length; i++) {
+      var formUserData = formsUserDetailList[i]
+      var values = formUserData.formValue
+      if (values) {
+        if (formUserData.comptName === 'leavekit' || formUserData.comptName === 'datetimerange') {
+          var index = vm.widget.config.optionBindInfo.bindFieldIdx
+          if (index >= 0 && values[index].hasOwnProperty('val') && !optionData[values[index].val]) {
+            optionData[values[index].val] = values[index].val
+          }
+        } else {
+          for (var k = 0; k < values.length; k++) {
+            if (values[k].hasOwnProperty('val') && !optionData[values[k].val]) {
+              //当val为数字时，对象会自动排序，导致排序会失效，无法控制排序问题，
+              var keyStr = values[k].val + " "
+              optionData[keyStr] = values[k].val
+            } else if (values[k].hasOwnProperty('uname') && !optionData[values[k].uname]) {
+              optionData[values[k].uname] = values[k].uname
+            } else if (values[k].hasOwnProperty('departmentName') && !optionData[values[k].departmentName]) {
+              optionData[values[k].departmentName] = values[k].departmentName
+            }
+          }
+        }
+      }
+    }
+    var tipArr = []
+    for (var key in optionData) {
+      var result = $.trim(key)
+      if (result === '') {
+        continue
+      }
+      if (/^(\-|\+)?\d+(\.\d+)?$/.test(result)) {
+        result = parseFloat(result)
+      }
+      var find = false
+      for (var i = 0; i < vm.searchOptions.length; i++) {
+        if (vm.searchOptions[i].title === result) {
+          find = true
+          break
+        }
+      }
+      if (!find) {
+        vm.searchOptions.push({'title': result})
+      }
+    }
+    for (var i = 0; i < vm.searchOptions.length; i++) {
+      for (var j = 0; j < vm.value.length; j++) {
+        if (vm.value[j].val === vm.searchOptions[i].title) {
+          vm.searchOptions[i].checked = true
+          tipArr.push(vm.searchOptions[i].title)
+          break
+        }
+      }
+    }
+  }
+  
+  /** 下拉框通用工具类 */
+  var selectboxUtil = {
+    /** 下拉框选项从第三方地址获取 */
+    loadOptions: function (vm, multiple) {
+      var link = ''
+      for (var i = 0; i < vm.widget.config.optionsLoadFromUrl.url.length; i++) {
+        var url = vm.widget.config.optionsLoadFromUrl.url[i]
+        if (url.type === 'text') {
+          link += url.label
+        } else if (url.type === 'field') {
+          var rootWidgets = vm.$store.getters.rootWidgets
+          for (var j = 0; j < rootWidgets.length; j++) {
+            var vals = []
+            if (rootWidgets[j].config.id == url.cid) {
+              if (url.ftype === 'uname' || url.ftype === 'uid') {
+                var vs = rootWidgets[j].config.fields[0].values
+                for (var k = 0; k < vs.length; k++) {
+                  if (url.ftype === 'uname') {
+                    vals.push(vs[k].uname)
+                  } else if (url.ftype === 'uid') {
+                    vals.push(vs[k].puid)
+                  }
+                }
+              } else {
+                if (rootWidgets[j].config.fields[0].values && rootWidgets[j].config.fields[0].values.length > 0) {//下拉框、单选未选择情况判断
+                  var val = rootWidgets[j].config.fields[0].values[0].val
+                  if (val == '') {
+                    return $.Deferred().resolve({success: false})
+                  }
+                  vals.push(val)
+                }
+              }
+            }
+            link += encodeURIComponent(vals.join(','))
+          }
+          var systemFields = vm.$store.getters.getSystemFields
+          var val = '', commitUser = Cookies.get('oa_name'), commitUid = Cookies.get('oa_uid'), commitFid = vm.$store.getters.getFormFid + ''
+          if ($.isEmptyObject(systemFields) || $.isEmptyObject(commitUser) || $.isEmptyObject(commitUid) || $.isEmptyObject(commitFid)) {
+            return $.Deferred().resolve({success: false})
+          }
+          switch (parseInt(url.cid)) {
+            case systemFields.commitUser.id:
+              val = commitUser
+              break
+            case systemFields.uid.id:
+              val = commitUid
+              break
+            case systemFields.deptId.id:
+              val = commitFid
+              break
+            default:
+              break
+          }
+          link += encodeURIComponent(val)
+        }
+      }
+      
+      var uri = 'front/open/share/apps/forms/fore/selectbox/requesturl'
+      if (multiple) {
+        uri = 'front/open/share/apps/forms/fore/multipleselect/requesturl'
+      }
+      return $.post(uri,
+          {
+            url: link,
+            response: JSON.stringify(vm.widget.config.optionsLoadFromUrl.response),
+            urlHeaders: JSON.stringify(vm.widget.config.optionsLoadFromUrl.urlHeaders)
+          }
+      )
+    },
+    optionsLoadFromUrl: function (vm, multiple) {
+      return selectboxUtil.loadSystemFields(vm).then(function () {
+        return selectboxUtil.loadOptions(vm, multiple)
+      })
+    },
+    loadSystemFields: function (vm) {
+      var systemFields = vm.$store.getters.getSystemFields
+      if ($.isEmptyObject(systemFields)) {
+        return $.get('data/common/system/field/list', {}, function (res) {
+          if (res.success) {
+            vm.$store.commit('setSystemFields', res.data.systemFields)
+          }
+        })
+      } else {
+        var defer = $.Deferred()
+        defer.resolve({success: true, data: {systemFields: systemFields}})
+        return defer.promise()
+      }
+    }
+  }
+
+  /** 重新构造选择用户信息 */
+  function reconstructSelUsers(vm) {
+    if (vm.selDeptUsers.length <= 0) {
+      return ''
+    }
+    var choseDepartments = []
+    for (var i = 0; i < vm.selDeptUsers.length; i++) {
+      var selUserOrg = vm.selDeptUsers[i]
+      var userOrgObj
+      if (selUserOrg.t === 2) {
+        userOrgObj = {
+          id: selUserOrg.id,
+          name: selUserOrg.name,
+          selDeptName: selUserOrg.name,
+          t: selUserOrg.t,
+          pid: selUserOrg.pid,
+          usercount: 100000
+        }
+        var names = [selUserOrg.name]
+        findDepartmentsName(vm, selUserOrg.pid, names)
+        userOrgObj['orgName'] = names.reverse().join('/')
+      } else {
+        userOrgObj = {id: selUserOrg.id, name: selUserOrg.name, t: selUserOrg.t}
+      }
+      choseDepartments.push(userOrgObj)
+      if (selUserOrg.t === 2) {
+        findDepartments(vm, choseDepartments, selUserOrg.id, selUserOrg.name, selUserOrg.t, userOrgObj['orgName'])
+      }
+    }
+    return JSON.stringify(choseDepartments)
+  }
+  
+  // 递归取出所有选中的节点架构信息
+  function findDepartmentsName(vm, pid, names) {
+    if (parseInt(pid) === -1) {
+      return
+    }
+    for (var i = 0; i < vm.departments.length; i++) {
+      var dept = vm.departments[i]
+      if (dept.id === pid) {
+        names.push(dept.name)
+        findDepartmentsName(vm, dept.pid, names)
+      }
+    }
+  }
+  
+  // 递归取出所有选中的节点信息
+  function findDepartments(vm, choseDepartments, id, selFOrgName, t, orgName) {
+    for (var i = 0; i < vm.departments.length; i++) {
+      var dept = vm.departments[i]
+      if (dept.pid === id) {
+        var orgObj = {id: dept.id, name: dept.name, selDeptName: selFOrgName, t: t, usercount: 100000, pid: id}
+        orgObj['orgName'] = orgName + '/' + dept.name
+        choseDepartments.push(orgObj)
+        findDepartments(vm, choseDepartments, dept.id, selFOrgName, t, orgObj['orgName'])
+      }
+    }
+  }
+  
+  function dropRefresh() {
+    $('body').dropload({
+      scrollArea: window,
+      loadUpFn: function (me) {
+        location.reload(true)
+      }
+    })
+  }
+  
+  function closeView() {
+  
+  }
+  
+  function lengthOfTimeByStr(sdate, edate) {
+    var isDateTime = false
+    if (sdate.indexOf(':') != -1) {
+      isDateTime = true
+    }
+    var s = moment(sdate), e = isDateTime ? moment(edate) : moment(moment(edate).valueOf() + 24 * 60 * 60 * 1000), oneHour = 60,
+        oneDay = oneHour * 24,
+        rMinute = e.diff(s, 'minutes'),
+        rDay = parseInt(rMinute / oneDay),
+        rHour = parseInt(rMinute % oneDay / oneHour),
+        rMinute = parseInt(rMinute % oneDay % oneHour),
+        rangeObjDay = rDay + Math.round(rHour / 24 * 100) / 100 + Math.round(rMinute / 60 / 24 * 100) / 100,
+        rangeObjHour = rDay * 24 + rHour + Math.round(rMinute / 60 * 100) / 100,
+        duration = ''
+    
+    if (rDay > 0) {
+      duration += rDay + '天'
+    }
+    if (rHour > 0 || rMinute > 0) {
+      duration += (rHour + roundTime(rMinute, oneHour)) + '小时'
+    }
+    
+    return {
+      rDay: rDay, rHour: rHour, rMinute: rMinute, duration: duration, rangeObjDay: rangeObjDay, rangeObjHour: rangeObjHour
+    }
+  }
+  
+  function roundTime(a, b) {
+    return Math.round(a / b * 10) / 10
+  }
+  
+  function lengthOfTime(sdate, edate) {
+    var s = moment(sdate), e = moment(edate), oneHour = 60, oneDay = oneHour * 24,
+        rMinute = e.diff(s, 'minutes'),
+        rDay = parseInt(rMinute / oneDay),
+        rHour = parseInt(rMinute % oneDay / oneHour),
+        rMinute = parseInt(rMinute % oneDay % oneHour),
+        duration = ''
+    
+    if (rDay > 0) {
+      duration += rDay + '天'
+    }
+    if (rHour > 0 || rMinute > 0) {
+      duration += (rHour + roundTime(rMinute, oneHour)) + '小时'
+    }
+    
+    return {
+      rDay: rDay, rHour: rHour, rMinute: rMinute, duration: duration
+    }
+  }
+
+  function createUUID() {
+    var d = new Date().getTime()
+    if (window.performance && typeof window.performance.now === 'function') {
+      d += performance.now() //use high-precision timer if available
+    }
+    var uuid = 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+      var r = (d + Math.random() * 16) % 16 | 0
+      d = Math.floor(d / 16)
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
+    })
+    return uuid
+  }
+
+  function doCalculateTabItemNum() {
+    var active_tab = $('#apply_tabs_form')
+    var tab_width = active_tab.find('.tab_list').width()
+    var items = active_tab.find('.tab_item')
+    var len = 0
+    for (var i = 0; i < items.length; i++) {
+      len += $(items[i]).width()
+    }
+    return Math.floor(len / tab_width)
+  }
+
+  function reCalculateTabBtnShowStatus(_this) {
+    var tn = doCalculateTabItemNum()
+    _this.fieldTab.leftBtn.disable = true
+    _this.fieldTab.rightBtn.disable = false
+    _this.fieldTab.leftBtn.show = false
+    _this.fieldTab.rightBtn.show = false
+    if (tn >= 1) {
+      _this.fieldTab.leftBtn.show = true
+      _this.fieldTab.rightBtn.show = true
+    }
+  }
+
+  /**
+   *
+   * 根据后台配置的组件多标签组件初始化填写页组件列表对象集
+   */
+  function initAllCompts(_this, transformFactory) {
+    if (!_this.forms.fieldTab) {
+      _this.forms.fieldTab = {open: false}
+    }
+    _this.fieldTab.dataList = _this.forms.fieldTab.dataList
+    _this.fieldTab.open = _this.forms.fieldTab.open
+    _this.fieldTab.activeIndex = 0
+    if (_this.fieldTab.open) {
+      //启用组件多标签
+      var tabOuterAreaCompts = []
+      for (var i = 0; i < _this.widgets.length; i++) {
+        var ele = _this.widgets[i]
+        if (ele && ele.config) {
+          var tabArr = _this.fieldTab.dataList, find = false
+          for (var j = 0; j < tabArr.length; j++) {
+            var fieldFind = false
+            for (var k = 0; k < tabArr[j].fieldIds.length; k++) {
+              if (tabArr[j].fieldIds[k] === ele.config.id) {
+                fieldFind = true
+                break
+              }
+            }
+            if (fieldFind) {
+              find = true
+              break
+            }
+          }
+          if (!find) {
+            //找到没有在标签内的组件
+            tabOuterAreaCompts.push(ele)
+          }
+        }
+      }
+      //初始化标签外组件列表
+      _this.tabOuterCompts = transformFactory.transform(tabOuterAreaCompts, -1)
+      var tabs = _this.fieldTab.dataList
+      for (var i = 0; i < tabs.length; i++) {
+        var comptInTabArr = []
+        for (var j = 0; j < tabs[i].fieldIds.length; j++) {
+         var fieldId = tabs[i].fieldIds[j]
+          for (var k = 0; k < _this.widgets.length; k++) {
+            var ele = _this.widgets[k]
+            if (ele && ele.config && ele.config.id === parseInt(fieldId)) {
+              //找到标签内组件
+              comptInTabArr.push(ele)
+              break
+            }
+          }
+        }
+        //初始化标签内组件列表
+        tabs[i].comptArr = transformFactory.transform(comptInTabArr, -1)
+        tabs[i]['show'] = true
+      }
+      _this.$nextTick(function () {
+        setTimeout(function () {
+          reCalculateTabBtnShowStatus(_this)
+        }, 1000)
+      })
+    } else {
+      //未开启多标签
+      _this.tabOuterCompts = transformFactory.transform(_this.widgets, -1)
+    }
+    // 保存子表单外的定位组件值在store
+    saveLocationValue(_this, _this.widgets)
+  }
+
+  //将用户表单数据处理为在页面表格上显示的表数据(支持明细合并单元格)
+  function calculateTableDataMerge(formData, trDataList) {
+    var detailGroupDataMaxLen = 0, otherDetailObj = {}
+
+    function doCalculateFun(formData, tdDataArr, isDetailColumn) {
+      var len = 0
+      for (var i = 0; i < formData.length; i++) {
+        var ele = formData[i]
+        if (ele.compt === 'captiontext' || (ele.compt === 'detailcombox' && isDetailColumn) || ele.compt === 'autonumber') {
+          continue
+        }
+
+        if (ele.compt === 'detailcombox' || ele.compt === 'matrixradio' || ele.compt === 'matrixcheckbox') {
+          if (!ele.compts || ele.compts.length <= 0 || ele.compts[0].length <= 0) {
+            continue
+          }
+
+          if (detailGroupDataMaxLen < ele.compts.length) {
+            detailGroupDataMaxLen = ele.compts.length
+          }
+
+          var index = doCalculateFun(ele.compts[0], tdDataArr, true)
+          if (!otherDetailObj[i]) {
+            otherDetailObj[i] = {fieldNum: index, data: []}
+          }
+          for (var j = 1; j < ele.compts.length; j++) {
+            var subCompts = ele.compts[j]
+            otherDetailObj[i].data.push(subCompts)
+          }
+          continue
+        }
+        for (var j = 0; j < ele.fields.length; j++) {
+          var field = ele.fields[j]
+          if ('timerange' === field.fieldType.type && !field.fieldType.calculate) {
+            //时间差值字段未启用
+            continue
+          }
+          var colObj = {rowspan: 1, id: ele.id, compt: ele.compt, data: '', isDetailColumn: isDetailColumn}
+          switch (ele.compt) {
+            case 'location':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].address)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'contact':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].uname)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'belonger':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].uname)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'department':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].departmentName)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'livevideo':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].playUrl)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'fileupload':
+              colObj['otherFiles'] = true
+              colObj.data = field.values
+              break
+            case 'imagebox':
+              colObj['imageFiles'] = true
+              colObj.data = field.values
+              break
+            case 'signature':
+              colObj['signFiles'] = true
+              colObj.data = field.values
+              break
+            case 'areamultiselect':
+            case 'multipleselect':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  if (field.values[k].val !== '') {
+                    valArr.push(field.values[k].val)
+                  }
+                }
+              }
+              colObj.data = valArr.join('/')
+              break
+            case 'richtext':
+              colObj['richtext'] = true
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].val)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'datetimerange':
+            case 'checklist':
+            case 'editinput':
+            case 'computeinput':
+            case 'numberinput':
+            case 'slider':
+            case 'dateinput':
+            case 'selectmultibox':
+            case 'radiobutton':
+            case 'selectbox':
+            case 'edittextarea':
+            case 'overtimekit':
+            case 'gooutkit':
+            case 'leavekit':
+            case 'punchkit':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].val)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+          }
+          len++
+          tdDataArr.push(colObj)
+        }
+      }
+      return len
+    }
+
+    //每条数据里的第一行
+    var tdDataArr = []
+
+    doCalculateFun(formData, tdDataArr, false)
+    for (var i = 0; i < tdDataArr.length; i++) {
+      if (!tdDataArr[i].isDetailColumn) {
+        tdDataArr[i].rowspan = detailGroupDataMaxLen
+      }
+    }
+    trDataList.push(tdDataArr)
+    for (var i = 0; i < detailGroupDataMaxLen - 1; i++) {
+      var tdDataArr = []
+      for (var key in otherDetailObj) {
+        if (otherDetailObj[key].data[i]) {
+          doCalculateFun(otherDetailObj[key].data[i], tdDataArr, true)
+        } else {
+          for (var j = 0; j < otherDetailObj[key].fieldNum; j++) {
+            tdDataArr.push({rowspan: 1, data: '', isDetailColumn: true})
+          }
+        }
+      }
+      trDataList.push(tdDataArr)
+    }
+    return trDataList
+  }
+  
+  // 初始化时在store单独保存定位组件值
+  function saveLocationValue(_this, widgets) {
+    if (!widgets || widgets.length === 0) {
+      return;
+    }
+    for (var i = 0; i < widgets.length; i++) {
+      var widget = widgets[i];
+      if (widget.config.compt !== 'location') {
+        continue;
+      }
+      var values = widget.config.fields[0].values || [];
+      _this.$store.commit('setLocationComptValue', {
+        id: widget.config.id,
+        inDetailGroupGeneralId: widget.config.inDetailGroupGeneralId,
+        value: values.length > 0 ? values[0] : {}
+      });
+    }
+  }
+  
+  function numValueConvertToPercent(compts) {
+    if (!compts) {
+      return
+    }
+    for (var i = 0; i < compts.length; i++) {
+      if (compts[i].compt === 'numberinput' || compts[i].compt === 'computeinput') {
+        if (compts[i].fields[0].percentage && compts[i].fields[0].values && compts[i].fields[0].values.length > 0 && compts[i].fields[0].values[0].val) {
+          var aDouble = parseFloat(compts[i].fields[0].values[0].val)
+          var precisionLen;
+          if (compts[i].compt === 'numberinput') {
+            precisionLen = parseInt(compts[i].fields[0].verify.realNumber.precisionLen)
+          } else {
+            precisionLen = parseInt(compts[i].fields[0].precisionLen)
+          }
+          compts[i].fields[0].values[0].val = (aDouble * 100).toFixed(precisionLen || 2)
+        }
+      }
+    }
+  }
+
+  return {
+    reSetDateFormat: reSetDateFormat,
+    addFormDataCache: addFormDataCache,
+    delFormDataCache: delFormDataCache,
+    getFormDataCache: getFormDataCache,
+    acquireOption: acquireOption,
+    acquireSearchOption: acquireSearchOption,
+    selectboxUtil: selectboxUtil,
+    dropRefresh: dropRefresh,
+    reconstructSelUsers: reconstructSelUsers,
+    closeView: closeView,
+    lengthOfTime: lengthOfTime,
+    lengthOfTimeByStr: lengthOfTimeByStr,
+    addApproveFormDataCache: addApproveFormDataCache,
+    getApproveFormDataCache: getApproveFormDataCache,
+    delApproveFormDataCache: delApproveFormDataCache,
+    createUUID: createUUID,
+    initAllCompts: initAllCompts,
+    doCalculateTabItemNum: doCalculateTabItemNum,
+    calculateTableDataMerge: calculateTableDataMerge,
+    saveLocationValue: saveLocationValue,
+    numValueConvertToPercent: numValueConvertToPercent
+  }
+})

@@ -1,0 +1,354 @@
+define(['Vue', 'jquery', 'cookies', 'Area'], function (Vue, $, Cookies) {
+  'use strict'
+  
+  /**
+   * 校验子表单中设置了“单次填写不允许重复值”的组件值是否合法
+   * 目前支持组件：
+   *     selectbox（下拉单选）
+   */
+  var noRepeatConfig = {
+    noRepeatFieldIdAndVueObjs: {},// 子表单单次重复校验相关组件id-vue实例对象 {configId: {inDetailGroupIndex: {id: 1, vueObj: vueObj}}}
+    horizontalFieldIdAndVueObjs: {},// 用于保存打开填写后的横向子表单原来id-vue实例对象 {configId: {inDetailGroupIndex: {id: 1, vueObj: vueObj}}}
+    /**
+     * 每种组件都有对应数据结构，互不影响
+     */
+    noRepeatSet: {
+      noRepeatSelectBoxValueSet: {}// 子表单-下拉单选 已选择值集合 {configId: {inDetailGroupIndex: value}}
+    },
+    /**
+     * 有重复字段的组件id集合 {widget.id: true}
+     */
+    repeatComptIds: {}, 
+    repeatComptStatus: {} // 各组件下重复字段
+  }
+  
+  /**获取联动组件vue对象*/
+  function getNoRepeatFieldObj(payload) {
+    var objs = noRepeatConfig.noRepeatFieldIdAndVueObjs
+    if (objs.hasOwnProperty(payload.configId)) {
+      return objs[payload.configId]
+    }
+    return null
+  }
+  
+  /**触发修改组件值*/
+  function triggerFieldValues(payload, result) {
+    var comptVueObj = getNoRepeatFieldObj(payload)
+    if (!comptVueObj) {
+      return
+    }
+    //触发字段为子表单内的字段
+    if (comptVueObj.hasOwnProperty(payload.inDetailGroupIndex)) {
+      comptVueObj[payload.inDetailGroupIndex].vueObj.setRepeatResult(result)
+    }
+  }
+  
+  /**
+   * 根据组件类型返回对应数据结构
+   * @param compt 组件类型
+   */
+  function selectDataStructure(compt) {
+    switch (compt) {
+      case 'selectbox':
+        return noRepeatConfig.noRepeatSet.noRepeatSelectBoxValueSet
+      default:
+        return {}
+    }
+  }
+  
+  /**
+   * 按组件分别保存校验完成的数据
+   * @param payload '{id: widget.id, configId: 1, compt: 'selectbox', inDetailGroupIndex: 1, noRepeated: true, value: ''}'
+   */
+  function setNoRepeatData(payload) {
+    // 若重复校验通过，则保存成功的组件值
+    var objs = selectDataStructure(payload.compt)
+    if (!objs.hasOwnProperty(payload.configId)) {
+      objs[payload.configId] = {}
+    }
+    switch (payload.compt) {
+      case 'selectbox':
+        objs[payload.configId][payload.inDetailGroupIndex] = payload.value
+        break
+      default:
+        break
+    }
+  }
+  
+  /**
+   * 校验指定组件值是否重复
+   * @param payload '{id: widget.id, configId: 1, compt: 'selectbox', inDetailGroupIndex: 1, noRepeated: true, value: ''}'
+   */
+  function checkNoRepeatFieldValue(payload) {
+    var objs = selectDataStructure(payload.compt)
+    if (!objs.hasOwnProperty(payload.configId)) {
+      return
+    }
+    // 用深拷贝，防止意外修改原数据
+    var noRepeatData = $.extend(true, {}, objs[payload.configId])
+    if (noRepeatData.hasOwnProperty('compt')) {// 排除 compt 属性
+      delete noRepeatData.compt
+    }
+    if (noRepeatData.hasOwnProperty(payload.inDetailGroupIndex)) {// 排除自身
+      delete noRepeatData[payload.inDetailGroupIndex]
+    }
+    switch (payload.compt) {
+      case 'selectbox':
+        // selectbox 组件对应结构:{configId: {inDetailGroupIndex: value}}
+        var result = []
+        for (var key in noRepeatData) {
+          if (!noRepeatData.hasOwnProperty(key)) {
+            continue;
+          }
+          var value = noRepeatData[key];
+          if (!value || result.indexOf(value) !== -1) {// 排除空值、已存在值
+            continue
+          }
+          result.push(value)
+        }
+        // 通知组件过滤的结果
+        triggerFieldValues(payload, result);
+        break;
+      default:
+        break;
+    }
+  }
+  
+  /**
+   * 找出重复值涉及的组件，并将结果保存在store的repeatComptStatus变量中 {configId_inDetailGroupIndex: true}
+   * 在 operateNoRepeatFieldValue、updateForOperateSub方法中调用
+   * @param state store实例
+   * @param configIds '{1: 'selectbox'}'
+   */
+  function checkNoRepeatStatus(state, configIds) {
+    for (var key in configIds) {
+      if (!configIds.hasOwnProperty(key)) {
+       continue; 
+      }
+      // 删除原来store保存的数据，若重复值则添加回来，让vue监听到变化
+      if (noRepeatConfig.repeatComptStatus.hasOwnProperty(key)) {
+        delete noRepeatConfig.repeatComptStatus[key];
+      }
+      // 获取组件类型对应的数据集
+      var compt = configIds[key], objs = $.extend(true, {}, selectDataStructure(compt)), data = objs[parseInt(key)], checkMap = {};
+      if ($.isEmptyObject(data)) {
+        continue;
+      }
+      for (var dKey in data) {
+        if (!data.hasOwnProperty(dKey)) {
+          continue;
+        }
+        // 翻转key-value，构造新的集合
+        var valueKey = '';
+        switch (compt) {
+          case 'selectbox':
+            valueKey = data[dKey];
+            if (!valueKey) {// 跳过空值，调整该组件的验证状态为true
+              triggerFieldStatusTrue({configId: parseInt(key), inDetailGroupIndex: parseInt(dKey)})
+              continue;
+            }
+            break;
+          default:
+            break;
+        }
+        if (!checkMap.hasOwnProperty(valueKey)) {
+          checkMap[valueKey] = [parseInt(dKey)];
+          continue;
+        }
+        if (checkMap[valueKey].indexOf(parseInt(dKey))) {
+          checkMap[valueKey].push(parseInt(dKey))
+        }
+      }
+      // 整理重复值的行索引
+      var repeatIdList = [];
+      for (var cKey in checkMap) {
+        if (!checkMap.hasOwnProperty(cKey)) {
+          continue;
+        }
+        var indexList = checkMap[cKey];
+        if (indexList.length <= 1) {// 未重复的跳过
+          continue;
+        }
+        repeatIdList.push.apply(repeatIdList, indexList);
+      }
+      // 保存
+      noRepeatConfig.repeatComptStatus[key] = repeatIdList;
+    }
+    // 刷新
+    triggerFieldStatus();
+  }
+  
+  /**触发修改组件校验状态*/
+  function triggerFieldStatus() {
+    var objs = noRepeatConfig.noRepeatFieldIdAndVueObjs;
+    for (var configId in objs) {
+      if (!objs.hasOwnProperty(configId)) {
+        continue;
+      }
+      var groupObjs = objs[configId];
+      for (var inDetailGroupIndex in groupObjs) {
+        if (!groupObjs.hasOwnProperty(inDetailGroupIndex)) {
+          continue;
+        }
+        // 是否重复
+        groupObjs[inDetailGroupIndex].vueObj.setRepeatStatus(getNoRepeatStatus(parseInt(configId), parseInt(inDetailGroupIndex)));
+        triggerHorizontalFieldStatus({configId: configId, inDetailGroupIndex: inDetailGroupIndex, status: getNoRepeatStatus(parseInt(configId), parseInt(inDetailGroupIndex))});
+      }
+    }
+  }
+  
+  function triggerFieldStatusTrue(payload) {
+    var comptVueObj = getNoRepeatFieldObj(payload)
+    if (!comptVueObj) {
+      return
+    }
+    //触发字段为子表单内的字段
+    if (comptVueObj.hasOwnProperty(payload.inDetailGroupIndex)) {
+      comptVueObj[payload.inDetailGroupIndex].vueObj.setRepeatStatus(true, parseInt(payload.inDetailGroupIndex))
+      triggerHorizontalFieldStatus({configId: payload.configId, inDetailGroupIndex: payload.inDetailGroupIndex, status: true});
+    }
+  }
+  
+  function getNoRepeatStatus(configId, inDetailGroupIndex) {
+    var status = true
+    if (!noRepeatConfig.repeatComptStatus.hasOwnProperty(configId)) {// 没有记录代表未开启
+      return status
+    }
+    return noRepeatConfig.repeatComptStatus[configId].indexOf(inDetailGroupIndex) === -1
+  }
+  
+  function triggerHorizontalFieldStatus(payload) {
+    var horizontalObjs = noRepeatConfig.horizontalFieldIdAndVueObjs;
+    if (!horizontalObjs.hasOwnProperty(payload.configId)) {
+      return;
+    }
+    var comptVueObj = horizontalObjs[payload.configId];
+    if (comptVueObj.hasOwnProperty(payload.inDetailGroupIndex)) {
+      noRepeatConfig.horizontalFieldIdAndVueObjs[payload.configId][payload.inDetailGroupIndex].vueObj.setRepeatStatus(payload.status, parseInt(payload.inDetailGroupIndex));
+    }
+  }
+  
+  function deleteVueObj(limitIds, inDetailGroupIndex) {
+    var horizontalObjs = noRepeatConfig.horizontalFieldIdAndVueObjs, objs = noRepeatConfig.noRepeatFieldIdAndVueObjs;
+    for (var hKey in horizontalObjs) {
+      if (!horizontalObjs.hasOwnProperty(hKey) || limitIds.indexOf(hKey) === -1) {
+        continue;
+      }
+      delete horizontalObjs[hKey][inDetailGroupIndex];
+    }
+    for (var key in objs) {
+      if (!objs.hasOwnProperty(key) || limitIds.indexOf(key) === -1) {
+        continue;
+      }
+      delete objs[key][inDetailGroupIndex];
+    }
+  }
+  
+  return {
+    /**
+     * 初始化组装相关组件id-vueObj
+     * @param state
+     * @param payload '{widget: this.widget, noRepeated: true, vueObj: this}'
+     */
+    createdNoRepeatFieldTrigger: function (state, payload) {
+      var objs = noRepeatConfig.noRepeatFieldIdAndVueObjs
+      var widget = payload.widget
+      if (widget.config.inDetailGroupIndex === -1 || !payload.noRepeated) {// 子表单外字段不处理，未开启唯一校验不处理
+        return
+      }
+      if (!objs.hasOwnProperty(widget.config.id)) {
+        objs[widget.config.id] = {}
+      }
+      // 若检测到已有该实例，则代表横向子表单填写，保存原实例
+      if (objs[widget.config.id].hasOwnProperty(widget.config.inDetailGroupIndex)) {
+        var horizontalObjs = noRepeatConfig.horizontalFieldIdAndVueObjs
+         if (!horizontalObjs.hasOwnProperty(widget.config.id)) {
+           horizontalObjs[widget.config.id] = {}
+         }
+         // 若已保存过，则不在保存
+        if (!horizontalObjs[widget.config.id].hasOwnProperty(widget.config.inDetailGroupIndex)) {
+          horizontalObjs[widget.config.id][widget.config.inDetailGroupIndex] = objs[widget.config.id][widget.config.inDetailGroupIndex]
+        }
+      }
+      objs[widget.config.id][widget.config.inDetailGroupIndex] = {id: payload.widget.id, vueObj: payload.vueObj}
+    },
+    /**
+     * 保存及更新需要校验重复的组件值
+     * @param state
+     * @param payload '{id: widget.id, configId: 1, compt: 'selectbox', inDetailGroupIndex: 1, noRepeated: true, value: ''}' value会因组件类型(compt)变动
+     */
+    operateNoRepeatFieldValue: function (state, payload) {
+      if (payload.inDetailGroupIndex === -1 || !payload.noRepeated) {// 子表单外字段不处理，未开启唯一校验不处理
+        return
+      }
+      checkNoRepeatFieldValue(payload)
+      // 保存已选择的组件值
+      setNoRepeatData(payload)
+      // 保存后找出重复值涉及的组件
+      var configIds = {};
+      configIds[payload.configId] = payload.compt;
+      checkNoRepeatStatus(state, configIds);
+    },
+    /**
+     * 操作子表单时更新数据
+     * @param state
+     * @param payload '{compts: {1: 'selectbox'}, inDetailGroupIndex: 1, type: 'delete/copy'}'
+     */
+    updateForOperateSub: function (state, payload) {
+      // 删除所有组件的该行记录
+      var updateSet = noRepeatConfig.noRepeatSet, configIds = [];
+      // 提取组件configId
+      for (var key in payload.compts) {
+        configIds.push(key);
+      }
+      
+      for (var key in updateSet) {
+        if (!updateSet.hasOwnProperty(key)) {
+          continue;
+        }
+        var updateComptSet = updateSet[key];
+        for (var cKey in updateComptSet) {
+          // 数据不存在或不是改子表单的字段跳过
+          if (!updateComptSet.hasOwnProperty(cKey) || configIds.indexOf(cKey) === -1) {
+            continue;
+          }
+          var updateGroupSet = updateComptSet[cKey];
+          if (!updateGroupSet.hasOwnProperty(payload.inDetailGroupIndex)) {
+            continue;
+          }
+          // 删除该行的字段值
+          delete updateGroupSet[payload.inDetailGroupIndex];
+          // 更新删除该行后之后的字段索引
+          for (var gKey in updateGroupSet) {
+            // 索引值小于删除索引的跳过
+            var index = parseInt(gKey)
+            if (!updateGroupSet.hasOwnProperty(gKey) || index <= payload.inDetailGroupIndex) {
+              continue;
+            }
+            var value = updateGroupSet[gKey];
+            // 添加新的索引
+            switch (payload.type) {
+              case 'delete':
+                delete updateGroupSet[gKey];
+                index = index - 1;
+                break;
+              case 'copy':
+                index = index + 1;
+                break;
+              default:
+                break;
+            }
+            updateGroupSet[index] = value;
+          }
+        }
+      }
+      // 删除后更新状态
+      checkNoRepeatStatus(state, payload.compts);
+      // 删除时同步删除组件实例
+      if (payload.type === 'delete') {
+        deleteVueObj(configIds, payload.inDetailGroupIndex);
+      }
+    },
+    triggerFieldStatus: triggerFieldStatus
+  }
+})
