@@ -1,0 +1,217 @@
+define(['util', 'moment', 'iosSelectCmp', 'jquery'], function (util, moment, IosSelectCmp, $) {
+  'use strict';
+  return function (widget) {
+    return {
+      id: widget.id,
+      template: [
+        '<div v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+            '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{stitle}}</h2>',
+          '</div>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_forbid_edit" :class="{form_forbid_nodata: !stip}" v-if="readonly">',
+              '<p class="form_forbid_word">{{stip ? stip :\'暂无数据\'}}</p>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<div class="temp_icon_input" @click.stop="selectTime()">',
+                '<i class="input_icon icon-date"></i>{{stip}}',
+              '</div>',
+            '</div>',
+          '</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          punchTime: '',
+          mark: '',
+          errMsg: ''
+        };
+      },
+      methods: {
+        selectTime: function () {
+          if (this.readonly) {
+            return
+          }
+          var _this = this;
+          var date = moment(), formatter = 'yyyy-MM-dd HH:mm';
+          if (this.punchTime) {
+            date = moment(this.punchTime);
+          }
+          var year = parseInt(date.format('YYYY')),
+              month = parseInt(date.format('MM')),
+              day = parseInt(date.format('DD')),
+              hour = parseInt(date.format('HH')),
+              minute = parseInt(date.format('mm'));
+          IosSelectCmp.datePickerByFormat(year - 100, parseInt(year) + 100, {
+            title: '',
+            oneLevelId: year,
+            twoLevelId: month,
+            threeLevelId: day,
+            fourLevelId: hour,
+            fiveLevelId: minute,
+            itemHeight: 35,
+            format: formatter,
+            relation: [1, 1, 1, 0],
+            callback: function (selectOneObj, selectTwoObj, selectThreeObj, selectFourObj, selectFiveObj) {
+              var dateStr = selectOneObj.id + '-' + selectTwoObj.id + '-' + selectThreeObj.id + ' ' + selectFourObj.id + ':' + selectFiveObj.id;
+              var dateStrTip = dateStr;
+              _this.punchTime = dateStrTip;
+            }
+          });
+        }
+      },
+      watch: {
+        punchTime: function (val) {
+          var errMsg = '';
+          if (!this.verified) {
+            if (val) {
+              var choiceDate = moment(val);
+              var now = moment(new Date());
+              if (now.valueOf() < choiceDate.valueOf()) {
+                errMsg = '补卡时间不能大于当前时间';
+              }
+            }
+          }
+          this.errMsg = errMsg;
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.punchTime}]},
+            ],
+            configId: this.widget.config.id,
+            errMsg: errMsg,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        }
+      },
+      computed: {
+        required: function () {
+          return this.widget.config.verify.required
+        },
+        readonly: function () {
+          if (this.$store.getters.getKitEdit) {
+            return true
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          // 后台权限管理字段权限控制可编辑
+          var permissionSetEditableFields = this.$store.getters.getPermissionSetEditableFields
+          if (permissionSetEditableFields && permissionSetEditableFields.indexOf(this.widget.config.id) !== -1) {
+            return false
+          }
+          // 后台权限管理字段权限控制可只读
+          var permissionSetReadOnlyFields = this.$store.getters.getPermissionSetReadOnlyFields
+          if (permissionSetReadOnlyFields && permissionSetReadOnlyFields.indexOf(this.widget.config.id) !== -1) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          return this.$store.getters.getReadonlyStatus
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          if (this.required) {
+            var choiceDate = moment(this.punchTime);
+            var now = moment(new Date());
+            return $.trim(this.punchTime) !== '' &&  now.valueOf() > choiceDate.valueOf();
+          }
+          return true
+        },
+        stitle: function () {
+          return this.widget.config.fields[0].label;
+        },
+        sformat: function () {
+          return this.widget.config.fields[0].fieldType.format
+        },
+        stip: {
+          get: function () {
+            if (this.punchTime) {
+              return this.punchTime;
+            }
+            return this.widget.config.fields[0].tip.text
+          }
+        },
+        visible: function () {
+          if (!this.widget.config.hasOwnProperty('visible')) {
+            this.widget.config.visible = true
+          }
+          return this.widget.config.visible
+        },
+        hasAuthority: function () {
+          var showStatus = false;
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+    
+          if (!this.visible) {
+            return showStatus
+          }
+          return true
+        },
+        isShow: function () {
+          var showStatus = false;
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true;
+          } else if (!!this.widget.config.fromDetail && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow;
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id];
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.punchTime}]}
+            ],
+            errMsg: this.errMsg,
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus;
+        }
+      },
+      created: function () {
+        var punchTimes = this.widget.config.fields[0].values;
+        this.punchTime = punchTimes ? (punchTimes[0] && punchTimes[0].val) || '' : '';
+        this.$store.commit('watchValues', {
+          id: this.widget.id,
+          fvalues: [
+            {fidx: 0, values: [{val: this.punchTime}]}
+          ],
+          verified: this.verified,
+          isShow: this.isShow,
+          hasAuthority: this.hasAuthority
+        })
+      },
+      mounted: function () {
+      
+      }
+    };
+  }
+});

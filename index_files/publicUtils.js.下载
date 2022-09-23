@@ -1,0 +1,2082 @@
+define(['jquery', 'moment', 'cookies', 'relateDataUtils', 'ocrUtils', 'filePreviewUtils', 'formatValueUtils','fileVerifyUtils', 'numPercentUtils', 'fieldPermissionUtils', 'numberInputUtils'], function ($, moment, Cookies, relateDataUtils, ocrUtils, filePreviewUtils, formatValueUtils, fileVerifyUtils, numPercentUtils, fieldPermissionUtils, numberInputUtils) {
+  var currUserDepartments = []
+  
+  function dropRefresh() {
+    $('body').dropload({
+      scrollArea: window,
+      loadUpFn: function (me) {
+        location.reload(true)
+      }
+    })
+  }
+  
+  function doRequest(url, data, async) {
+    return $.ajax({
+      url: url,
+      type: 'post',
+      data: data,
+      async: !async,
+      dataType: 'json'
+    })
+  }
+  
+  function generatorId() {
+    var s = [], _uuid = 0
+    var hexDigits = '0123456789abcdef'
+    for (var i = 0; i < 36; i++) {
+      s[i] = hexDigits.substr(Math.floor(Math.random() * 0x10), 1)
+    }
+    s[14] = '4' // bits 12-15 of the time_hi_and_version field to 0010
+    s[19] = hexDigits.substr((s[19] & 0x3) | 0x8, 1) // bits 6-7 of the clock_seq_hi_and_reserved to 01
+    s[8] = s[13] = s[18] = s[23] = '-'
+    
+    _uuid = s.join('')
+    return _uuid
+  }
+  
+  function getCurrentUserDepartments() {
+    var depts = []
+    
+    doRequest('data/form/find/user/sel/org', {uid: Cookies.get('oa_uid'), }, true).then(function (res) {
+      if (res.success && res.data.userDept.data && res.data.userDept.data.length > 0) {
+        for (var i = 0; i < res.data.userDept.data.length; i++) {
+          depts.push(res.data.userDept.data[i].id)
+        }
+      }
+    })
+    return depts
+  }
+  
+  /**
+   * 获取动态范围开始结束 0/1 开始/结束
+   */
+  function getDynamicRange(_this, type) {
+    var startValue = _this.dynamicRangeStartValue,
+        endValue = _this.dynamicRangeEndValue,
+        rangeTypeStart = _this.dynamicRangeStartType, //1/2/3 之前/当天/之后
+        rangeTypeEnd = _this.dynamicRangeEndType, //1/2/3 之前/当天/之后
+        format = _this.format
+    switch (type) {
+        //开始时间
+      case 0:
+        switch (format) {
+            //年
+          case 'yyyy':
+            switch (rangeTypeStart) {
+                //往前
+              case 1:
+                return moment(moment().year(moment().subtract(startValue, 'years').year()).startOf('year').valueOf()).valueOf()
+                //当前
+              case 2:
+                return moment(moment().year(moment().year()).startOf('year').valueOf()).valueOf()
+                //往后
+              case 3:
+                return moment(moment().year(moment().add(startValue, 'years').year()).startOf('year').valueOf()).valueOf()
+            }
+            return
+          case 'yyyy-MM':
+            switch (rangeTypeStart) {
+                //往前
+              case 1:
+                return moment(moment().month(moment().subtract(startValue, 'months').month()).startOf('month').valueOf()).valueOf()
+                //当前
+              case 2:
+                return moment(moment().month(moment().month()).startOf('month').valueOf()).valueOf()
+                //往后
+              case 3:
+                return moment(moment().month(moment().add(startValue, 'months').month()).startOf('month').valueOf()).valueOf()
+            }
+            return
+          case 'yyyy-MM-dd HH:mm':
+          case 'yyyy-MM-dd':
+            switch (rangeTypeStart) {
+                //往前
+              case 1:
+                return moment().subtract(startValue, 'days').startOf('day').valueOf()
+                //当前
+              case 2:
+                return moment().startOf('day').valueOf()
+                //往后
+              case 3:
+                return moment().add(startValue, 'days').startOf('day').valueOf()
+            }
+            return
+        }
+        break
+      case 1:
+        //结束时间
+        switch (format) {
+            //年
+          case 'yyyy':
+            switch (rangeTypeEnd) {
+                //往前
+              case 1:
+                return moment(moment().year(moment().subtract(endValue, 'years').year()).endOf('year').valueOf()).valueOf()
+                //当前
+              case 2:
+                return moment(moment().year(moment().year()).endOf('year').valueOf()).valueOf()
+                //往后
+              case 3:
+                return moment(moment().year(moment().add(endValue, 'years').year()).endOf('year').valueOf()).valueOf()
+            }
+            return
+          case 'yyyy-MM':
+            switch (rangeTypeEnd) {
+                //往前
+              case 1:
+                return moment(moment().month(moment().subtract(endValue, 'months').month()).endOf('month').valueOf()).valueOf()
+                //当前
+              case 2:
+                return moment(moment().month(moment().month()).endOf('month').valueOf()).valueOf()
+                //往后
+              case 3:
+                return moment(moment().month(moment().add(endValue, 'months').month()).endOf('month').valueOf()).valueOf()
+            }
+            return
+          case 'yyyy-MM-dd HH:mm':
+          case 'yyyy-MM-dd':
+            switch (rangeTypeEnd) {
+                //往前
+              case 1:
+                return moment().subtract(endValue, 'days').endOf('day').valueOf()
+                //当前
+              case 2:
+                return moment().endOf('day').valueOf()
+                //往后
+              case 3:
+                return moment().add(endValue, 'days').endOf('day').valueOf()
+            }
+            return
+        }
+        break
+      default:
+        break
+    }
+  }
+  
+  function convertStrToDate(str, format) {
+    format = convertToMomentFormat(format)
+    return moment(str, format)
+  }
+  
+  /**
+   * 根据指定格式时间戳转日期
+   */
+  function convertTimestampToFormatStr(date, format) {
+    var dataStr = new String(date)
+    if (!date || dataStr.trim() === '') {
+      return ''
+    }
+    format = convertToMomentFormat(format)
+    if (dataStr.indexOf(':') === -1 && dataStr.indexOf(':') === -1) {
+      return moment(new Date(date)).format(format)
+    } else {
+      return date
+    }
+  }
+  
+  function convertDateToFormatStr(date, format) {
+    format = convertToMomentFormat(format)
+    return moment(date).format(format)
+  }
+  
+  function convertToMomentFormat(format) {
+    var timeformat = 'YYYY-MM-DD HH:mm'
+    switch (format) {
+      case 'yyyy':
+        timeformat = 'YYYY'
+        break
+      case 'yyyy-MM' :
+        timeformat = 'YYYY-MM'
+        break
+      case 'yyyy-MM-dd' :
+        timeformat = 'YYYY-MM-DD'
+        break
+      case 'yyyy-MM-dd HH:mm' :
+        timeformat = 'YYYY-MM-DD HH:mm'
+        break
+      case 'HH:mm':
+        timeformat = 'HH:mm'
+        break
+    }
+    return timeformat
+  }
+  
+  function setValidDateRangeForMobile(_this) {
+    var timeformat = 'YYYY-MM-DD HH:mm'
+    switch (_this.format) {
+      case 'yyyy':
+        timeformat = 'YYYY'
+        break
+      case 'yyyy-MM' :
+        timeformat = 'YYYY-MM'
+        break
+      case 'yyyy-MM-dd' :
+        _this.newFormat = 'YY-MM-DD'
+        _this.formatShow = true
+        _this.pickerType = 'date'
+        timeformat = 'YYYY-MM-DD'
+        break
+      case 'yyyy-MM-dd HH:mm' :
+        _this.newFormat = 'YY-MM-DD hh:mm'
+        _this.formatShow = true
+        _this.pickerType = 'datetime'
+        timeformat = 'YYYY-MM-DD HH:mm'
+        break
+      case 'HH:mm':
+        timeformat = 'HH:mm'
+        break
+    }
+    var valueType = _this.rangeType
+    var minDateTime = moment('1000-01-01 00:00:00').format(timeformat)
+    var maxDateTime = moment('3099-01-01 00:00:00').format(timeformat)
+    switch (valueType) {
+      case 0://不限制
+        minDateTime = null
+        maxDateTime = null
+        break
+      case 1://自定义合法时间区间
+        var beginStr = _this.beginDate
+        var endStr = _this.endDate
+        if (beginStr && endStr) {
+          if (timeformat === 'HH:mm') {
+            var beginDate = moment().format('YYYY-MM-DD') + ' ' + beginStr
+            var endDate = moment().format('YYYY-MM-DD') + ' ' + endStr
+            minDateTime = moment(beginDate).format(timeformat)
+            maxDateTime = moment(endDate).format(timeformat)
+          } else {
+            minDateTime = moment(beginStr).format(timeformat)
+            maxDateTime = moment(endStr).format(timeformat)
+          }
+        } else if (timeformat === 'HH:mm') {
+          var beginDate = moment().format('YYYY-MM-DD') + ' 00:00'
+          var endDate = moment().format('YYYY-MM-DD') + ' 23:59'
+          minDateTime = moment(beginDate).format(timeformat)
+          maxDateTime = moment(endDate).format(timeformat)
+        }
+        break
+      case 2://本周
+        minDateTime = moment().weekday(1).format(timeformat)//本周一
+        maxDateTime = moment().weekday(7).format(timeformat) //本周日
+        break
+      case 3://本月
+        minDateTime = moment(moment().month(moment().month()).startOf('month').valueOf()).format(timeformat)
+        maxDateTime = moment(moment().month(moment().month()).endOf('month').valueOf()).format(timeformat)
+        break
+      case 4://本年
+        minDateTime = moment(moment().year(moment().year()).startOf('year').valueOf()).format(timeformat)
+        maxDateTime = moment(moment().year(moment().year()).endOf('year').valueOf()).format(timeformat)
+        break
+      case 5://动态范围
+        minDateTime = moment(getDynamicRange(_this, 0)).format(timeformat)
+        maxDateTime = moment(getDynamicRange(_this, 1)).format(timeformat)
+        break
+    }
+    return {
+      minDateTime: minDateTime,
+      maxDateTime: maxDateTime
+    }
+  }
+  
+  function setValidDateRangeForPC(_this) {
+    var timeformat = _this.format
+    var valueType = _this.rangeType
+    var start = '1000-01-01 00:00:00'
+    var end = '3000-01-01 00:00:00'
+    switch (valueType) {
+      case 1://自定义合法时间区间
+        var beginStr = _this.beginDate
+        var endStr = _this.endDate
+        if (beginStr && endStr) {
+          switch (timeformat) {
+            case 'HH:mm':
+              start = moment().format('YYYY-MM-DD') + ' ' + beginStr + ':00'
+              end = moment().format('YYYY-MM-DD') + ' ' + endStr + ':00'
+              break
+            case 'yyyy-MM':
+              start = moment(beginStr).add(3, 'days').format('YYYY-MM-DD HH:mm:00')
+              end = moment(endStr).add(1, 'months').subtract(1, 'days').format('YYYY-MM-DD HH:mm:00')
+              break
+            case 'yyyy':
+              start = moment(beginStr).format('YYYY-MM-DD HH:mm:00')
+              end = moment(endStr).add(1, 'years').subtract(1, 'days').format('YYYY-MM-DD HH:mm:00')
+              break
+            default:
+              start = moment(beginStr).format('YYYY-MM-DD HH:mm:00')
+              end = moment(endStr).format('YYYY-MM-DD HH:mm:00')
+              break
+          }
+        } else if (timeformat === 'HH:mm') {
+          start = moment().format('YYYY-MM-DD') + ' 00:00'
+          end = moment().format('YYYY-MM-DD') + ' 23:59'
+        }
+        break
+      case 2://本周
+        start = moment().weekday(1).format('YYYY-MM-DD') + ' 00:00:00' //本周一
+        end = moment().weekday(7).format('YYYY-MM-DD')  + ' 23:59:59'//本周日
+        break
+      case 3://本月
+        start = moment(moment().month(moment().month()).startOf('month').valueOf()).format('YYYY-MM-DD HH:mm:ss')
+        end = moment(moment().month(moment().month()).endOf('month').valueOf()).format('YYYY-MM-DD HH:mm:ss')
+        break
+      case 4://本年
+        start = moment(moment().year(moment().year()).startOf('year').valueOf()).format('YYYY-MM-DD HH:mm:ss')
+        end = moment(moment().year(moment().year()).endOf('year').valueOf()).format('YYYY-MM-DD HH:mm:ss')
+        break
+      case 5://动态范围
+        start = moment(getDynamicRange(_this, 0)).format('YYYY-MM-DD HH:mm:ss')
+        end = moment(getDynamicRange(_this, 1)).format('YYYY-MM-DD HH:mm:ss')
+        break
+    }
+    return {
+      start: start,
+      end: end
+    }
+  }
+  
+  /**
+   * 单行输入组件重复值检验公用方法
+   */
+  function uniqueConditionDetailRepeat(uniqueCondition) {
+    var detailsInputObj = {}
+    var conditionArr = JSON.parse(uniqueCondition)
+    for (var i = 0; i < conditionArr.length; i++) {
+      var item = conditionArr[i][0],
+          key = item.id + '-' + item.val
+      if (item.isDetail) {
+        if (detailsInputObj.hasOwnProperty(key)) {
+          var objArr = detailsInputObj[key],
+              addFlag = false
+          for (var j = 0; j < objArr.length; j++) {
+            if (objArr[j].val === item.val) {
+              addFlag = true
+              break
+            }
+          }
+          if (addFlag) {
+            objArr.push(item)
+            detailsInputObj[key] = objArr
+          }
+        } else {
+          var valArr = []
+          valArr.push(item)
+          detailsInputObj[key] = valArr
+        }
+      }
+    }
+    var uniqueErrorFields = {}
+    for (var key in detailsInputObj) {
+      if (detailsInputObj[key].length > 1) {
+        for (var i = 0; i < detailsInputObj[key].length; i++) {
+          var item = detailsInputObj[key][i]
+          uniqueErrorFields[item.id + '-' + item.detailIdx] = {'lable': item.lable, 'repeat': true}
+        }
+      }
+    }
+    return uniqueErrorFields
+  }
+  
+  function uniqueCondition(formData, mobile, roleId) {
+    var compts_support_unique = ['editinput']
+    var unique_filter = []
+    for (var i = 0; i < formData.length; i++) {
+      var compt = formData[i]
+      if (mobile) {
+        compt = formData[i].config
+      }
+      if (compts_support_unique.indexOf(compt.compt) >= 0) {
+        //字段右侧设置栏设置为不可见时：如果此时是前台填写, visible参与校验. 如果此时是后台填写,visible不参与校验
+        var visibleJoinVerifyFlag = compt.fields[0].visible ? true : !$.isEmptyObject(roleId)
+        if (visibleJoinVerifyFlag &&
+            compt.fields[0].verify &&
+            compt.fields[0].verify.unique &&
+            compt.fields[0].verify.unique.open &&
+            compt.fields[0].values &&
+            compt.fields[0].values.length > 0 &&
+            compt.fields[0].values[0].val &&
+            compt.fields[0].values[0].val.length > 0) {
+          unique_filter.push([{
+            id: compt.id,
+            compt: compt.compt,
+            label: compt.fields[0].label,
+            val: compt.fields[0].values[0].val,
+            express: '===',
+            isDetail: false,
+            detailIdx: -1,
+            parentId: -1
+          }])
+        }
+      } else if (compt.compt === 'detailcombox') {
+        for (var j = 0; j < compt.compts.length; j++) {
+          var detailEditInputArr = JSON.parse(uniqueCondition(compt.compts[j]))
+          for (var k = 0; k < detailEditInputArr.length; k++) {
+            if (detailEditInputArr[k][0]) {
+              detailEditInputArr[k][0].isDetail = true
+              detailEditInputArr[k][0].detailIdx = j
+              detailEditInputArr[k][0].parentId = compt.id
+            }
+            unique_filter.push(detailEditInputArr[k])
+          }
+        }
+      }
+    }
+    return JSON.stringify(unique_filter)
+  }
+  
+  function digitUpperConvert(n) {
+    var fraction = ['角', '分']
+    var digit = [
+      '零', '壹', '贰', '叁', '肆',
+      '伍', '陆', '柒', '捌', '玖'
+    ]
+    var unit = [
+      ['元', '万', '亿'],
+      ['', '拾', '佰', '仟']
+    ]
+    var head = n < 0 ? '欠' : ''
+    n = Math.abs(n)
+    var s = ''
+    for (var i = 0; i < fraction.length; i++) {
+      s += (digit[Math.floor(n * 10 * Math.pow(10, i)) % 10] + fraction[i]).replace(/零./, '')
+    }
+    s = s || '整'
+    n = Math.floor(n)
+    for (var i = 0; i < unit[0].length && n > 0; i++) {
+      var p = ''
+      for (var j = 0; j < unit[1].length && n > 0; j++) {
+        p = digit[n % 10] + unit[1][j] + p
+        n = Math.floor(n / 10)
+      }
+      s = p.replace(/(零.)*零$/, '').replace(/^$/, '零') + unit[0][i] + s
+    }
+    return head + s.replace(/(零.)*零元/, '元')
+                   .replace(/(零.)+/g, '零')
+                   .replace(/^整$/, '零元整')
+  }
+  
+  function numberFormat(_this, val) {
+    _this.micrometerValue = ''
+    _this.chineseValue = ''
+    val = val + ''
+    if ($.trim(val) === '') {
+      return
+    }
+    if (_this.micrometer) {
+      // 千分符显示
+      if (val.indexOf('.') !== -1) {
+        var splitValue = val.split('.')
+        _this.micrometerValue = splitValue[0].replace(/(?=(\B\d{3})+$)/g, ',') + '.' + splitValue[1]
+      } else {
+        _this.micrometerValue = val.replace(/(?=(\B\d{3})+$)/g, ',')
+      }
+    }
+    if (_this.capital) {
+      // 数字大写显示
+      if (/^\d*(\.\d*)?$/.test(val)) {
+        _this.chineseValue = digitUpperConvert(val)
+      }
+    }
+  }
+  
+  function changeTime(type, range) {
+    var sstartTime = '', sendTime = ''
+    switch (type) {
+        //中文的为兼容部分老数据
+      case 'toToday':
+      case '今日':
+        //今日
+        var dateStr = moment().format('YYYY-MM-DD')
+        sstartTime = dateStr + ' 00:00:00'
+        sendTime = dateStr + ' 23:59:59'
+        break
+      case 'toThisWeek':
+      case '本周':
+        //本周
+        sstartTime = moment().day('Monday').format('YYYY-MM-DD 00:00:00')
+        sendTime = moment().day(7).format('YYYY-MM-DD 23:59:59')
+        break
+      case 'toThisMonth':
+      case '本月':
+        //本月
+        sstartTime = moment().month(moment().month()).startOf('month').format('YYYY-MM-DD 00:00:00')
+        sendTime = moment().month(moment().month()).endOf('month').format('YYYY-MM-DD 23:59:59')
+        break
+      case 'toThisYear':
+      case '本年':
+        //本年
+        sstartTime = moment().year(moment().year()).startOf('year').format('YYYY-MM-DD 00:00:00')
+        sendTime = moment().year(moment().year()).endOf('year').format('YYYY-MM-DD 23:59:59')
+        break
+      case 'toYesterday':
+      case '昨日':
+        //昨日
+        var dateStr = moment().subtract(1, 'days').format('YYYY-MM-DD')
+        sstartTime = dateStr + ' 00:00:00'
+        sendTime = dateStr + ' 23:59:59'
+        break
+      case 'toLastWeek':
+        //上周
+        sstartTime = moment().week(moment().week() - 1).startOf('week').add(1, 'days').format('YYYY-MM-DD 00:00:00')
+        sendTime = moment().week(moment().week() - 1).endOf('week').add(1, 'days').format('YYYY-MM-DD 23:59:59')
+        break
+      case 'toNextWeek':
+        //下周
+        sstartTime = moment().week(moment().week() + 1).startOf('week').add(1, 'days').format('YYYY-MM-DD 00:00:00')
+        sendTime = moment().week(moment().week() + 1).endOf('week').add(1, 'days').format('YYYY-MM-DD 23:59:59')
+        break
+      case 'toLastMonth':
+        //上月
+        sstartTime = moment().months(moment().months() - 1).startOf('months').format('YYYY-MM-DD 00:00:00')
+        sendTime = moment().months(moment().months() - 1).endOf('months').format('YYYY-MM-DD 23:59:59')
+        break
+      case 'toNextMonth':
+        //下月
+        sstartTime = moment().months(moment().months() + 1).startOf('months').format('YYYY-MM-DD 00:00:00')
+        sendTime = moment().months(moment().months() + 1).endOf('months').format('YYYY-MM-DD 23:59:59')
+        break
+      case 'toLastYear':
+        //上一年
+        sstartTime = moment().years(moment().years() - 1).startOf('years').format('YYYY-MM-DD 00:00:00')
+        sendTime = moment().years(moment().years() - 1).endOf('years').format('YYYY-MM-DD 23:59:59')
+        break
+      case 'toNextYear':
+        //下一年
+        sstartTime = moment().years(moment().years() + 1).startOf('years').format('YYYY-MM-DD 00:00:00')
+        sendTime = moment().years(moment().years() + 1).endOf('years').format('YYYY-MM-DD 23:59:59')
+        break
+      default:
+        if (!$.isEmptyObject(range)) {
+          //非"yyyy-mm-dd hh:mm"格式的日期，要按范围处理
+          sstartTime = range[0].val
+          sendTime = range[1].val
+          break
+        }
+        return null
+    }
+    return {
+      sstartTime: sstartTime,
+      sendTime: sendTime
+    }
+  }
+  
+  /**
+   * 为了保证通用性，fields是经过整理的
+   */
+  function dataMatchFilterCondition(fields, condition, params) {
+    
+    function fieldMatchFilter(field, filter) {
+      var val
+      switch (field.compt) {
+        case 'editinput':
+        case 'edittextarea':
+        case 'autonumber':
+          val = field.fields[0].values[0].val
+          switch (filter.express) {
+            case '===':
+              return val === filter.val
+            case '!==':
+              return val !== filter.val
+            case 'null':
+              return val.length === 0
+            case 'notNull':
+              return val.length > 0
+            case 'like':
+              return filter.val.indexOf(val) >= 0
+            case 'notLike':
+              return filter.val.indexOf(val) < 0
+            default:
+              return false
+          }
+        case 'radiobutton':
+        case 'form_audit':
+        case 'selectbox':
+          if (field.fields[0].values.length === 0) {
+            val = ''
+          } else {
+            val = field.fields[0].values[0].val ? field.fields[0].values[0].val : field.fields[0].values[0] //由于是否设置选项颜色所处理后的数据格式不同，此处兼容两种数据格式
+          }
+          var filterVal = Array.isArray(filter.val) ? filter.val : filter.val.split(',') //val结构由字符串改为数组，兼容老数据字符串格式
+          switch (filter.express) {
+            case '===':
+              return val === filterVal[0]
+            case '!==':
+              return val !== filterVal[0]
+            case 'null':
+              return val.length === 0
+            case 'notNull':
+              return val.length > 0
+              // case 'like':
+              // case 'notLike':
+            case 'match':
+              return filterVal.indexOf(val) >= 0
+            case 'notMatch':
+              return filterVal.indexOf(val) < 0
+            default:
+              return false
+          }
+          // case 'leavekit_type':
+          // case 'select_status':
+          //   val = field.fields[0].values[0].val
+          //   switch (filter.express) {
+          //     case '===':
+          //     case '!==':
+          //     case 'match':
+          //     case 'notMatch':
+          //   }
+        case 'checklist':
+        case 'selectmultibox':
+        case 'multipleselect':
+          val = field.fields[0].values
+          var matchedItem = 0
+          var fval = Array.isArray(filter.val) ? filter.val : filter.val.split(',') //val结构由字符串改为数组，兼容老数据字符串格式
+          for (var i = 0; i < val.length; i++) {
+            var matchVal = val[i].val ? val[i].val : val[i] //由于是否设置选项颜色所处理后的数据格式不同，此处兼容两种数据格式
+            if (fval.indexOf(matchVal) >= 0) {
+              matchedItem++
+            }
+          }
+          switch (filter.express) {
+            case '===':
+              return matchedItem === val.length && fval.length === val.length
+            case 'null':
+              return val.length === 0
+            case 'notNull':
+              return val.length > 0
+            case 'match':
+              return matchedItem > 0
+            case 'allMatch':
+              return matchedItem === val.length
+            default:
+              return false
+          }
+        case 'numberinput':
+        case 'computeinput':
+          val = field.fields[0].values[0].val
+          if (val.length === 0) {
+            return filter.express === 'null'
+          }
+          val = Number(val)
+          var fval = Number(filter.val)
+          switch (filter.express) {
+            case '===':
+              return val === fval
+            case '!==':
+              return val !== fval
+            case 'notNull':
+              return true
+            case '>':
+              return val > fval
+            case '>=':
+              return val >= fval
+            case '<':
+              return val < fval
+            case '<=':
+              return val <= fval
+            case '><':
+              return val >= Number(filter.range[0].val) && val <= Number(filter.range[1].val)
+            default:
+              return false
+          }
+        case 'dateinput':
+        case 'datetimerange':
+          // case 'leavekit':
+          // case 'overtimekit':
+          // case 'gooutkit':
+          // case 'punchkit':
+          if (field.compt === 'datetimerange') {
+            val = field.fields[filter.subIndex].values[0].val
+          } else {
+            val = field.fields[0].values[0].val
+          }
+          if (val.length === 0) {
+            return filter.express === 'null'
+          }
+          val = moment(val).valueOf()
+          var lval, rval
+          if (filter.express === 'dynamic') {
+            //兼容老数据的动态筛选
+            filter.dynamicDateType = filter.express
+            filter.express = '==='
+          }
+          if (filter.express === '><') {
+            filter.dynamicDateType = '' //兼容老数据
+            lval = moment(filter.range[0].val).valueOf()
+            rval = moment(filter.range[1].val).valueOf()
+            return val >= lval && val <= rval
+          } else if (filter.val && filter.hasOwnProperty('dynamicDateType') && filter.dynamicDateType !== '') {
+            //选择"固定日期"以外的进行日期处理（今日、昨日、上一年...等具有范围的时间）
+            var dateRange = changeTime(filter.val, filter.range)
+            if (dateRange) {
+              lval = dateRange.sstartTime
+              rval = dateRange.sendTime
+              if (!lval || !rval) {
+                return false
+              }
+              lval = moment(lval).valueOf()
+              rval = moment(rval).valueOf()
+              switch (filter.express) {
+                case '===':
+                  return val >= lval && val <= rval
+                case '!==':
+                  return val < lval || val > rval
+                case '>':
+                  return val > rval //大于，右侧为基准
+                case '>=':
+                  return val >= lval //大于等于，左侧为基准
+                case '<':
+                  return val < lval //小于，左侧为基准
+                case '<=':
+                  return val <= rval //小于等于，右侧为基准
+              }
+            } else {
+              //设置时选择"固定日期"，具体的时间，无范围
+              fval = moment(filter.val).valueOf()
+              switch (filter.express) {
+                case '===':
+                  return val === fval
+                case '!==':
+                  return val !== fval
+                case 'notNull':
+                  return field.fields[0].values[0].val.length > 0
+                case '>':
+                  return val > fval
+                case '>=':
+                  return val >= fval
+                case '<':
+                  return val < fval
+                case '<=':
+                  return val <= fval
+              }
+            }
+          }
+          return false
+        case 'department':
+        case 'belonger':
+        case 'contact':
+          if (field.fields[0].values.length === 0) {
+            return filter.express === 'null'
+          }
+          if (filter.express === 'notNull') {
+            return true
+          }
+          val = field.fields[0].values
+          var ids = []
+          for (var i = 0; i < val.length; i++) {
+            ids.push(field.compt === 'department' ? val[i].departmentId : val[i].puid)
+          }
+          
+          matchedItem = 0
+          if (filter.contacts) {
+            for (var i = 0; i < filter.contacts.length; i++) {
+              if (ids.indexOf(filter.contacts[i].id) >= 0) {
+                matchedItem++
+              }
+            }
+          } else if (filter.val === 'currUser') {
+            if (field.compt === 'department') {
+              if (currUserDepartments.length === 0) { // 获取当前用户所在部门
+                currUserDepartments = getCurrentUserDepartments()
+              }
+              for (var i = 0; i < currUserDepartments.length; i++) {
+                if (ids.indexOf(currUserDepartments[i]) >= 0) {
+                  matchedItem++
+                }
+              }
+            } else {
+              if (ids.indexOf(Number(Cookies.get('oa_uid'))) >= 0) {
+                matchedItem++
+              }
+            }
+          }
+          
+          switch (filter.express) {
+            case '===':
+              if (filter.val === 'currUser') {
+                if (field.compt === 'department') {
+                  return matchedItem === currUserDepartments.length && ids.length === matchedItem
+                } else {
+                  return ids.length === 1 && matchedItem === ids.length
+                }
+              } else {
+                return ids.length === filter.contacts.length && matchedItem === ids.length
+              }
+              return false
+            case '!==':
+              return matchedItem !== ids.length || ( filter.contacts && ids.length !== filter.contacts.length )
+            case 'notNull':
+              return true
+            case 'match':
+              return matchedItem > 0
+            case 'allMatch':
+              return matchedItem === ids.length
+          }
+          return false
+      }
+    }
+    
+    if (condition.filters) {
+      var matchedCount = 0
+      for (var i = 0; i < condition.filters.length; i++) {
+        var filter = condition.filters[i]
+        if (filter.hasOwnProperty('model')) {
+          if (dataMatchFilterCondition(fields, filter)) {
+            matchedCount++
+          }
+        }
+        if (fields.hasOwnProperty(filter.id)) {
+          var field = fields[filter.id]
+          if (undefined !== filter.subIndex && ['leavekit'].indexOf(field.compt) >= 0) {
+            field = field.fields[Number(filter.subIndex)]
+            field.fields = [field]
+            switch (field.fieldType.type) {// for leavekit/gooutkit....
+              case 'date':
+                field.compt = 'dateinput'
+                break
+              case 'timerange':
+                field.compt = 'numberinput'
+                break
+              default:
+                field.compt = 'editinput'
+            }
+          }
+          
+          if (fieldMatchFilter(field, filter)) {
+            matchedCount++
+          }
+        }
+        
+        if (condition.model === 1 && matchedCount > 0) {//条件“或”：匹配一次就结束
+          return true
+        }
+        if (condition.model === 0 && matchedCount < i + 1) {//条件“与”：有一次不匹配就结束
+          return false
+        }
+      }
+    }
+    
+    if (condition.model === 1) {
+      return matchedCount > 0
+    }
+    
+    return true
+  }
+  
+  function dealPrecisionLen(val, len) {
+    if (isNaN(val)) {
+      return 0
+    }
+    return parseFloat(val).toFixed(len)
+  }
+  
+  function makeRelevanceParams(_this) {
+    var relevance = {}
+    var fields = getFieldConfig(_this, parseInt(_this.roleId))
+    for (var id in fields) {
+      if (fields[id] === 1) { // 通过relevance实现readonly的效果
+        relevance[id] = null
+      }
+    }
+    return relevance
+  }
+  
+  /**
+   * 根据roleId获取“字段权限”配置
+   * @param _this
+   * @param roleId
+   * @param launchStatus（apply_web_for_manage.btl页面中使用）
+   * @param permissionGroupId 权限组ID
+   */
+  function getFieldConfig(_this, roleId, launchStatus, permissionGroupId) {
+    var fields = {}
+    if (((!$.isEmptyObject(launchStatus) && launchStatus === '1') || $.isEmptyObject(launchStatus)) && _this.forms.hasOwnProperty('permissionConfig')) {
+      var permissionConfig = typeof _this.forms.permissionConfig === 'string' ? JSON.parse(_this.forms.permissionConfig) : _this.forms.permissionConfig
+      var permissionConf = ''
+      //兼容默认权限组
+      if (!Array.isArray(permissionConfig)) {
+        permissionConf = permissionConfig
+      } else {
+        if (!permissionGroupId || parseInt(permissionGroupId) === -1) {
+          permissionConf = permissionConfig[0]
+        } else {
+          for (var i = 0; i < permissionConfig.length; i++) {
+            if (permissionConfig[i].permissionGroupId === parseInt(permissionGroupId)) {
+              permissionConf = permissionConfig[i]
+              break
+            }
+          }
+        }
+      }
+      
+      if (permissionConf && permissionConf.hasOwnProperty('fieldConfig')) {
+        var conf = permissionConf.fieldConfig
+        var curRoleId = parseInt(roleId)
+        fields = getConfigByRoleId(conf, curRoleId)
+      }
+    }
+    return fields
+  }
+  
+  /**
+   * 判断roleId是否在配置中：若匹配上则返回对应config
+   *
+   * @param conf 权限配置数据（数据权限、字段权限及操作权限结构一致）
+   * @param roleId 当前角色ID
+   */
+  function getConfigByRoleId(conf, roleId) {
+    var fields = {}
+    var roleConfigs = conf.roleConfigs
+    if (roleId > -1 && roleConfigs && roleConfigs.length > 0) {
+      for (var i = 0; i < roleConfigs.length; i++) {
+        var ids = roleConfigs[i].ids
+        if (ids.indexOf(roleId) > -1) {
+          fields = roleConfigs[i].config
+          return fields
+        }
+      }
+    }
+    if (!$.isEmptyObject(conf.otherConfig)) {
+      fields = conf.otherConfig
+    }
+    return fields
+  }
+  
+  function hideFields(fields, formData) {
+    if (!fields || !formData) {
+      return
+    }
+    for (var i = 0; i < formData.length; i++) {
+      if (formData[i].compt === 'detailcombox') {
+        var compts = formData[i].compts
+        if (compts[0] instanceof Array) {
+          compts = compts[0]
+        }
+        var hideCount = 0
+        for (var j = 0; j < compts.length; j++) {
+          if (fields[compts[j].id] === 2) {
+            hideCount++
+          }
+        }
+        if (hideCount === compts.length) {
+          fields[formData[i].id] = 2
+        }
+      }
+    }
+  }
+  
+  //将此表单结构处理为在页面表格上显示的表头数据(支持明细合并单元格)
+  function calTabTitle(_this, colArr, disFields, isShow) {
+    var filterObj = {}, needFilter = false
+    if (disFields && disFields.length > 0) {
+      needFilter = true
+      for (var i = 0; i < disFields.length; i++) {
+        filterObj[disFields[i].id] = disFields[i].id
+        if (disFields[i].pid > 0) {
+          //如果当前表单在后台设置显示的组件属于明细内 则其父级明细组件也要显示
+          filterObj[disFields[i].pid] = disFields[i].pid
+        }
+      }
+    }
+    var columns = [], index = 0
+    var detailIndexObjArr = []
+    var secondLine = []
+    var unDetailIndexArr = [], hasDetail = false
+    var gatherModel = _this.$store.getters.getGatherModel
+    for (var i = 0; i < colArr.length; i++) {
+      var ele = colArr[i]
+      var colObj
+      var isMatrix = false
+      if (ele.compt === 'captiontext' || ele.compt === 'relateddata' || ele.compt === 'imageocr') {
+        continue
+      }
+      
+      switch (ele.compt) {
+        case 'detailcombox':
+        case 'matrixradio':
+        case 'matrixcheckbox':
+        case 'datetimerange':
+          if (hasAuthority(_this, needFilter, gatherModel, ele, true, isMatrix)) {
+            continue
+          }
+          break
+        default:
+          if (hasAuthority(_this, needFilter, gatherModel, ele, false, isMatrix)) {
+            continue
+          }
+          break
+      }
+      
+      if (ele.compt === 'detailcombox' || ele.compt === 'matrixradio' || ele.compt === 'matrixcheckbox') {
+        if (needFilter && !filterObj[ele.id]) {
+          continue
+        }
+        if (ele.compts.length <= 0) {
+          continue
+        }
+        if (ele.compt === 'matrixradio' || ele.compt === 'matrixcheckbox') {
+          isMatrix = true
+        }
+        hasDetail = true
+        var detailLen = 0
+        for (var m = 0; m < ele.compts.length; m++) {
+          var subCompts = ele.compts[m]
+          if (subCompts.compt === 'captiontext' || subCompts.compt === 'relateddata' || subCompts.compt === 'imageocr') {
+            continue
+          }
+          switch (subCompts.compt) {
+            case 'datetimerange':
+              if (hasAuthority(_this, needFilter, gatherModel, subCompts, true, isMatrix)) {
+                continue
+              }
+              break
+            default:
+              if (hasAuthority(_this, needFilter, gatherModel, subCompts, false, isMatrix)) {
+                continue
+              }
+              break
+          }
+          for (var j = 0; j < subCompts.fields.length; j++) {
+            var field = subCompts.fields[j]
+            if ('timerange' === field.fieldType.type && !field.fieldType.calculate) {
+              //时间差值字段未启用
+              continue
+            }
+            detailLen++
+          }
+        }
+        detailIndexObjArr.push({index: index, id: ele.id, colspan: detailLen, title: ele.label})
+        for (var j = 0; j < ele.compts.length; j++) {
+          var subEle = ele.compts[j]
+          if (subEle.compt === 'captiontext' || subEle.compt === 'relateddata' || subEle.compt === 'imageocr' || subEle.compt === 'detailcombox') {
+            continue
+          }
+          switch (subEle.compt) {
+            case 'datetimerange':
+              if (hasAuthority(_this, needFilter, gatherModel, subEle, true, isMatrix)) {
+                continue
+              }
+              break
+            default:
+              if (hasAuthority(_this, needFilter, gatherModel, subEle, false, isMatrix)) {
+                continue
+              }
+              break
+          }
+          for (var k = 0; k < subEle.fields.length; k++) {
+            var field = subEle.fields[k]
+            if ('timerange' === field.fieldType.type && !field.fieldType.calculate) {
+              //时间差值字段未启用
+              continue
+            }
+            colObj = {
+              id: subEle.id,
+              pid: ele.id,
+              field: index,
+              compt: subEle.compt,
+              title: subEle.fields[0].label,
+              unit: field.fieldType.unit,
+              isDetail: true,
+              show: true
+            }
+            if (subEle.compt === 'datetimerange') {
+              colObj.id = subEle.id + '_' + k
+            }
+            colObj.title = !field.label ? '' : field.label
+            secondLine.push(colObj)
+            index++
+          }
+        }
+        continue
+      }
+      for (var j = 0; j < ele.fields.length; j++) {
+        var field = ele.fields[j]
+        if ('timerange' === field.fieldType.type && !field.fieldType.calculate) {
+          //时间差值字段未启用
+          continue
+        }
+        colObj = {id: ele.id, field: index, title: '', compt: ele.compt, unit: field.fieldType.unit, show: true}
+        if (ele.compt === 'datetimerange') {
+          colObj.id = ele.id + '_' + j
+        }
+        colObj.title = !field.label ? '' : field.label
+        if (needFilter && !filterObj[colObj.id]) {
+          break
+        }
+        secondLine.push(colObj)
+        unDetailIndexArr.push(index)
+        index++
+      }
+    }
+    //表头增加提交时间列
+    secondLine.push({
+      title: '提交时间',
+      rowspan: hasDetail ? 2 : 1,
+      show: !!isShow //控制选择数据页面不显示提交时间列
+    })
+    if (hasDetail) {
+      var firstLine = $.extend(true, [], secondLine)
+      for (var i = 0; i < firstLine.length; i++) {
+        var columnsFirst = firstLine[i]
+        for (var m = 0; m < unDetailIndexArr.length; m++) {
+          if (columnsFirst.field === unDetailIndexArr[m]) {
+            firstLine[i]['rowspan'] = 2
+            secondLine[i]['del'] = true
+            break
+          }
+        }
+        
+        for (var m = 0; m < detailIndexObjArr.length; m++) {
+          var detailStartIndexObj = detailIndexObjArr[m]
+          if (columnsFirst.field === detailStartIndexObj.index) {
+            firstLine[i].title = detailStartIndexObj.title
+            firstLine[i].id = detailStartIndexObj.id
+            firstLine[i]['colspan'] = detailStartIndexObj.colspan
+            firstLine[i]['isDetail'] = false
+            break
+          }
+        }
+        if (columnsFirst.isDetail) {
+          //当前明细里除第一列以外的其它列
+          firstLine[i]['del'] = true
+        }
+      }
+      columns[0] = []
+      columns[1] = []
+      for (var i = 0; i < firstLine.length; i++) {
+        if (!firstLine[i].del) {
+          columns[0].push(firstLine[i])
+        }
+      }
+      for (var i = 0; i < secondLine.length; i++) {
+        if (!secondLine[i].del) {
+          columns[1].push(secondLine[i])
+        }
+      }
+    } else {
+      columns[0] = $.extend(true, [], secondLine)
+      columns.splice(1, 1)
+    }
+    return columns
+  }
+  
+  function hasAuthority(_this, needFilter, gatherMode, compt, isDetail, isMatrix) {
+    if (isMatrix) {
+      //矩阵内的跳过
+      return false
+    }
+    if (gatherMode) {
+      //发放采集的个人提交记录中查看按设置的字段显示
+      return !needFilter && !_this.$store.getters.getFieldGatherShowStatusById(compt.id)
+    }
+    if (isDetail) {
+      //非选择数据组件加载数据源列表时组件设置了不可见或选项关联时隐藏 则不显示加载
+      return !needFilter && (compt.hasOwnProperty('visible') && !compt.visible)
+    }
+    //非选择数据组件加载数据源列表时组件设置了不可见或选项关联时隐藏 则不显示加载
+    return !needFilter && (compt.fields[0].hasOwnProperty('visible') && !compt.fields[0].visible)
+  }
+  
+  /**
+   * 将用户表单数据处理为在页面表格上显示的表数据(支持明细合并单元格)
+   */
+  function calculateTableDataMerge(_this, compt, trDataList, dynamicFields, isShow) {
+    var detailGroupDataMaxLen = 0, otherDetailObj = {}, isMatrix = false
+    
+    var formData = $.extend(true, [], compt.formData)
+    var gatherModel = _this.$store.getters.getGatherModel
+    
+    function doCalculateFun(formData, tdDataArr, isDetailColumn, filterObj, needFilter, gatherModel, isMatrix, pid) {
+      var len = 0
+      for (var i = 0; i < formData.length; i++) {
+        var ele = formData[i]
+        if (ele.compt === 'captiontext' || ele.compt === 'relateddata' || ele.compt === 'imageocr' || (ele.compt === 'detailcombox' && isDetailColumn)) {
+          continue
+        }
+        
+        switch (ele.compt) {
+          case 'detailcombox':
+          case 'matrixradio':
+          case 'matrixcheckbox':
+          case 'datetimerange':
+            if (hasAuthority(_this, needFilter, gatherModel, ele, true)) {
+              continue
+            }
+            break
+          default:
+            if (hasAuthority(_this, needFilter, gatherModel, ele, false, isMatrix)) {
+              continue
+            }
+            break
+        }
+        
+        if (ele.compt === 'detailcombox' || ele.compt === 'matrixradio' || ele.compt === 'matrixcheckbox') {
+          if (!isDetailColumn && needFilter && !filterObj[ele.id]) {
+            continue
+          }
+          if (!ele.compts || ele.compts.length <= 0 || ele.compts[0].length <= 0) {
+            continue
+          }
+          
+          if (detailGroupDataMaxLen < ele.compts.length) {
+            detailGroupDataMaxLen = ele.compts.length
+          }
+          if (ele.compt === 'matrixradio' || ele.compt === 'matrixcheckbox') {
+            isMatrix = true
+          }
+          
+          var index = doCalculateFun(ele.compts[0], tdDataArr, true, null, needFilter, gatherModel, isMatrix, ele.id)
+          if (!otherDetailObj[i]) {
+            otherDetailObj[i] = {id: ele.id, fieldNum: index, data: []}
+          }
+          for (var j = 1; j < ele.compts.length; j++) {
+            var subCompts = ele.compts[j]
+            otherDetailObj[i].data.push(subCompts)
+          }
+          continue
+        }
+        for (var j = 0; j < ele.fields.length; j++) {
+          var field = ele.fields[j]
+          if ('timerange' === field.fieldType.type && !field.fieldType.calculate) {
+            //时间差值字段未启用
+            continue
+          }
+          var colObj = {
+            id: ele.id,
+            rowspan: 1,
+            data: '',
+            compt: ele.compt,
+            micrometer: field.micrometer,
+            isDetailColumn: isDetailColumn,
+            show: true
+          }
+          if (pid) {
+            colObj['pid'] = pid
+          }
+          if (ele.compt === 'datetimerange') {
+            colObj.id = ele.id + '_' + j
+          }
+          switch (ele.compt) {
+            case 'location':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].address)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'contact':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].uname)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'belonger':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].uname)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'department':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].departmentName)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'livevideo':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].playUrl)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'fileupload':
+              colObj['otherFiles'] = true
+              colObj.data = field.values
+              break
+            case 'imagebox':
+              colObj['imageFiles'] = true
+              colObj.data = field.values
+              break
+            case 'videobox':
+              colObj['videoFiles'] = true
+              colObj.data = field.values
+              break
+            case 'signature':
+              colObj['signFiles'] = true
+              colObj.data = field.values
+              break
+            case 'areamultiselect':
+            case 'multipleselect':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  if (field.values[k].val !== '') {
+                    valArr.push(field.values[k].val)
+                  }
+                }
+              }
+              colObj.data = valArr.join('/')
+              break
+            case 'areacheckbox':
+              var result = ''
+              if (field.values && field.values.length > 0) {
+                result = getSelectedPathAreaStr(field.values)
+              }
+              colObj.data = result
+              break
+            case 'computeinput':
+            case 'numberinput':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  var val = field.values[k].val
+                  if (field.micrometer && val) {
+                    // 数字字段千字符追加
+                    if (val.indexOf('.') !== -1) {
+                      var splitValue = val.split('.')
+                      val = splitValue[0].replace(/(?=(\B\d{3})+$)/g, ',') + '.' + splitValue[1]
+                    } else {
+                      val = val.replace(/(?=(\B\d{3})+$)/g, ',')
+                    }
+                  }
+                  // 数字字段追加百分号
+                  if (field.percentage && val) {
+                    val += '%'
+                  }
+                  valArr.push(val)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'richtext':
+              colObj['richtext'] = true
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].val)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+            case 'radiobutton':
+            case 'checklist':
+            case 'selectbox':
+            case 'selectmultibox':
+              colObj['optionColor'] = ele.optionColor
+              if (!field.values) {
+                colObj.data = ''
+              } else {
+                var valArr = []
+                if (ele.optionColor) {
+                  for (var k = 0; k < field.values.length; k++) {
+                    var data = {val: field.values[k].val, color: '', className: ''}
+                    if (field.values[k].isOther) {
+                      data.className = 'other_span'
+                      valArr.push(data)
+                    } else {
+                      for (var x in field.options) {
+                        if (field.options[x].title !== data.val) {
+                          continue
+                        }
+                        data.color = field.options[x].color
+                        data.className = field.options[x].className
+                        break
+                      }
+                      valArr.push(data)
+                    }
+                  }
+                  colObj.optionColor = true
+                  colObj.data = valArr
+                } else {
+                  for (var k = 0; k < field.values.length; k++) {
+                    valArr.push(field.values[k].val)
+                  }
+                  colObj.data = valArr.join(',')
+                }
+              }
+              break
+            case 'datetimerange':
+            case 'editinput':
+            case 'slider':
+            case 'dateinput':
+            case 'edittextarea':
+            case 'autonumber':
+              var valArr = []
+              if (field.values && field.values.length > 0) {
+                for (var k = 0; k < field.values.length; k++) {
+                  valArr.push(field.values[k].val)
+                }
+              }
+              colObj.data = valArr.join(',')
+              break
+          }
+          
+          if (!isDetailColumn && needFilter && !filterObj[colObj.id]) {
+            break
+          }
+          len++
+          tdDataArr.push(colObj)
+        }
+      }
+      return len
+    }
+    
+    var filterObj = {}, needFilter = false
+    if (dynamicFields && dynamicFields.length > 0) {
+      needFilter = true
+      for (var i = 0; i < dynamicFields.length; i++) {
+        filterObj[dynamicFields[i].id] = dynamicFields[i].id
+        if (dynamicFields[i].pid > 0) {
+          //如果当前表单在后台设置显示的组件属于明细内 则其父级明细组件也要显示
+          filterObj[dynamicFields[i].pid] = dynamicFields[i].pid
+        }
+      }
+    }
+    //每条数据里的第一行
+    var tdDataArr = []
+    doCalculateFun(formData, tdDataArr, false, filterObj, needFilter, gatherModel, isMatrix)
+    for (var i = 0; i < tdDataArr.length; i++) {
+      if (!tdDataArr[i].isDetailColumn) {
+        tdDataArr[i].rowspan = detailGroupDataMaxLen
+      }
+    }
+    //数据展示增加提交时间
+    tdDataArr.push({
+      rowspan: detailGroupDataMaxLen,
+      data: moment(compt.inserttime).format('YYYY-MM-DD HH:mm'),
+      show: !!isShow //控制选择数据页面不显示提交时间列
+    })
+    trDataList.push(tdDataArr)
+    for (var i = 0; i < detailGroupDataMaxLen - 1; i++) {
+      var tdDataArr = []
+      for (var key in otherDetailObj) {
+        if (otherDetailObj[key].data[i]) {
+          doCalculateFun(otherDetailObj[key].data[i], tdDataArr, true, null, needFilter, gatherModel, isMatrix, otherDetailObj[key].id)
+        } else {
+          for (var j = 0; j < otherDetailObj[key].fieldNum; j++) {
+            tdDataArr.push({pid: otherDetailObj[key].id, rowspan: 1, data: '', isDetailColumn: true})
+          }
+        }
+      }
+      trDataList.push(tdDataArr)
+    }
+    return trDataList
+  }
+  
+  /**
+   * 获取地址多选信息
+   * @param selectedAreas
+   * @returns {string}
+   */
+  function getSelectedPathAreaStr(selectedAreas) {
+    if (selectedAreas.length === 0) {
+      return ''
+    }
+    
+    var otherAreas = [] // 附属项数组
+    var areas = [] // 省市县数组
+    for (var i = 0; i < selectedAreas.length; i++) {
+      var selArea = selectedAreas[i]
+      if ($.trim(selArea.areaCode).length < 6) { // 附属项，比如全国 areaCode = 0, 长度小于6
+        otherAreas.push(selArea)
+      } else {
+        areas.push(selArea)
+      }
+    }
+    // 附属项
+    var otherAreaNames = []
+    for (var j = 0; j < otherAreas.length; j++) {
+      otherAreaNames.push(otherAreas[j].val)
+    }
+    // 省市县
+    var areaNames = []
+    if (areas.length > 0) {
+      var lastArea = areas[areas.length - 1]
+      var level = getLevel(lastArea)
+      var pathAreaNameArr
+      
+      for (var k = 0; k < areas.length; k++) {
+        if (k % level === 0) {
+          pathAreaNameArr = []
+        }
+        pathAreaNameArr.push(areas[k].val)
+        if ((k + 1) % level === 0) {
+          areaNames.push(pathAreaNameArr.join('/'))
+        }
+      }
+    }
+    
+    var result = ''
+    if (otherAreaNames.length > 0) {
+      result += otherAreaNames.join(',')
+    }
+    if (otherAreaNames.length > 0 && areaNames.length > 0) {
+      result += ','
+    }
+    if (areaNames.length > 0) {
+      result += areaNames.join(',')
+    }
+    
+    return result
+  }
+  
+  /**
+   * 获取地址多选的层级
+   */
+  function getLevel(area) {
+    var code = area.areaCode + ''
+    var province = code.substring(2)
+    var city = code.substring(4)
+    
+    if (province === '0000') { // 省级
+      return 1
+    }
+    if (city === '00') { // 市级
+      return 2
+    }
+    return 3 // 区县级
+  }
+  
+  /**
+   *  学习通、第三方、web, 格式化显示倒计时
+   */
+  function numberToTimer(value) {
+    // 获取自动显示时间的值，按秒进行更新数据，自动更新页面秒数变更
+    value = value * 1000
+    // 总秒数
+    var second = Math.floor(value / 1000)
+    // 小时
+    var hr = Math.floor(second / 3600 % 24)
+    // 分钟
+    var min = Math.floor(second / 60 % 60)
+    // 秒
+    var sec = Math.floor(second % 60)
+    return hr + ' 小时 ' + min + ' 分钟 ' + sec + ' 秒'
+  }
+  
+  /**
+   *  学习通、第三方、web, 实时更新倒计时
+   */
+  function checkTimerShow(_this, startTime, endTime) {
+    // 在表单填报之前，进行的判断，结束填报的表单禁止进行按秒进行倒计时，以秒为单位
+    _this.countdownNumber = calculateScondsNumber(_this.forms.effectiveDate)
+    if (!_this.afterBegin && _this.beforeBegin && startTime && endTime
+        && _this.countdownNumber <= 86400) {
+      _this.timeBegin = true
+      _this.beforeBegin = false
+      // 定时器，将在定时结束后，即填报开始的时候刷新填报信息，允许填写表单
+      var countdownNumberTimer = setInterval(function () {
+        _this.countdownNumber--
+        if (_this.countdownNumber <= 0) {
+          _this.formShow = true
+          _this.enableWrite = true
+          clearInterval(countdownNumberTimer)
+        }
+      }, 1000)
+    }
+  }
+  
+  function calculateScondsNumber(endTime) {
+    // 计算两个时间范围的秒数，即开始时间与现在时间的总秒数
+    var beginTime = new Date().getTime()
+    var apartTime = endTime - beginTime
+    return parseInt(apartTime / 1000)
+  }
+  
+  function getOptionalScope(vm, id) {
+    var widgetMap = {}
+    var comptMap = {}
+    
+    function allContacts(compts) { // 考虑子表单中的联系人
+      compts.forEach(function (item) {
+        var compt = item.config
+        if (compt.compt === 'detailcombox') {
+          item.children.forEach(function (list) {
+            allContacts(list)
+          })
+        } else {
+          widgetMap[item.id] = item
+          comptMap[compt.id] = compt
+        }
+      })
+    }
+    
+    if (id) {
+      allContacts(vm.widgets)
+      if (widgetMap.hasOwnProperty(id) && widgetMap[id].config.compt === 'contact') { //排除departments
+        var scope = getScope(widgetMap[id].config.id, comptMap)
+        if (scope.type) {
+          return scope
+        }
+      }
+    }
+    return null
+    
+    function getScope(id, comptMap) {
+      var ids = []
+      var type = 0
+      if (comptMap.hasOwnProperty(id)) {
+        var compt = comptMap[id]
+        if (compt.optionalScope && compt.optionalScope.options && compt.optionalScope.options.length > 0) {
+          var options = JSON.parse(compt.optionalScope.options)
+          type = compt.optionalScope.type
+          if (type === 1 // 指定部门
+              || type === 2 // 指定人员
+              || type === 3) { // 指定角色
+            for (var i = 0; i < options.length; i++) {
+              ids.push(options[i].id)
+            }
+          } else if (type === 4) { // 指定字段
+            for (i = 0; i < options.length; i++) {
+              if (comptMap.hasOwnProperty(options[i].id)) {
+                var targetCompt = comptMap[options[i].id]
+                
+                for (var k = 0; k < targetCompt.fields[0].values.length; k++) {
+                  ids.push(targetCompt.fields[0].values[k].departmentId)
+                }
+              }
+            }
+          } else { // 全部范围
+            // do nothing
+          }
+        }
+      }
+      
+      return {type: type, ids: ids.join(',')}
+    }
+  }
+  
+  /**
+   * 联系人/所属人根据关联条件查询填充默认值
+   */
+  function contactBelongerDefalutValueLoad(_this, value) {
+    if (value === '') {
+      _this.value = []
+    }
+    doRequest('data/form/find/user/bysnomobile', {sno: value, mobile: value, type: _this.relationValueConfig.type}, true).then(function (res) {
+      if (res.success && res.data.userInfo.hasOwnProperty('result') && res.data.userInfo.result) {
+        var userInfo = res.data.userInfo
+        if (_this.widget.config.compt === 'belonger') {
+          _this.value = [{puid: userInfo.uid, uname: userInfo.realname, enc: userInfo.enc}]
+        } else {
+          var ids = getRangeOptionIds(_this).split(',')
+          switch (_this.optionalType) {
+            case 0:
+              if (userInfo.realname === '匿名用户') {
+                _this.value = []
+                return
+              }
+              doRequest('data/form/find/users/byroster', {uname: userInfo.realname}, true).then(function (res) {
+                if (res.success && res.data.users.result === 1) {
+                  var users = res.data.users.data.list
+                  for (var i = 0; i < users.length; i++) {
+                    if (users[i].hasOwnProperty('puid') && parseInt(users[i].puid) === userInfo.uid) {
+                      _this.value = [{puid: userInfo.uid, uname: userInfo.realname, enc: userInfo.enc}]
+                      return
+                    }
+                  }
+                }
+              })
+              return
+            case 2:
+              for (var i = 0; i < ids.length; i++) {
+                if (userInfo.uid === parseInt(ids[i])) {
+                  _this.value = [{puid: userInfo.uid, uname: userInfo.realname, enc: userInfo.enc}]
+                }
+              }
+              break
+            case 3:
+              doRequest('data/form/find/users/byroleid', {roleIds: ids.join(',')}, true).then(function (res) {
+                if (res.success && res.data.users && res.data.users.status) {
+                  var users = res.data.users.json
+                  for (var i = 0; i < users.length; i++) {
+                    if (users[i].userid === userInfo.uid) {
+                      _this.value = [{puid: userInfo.uid, uname: userInfo.realname, enc: userInfo.enc}]
+                      return
+                    }
+                  }
+                }
+              })
+              break
+            case 1:
+            case 4:
+              getDepartmentUser(_this, ids.join(','), userInfo)
+              break
+            default:
+              break
+          }
+        }
+      } else {
+        _this.value = []
+      }
+    })
+  }
+  /**
+   * 获取关联字段的信息
+   */
+  function getRangeOptionFieldData(_this) {
+    var fieldData = {
+      ids:[],
+      labels:[]
+    }
+    if (_this.optionalScope && _this.optionalScope.options && _this.optionalScope.options.length > 0) {
+      var options = JSON.parse(_this.optionalScope.options)
+      var type = _this.optionalScope.type
+      if (type === 1 // 指定部门
+          || type === 2 // 指定人员
+          || type === 3) { // 指定角色
+        for (var i = 0; i < options.length; i++) {
+          fieldData.ids.push(options[i].id)
+        }
+      } else if (type === 4) { // 指定字段
+        for (i = 0; i < options.length; i++) {
+          for (var j = 0; j < _this.widgets.length; j++) {
+            var compt = _this.widgets[j]
+            if (compt.config.id === options[i].id) {
+              fieldData.labels.push(compt.config.fields[0].label)
+              for (var k = 0; k < compt.config.fields[0].values.length; k++) {
+                fieldData.ids.push(compt.config.fields[0].values[k].departmentId)
+              }
+            }
+          }
+        }
+      }
+    }
+    return {ids:fieldData.ids.join(','),labels:fieldData.labels.join(',')}
+  }
+  /**
+   * 获取联系人/所属人组件可选范围条件
+   */
+  function getRangeOptionIds(_this) {
+    var ids = []
+    if (_this.optionalScope && _this.optionalScope.options && _this.optionalScope.options.length > 0) {
+      var options = JSON.parse(_this.optionalScope.options)
+      var type = _this.optionalScope.type
+      if (type === 1 // 指定部门
+          || type === 2 // 指定人员
+          || type === 3) { // 指定角色
+        for (var i = 0; i < options.length; i++) {
+          ids.push(options[i].id)
+        }
+      } else if (type === 4) { // 指定字段
+        for (i = 0; i < options.length; i++) {
+          for (var j = 0; j < _this.widgets.length; j++) {
+            var compt = _this.widgets[j]
+            if (compt.config.id === options[i].id) {
+              for (var k = 0; k < compt.config.fields[0].values.length; k++) {
+                ids.push(compt.config.fields[0].values[k].departmentId)
+              }
+            }
+          }
+        }
+      }
+    }
+    return ids.join(',')
+  }
+  
+  function getDepartmentUser(_this, departmentIds, userInfo) {
+    if (departmentIds) {
+      doRequest('data/form/find/users/bydepartmentids', {departmentIds: departmentIds}, true).then(function (res) {
+        if (res.success && res.data.users) {
+          var users = res.data.users
+          for (var i = 0; i < users.length; i++) {
+            if (users[i].puid === parseInt(userInfo.uid)) {
+              _this.value = [{puid: userInfo.uid, uname: userInfo.realname, enc: userInfo.enc}]
+              return
+            }
+          }
+        }
+      })
+    }
+  }
+  
+  /**
+   * 身份证号前两位的地址及校验位的验证
+   */
+  function idCardCodeValid(code) {
+    var cityCode = {
+      11: '北京', 12: '天津', 13: '河北', 14: '山西', 15: '内蒙古', 21: '辽宁', 22: '吉林',
+      23: '黑龙江 ', 31: '上海', 32: '江苏', 33: '浙江', 34: '安徽', 35: '福建', 36: '江西',
+      37: '山东', 41: '河南', 42: '湖北 ', 43: '湖南', 44: '广东', 45: '广西', 46: '海南',
+      50: '重庆', 51: '四川', 52: '贵州', 53: '云南', 54: '西藏 ', 61: '陕西', 62: '甘肃',
+      63: '青海', 64: '宁夏', 65: '新疆', 71: '台湾', 81: '香港', 82: '澳门', 91: '国外 '
+    }
+    if (code && !cityCode[code.substr(0, 2)]) {
+      return false
+    }
+    //18位身份证需要验证最后一位校验位
+    if (code && code.length === 18) {
+      code = code.split('')
+      // 加权因子
+      var factor = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2]
+      //校验位
+      var parityCheck = [1, 0, 'X', 9, 8, 7, 6, 5, 4, 3, 2]
+      var sum = 0
+      var ai = 0
+      var wi = 0
+      for (var i = 0; i < 17; i++) {
+        ai = code[i]
+        wi = factor[i]
+        sum += ai * wi  //∑(ai×Wi)(mod 11)
+      }
+      return $.trim(parityCheck[sum % 11]) === $.trim(code[17])
+    }
+    return true
+  }
+  
+  
+  /** 修改字段值，兼容关联选项的组件的显示与隐藏 */
+  function getRelationConfig(compts, relationConfig, hasRelationConfig) {
+    for (var i = 0; i < compts.length; i++) {
+      var ele = compts[i]
+      if (/^radiobutton|checklist|selectbox|selectmultibox$/.test(ele.compt)) {
+        var values = ele.fields[0].values
+        if (values && values.length > 0) {
+          for (var j = 0; j < ele.fields[0].options.length; j++) {
+            var option = ele.fields[0].options[j]
+            if (option && option.hasOwnProperty('idArr')) {
+              // 保存所有配置了管理关联选项的组件
+              for (var k = 0; k < option.idArr.length; k++) {
+                hasRelationConfig[option.idArr[k]] = option.idArr[k]
+              }
+              for (var m = 0; m < values.length; m++) {
+                if ($.trim(values[m].val) === $.trim(option.title)
+                    && option.idArr && option.idArr.length > 0) {
+                  for (var k = 0; k < option.idArr.length; k++) {
+                    relationConfig[option.idArr[k]] = true
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else if (ele.compt === 'detailcombox') {
+        // 对子表单配置了关联选项设置默认为不可见
+        if (hasRelationConfig.hasOwnProperty(ele.id)) {
+          ele.isShow = false
+        }
+        if (ele.compts[0]) {
+          getRelationConfig(ele.compts[0], relationConfig, hasRelationConfig)
+        }
+      }
+    }
+  }
+  
+  /** 触发器、修改字段值，修改的数据会导致个别组件显示异常，查看页进行页面组件显示逻辑重新判断 */
+  function changeRelationFiledConfig(compts, formIdValueData) {
+    var relationConfig = {}
+    var hasRelationConfig = {}
+    if(compts){
+      getRelationConfig(compts, relationConfig, hasRelationConfig)
+    }
+    for (var i = 0; i < compts.length; i++) {
+      var compt = compts[i]
+      if (relationConfig.hasOwnProperty(compt.id)) {
+        compt.isShow = relationConfig[compt.id]
+      } else if (formIdValueData) {
+        if (formIdValueData && formIdValueData.hasOwnProperty(compt.id)
+            && formIdValueData[compt.id].hasOwnProperty('groupValues')
+            && formIdValueData[compt.id].groupValues.length > 0
+            && formIdValueData[compt.id].groupValues[0].hasOwnProperty('isShow')) {
+          compt.isShow = formIdValueData[compt.id].groupValues[0].isShow
+        }
+      }
+      if (compt.compt === 'detailcombox') {
+        if(compt.compts[0]){
+          changeRelationFiledConfig(compt.compts[0], formIdValueData)
+        }
+      }
+    }
+  }
+  
+  /** 设置联系人、所属人组件值为当前用户 */
+  function setComptValueByLoginUser(_this) {
+    if (!_this.userInfo.uid
+        || isNaN(parseInt(_this.userInfo.uid))
+        || parseInt(_this.userInfo.uid) <= 0
+        || !_this.userInfo.uname ||
+        $.trim(_this.userInfo.uname) === '') {
+      _this.value = []
+      return
+    }
+    _this.value = [{puid: parseInt(_this.userInfo.uid), uname: _this.userInfo.uname}]
+  }
+
+  /**
+  * 移动端底部提示弹窗
+  */
+  function showBtmTips(msg) {
+    var tipDom = null
+    var tipText = null
+    function createDom() {
+      tipText = $('<p class="tip_info"></p>')
+      tipDom = $('<div id="tip_dom" class="btm_tips"></div>')
+      tipDom.append(tipText)
+      window._tipDom = tipDom
+      $('body').append(tipDom)
+    }
+    function showTips() {
+      tipText = tipDom.find('.tip_info')
+      tipText.text(msg)
+      tipDom.css({'opacity':1,'z-index':1000})
+      if(window.btmTipsTimer){
+        clearTimeout(window.btmTipsTimer)
+      }
+      window.btmTipsTimer = setTimeout(function () {
+        tipDom.css({'opacity':0,'z-index':-1})
+      },1000)
+    }
+    if(window._tipDom){
+      tipDom = window._tipDom
+      showTips()
+    }else{
+      createDom()
+      showTips()
+    }
+  }
+
+  //监听下拉框显示
+  //vm: vue实例对象
+  //item: 存放下拉框显示属性的对象
+  //prop: 控制下拉框显示的属性名
+  //target: 指定目标元素，点击此元素下拉框关闭。默认为window
+  function watchSelectList(vm, item, prop, target) {
+    if(!target){
+      target = window
+    }
+    if (!window.selectListConfig) {
+      bindGlobalEvent()
+    }
+    var selectListConfig = window.selectListConfig
+    if (selectListConfig.opendSelect === item && selectListConfig.showProp === prop) {
+      return
+    }
+    closeOtherSelectList()
+    selectListConfig.opendSelect = item
+    selectListConfig.showProp = prop
+
+    function bindGlobalEvent() {
+      window.selectListConfig = {
+        opendSelect: {},
+        showProp: ''
+      }
+      target.addEventListener('click', function (e) {
+        //关闭其他下拉框
+        closeOtherSelectList()
+      })
+    }
+
+    //关闭监听的下拉框
+    function closeOtherSelectList() {
+      var opendSelect = selectListConfig.opendSelect
+      var showProp = selectListConfig.showProp
+      opendSelect[showProp] = false
+    }
+  }
+  
+  /**
+   * 向前一个页面（父级页面）发送消息
+   * @param data
+   */
+  function postMessageSend(data) {
+    try {
+      if (window.parent) {//嵌套页面
+        window.parent.postMessage(JSON.stringify(data), '*')
+      }
+      if (window.opener) {//新窗口
+        window.opener.postMessage(JSON.stringify(data), '*')
+      }
+    } catch (e) {
+      console.log('postMessage错误：', e)
+    }
+  }
+  
+  /**
+   * 判断客户端是否为微信
+   * @returns {boolean}
+   */
+  function isWeiXin() {
+    var ua = window.navigator.userAgent.toLowerCase()
+    if (ua.match(/MicroMessenger/i) && ua.match(/MicroMessenger/i)[0] === 'micromessenger') {
+      return true
+    } else {
+      return false
+    }
+  }
+
+  return {
+    setValidDateRangeForMobile: setValidDateRangeForMobile,
+    setValidDateRangeForPC: setValidDateRangeForPC,
+    uniqueConditions: uniqueCondition,
+    uniqueConditionDetailRepeat: uniqueConditionDetailRepeat,
+    getType: filePreviewUtils.getType,
+    digitUpperConvert: digitUpperConvert,
+    numberFormat: numberFormat,
+    filePreview: filePreviewUtils.filePreview,//新改造图片、附件预览方式
+    showTextValue: formatValueUtils.showTextValue,
+    dataMatchFilterCondition: dataMatchFilterCondition,//判断数据是否满足过滤条件
+    dealPrecisionLen: dealPrecisionLen,//处理数据保留小数位数,不够的补0
+    makeRelevanceParams: makeRelevanceParams,
+    getFieldConfig: getFieldConfig,
+    hideFields: hideFields,
+    calTabTitle: calTabTitle,
+    calculateTableDataMerge: calculateTableDataMerge,
+    numberToTimer: numberToTimer,
+    checkTimerShow: checkTimerShow,
+    getOptionalScope: getOptionalScope,
+    isNotEmptyValForRelatedData: relateDataUtils.isNotEmptyValForRelatedData,
+    addRelatedDataCache: relateDataUtils.addRelatedDataCache,
+    delRelatedDataCache: relateDataUtils.delRelatedDataCache,
+    getRelatedDataCache: relateDataUtils.getRelatedDataCache,
+    relatedDataEcho: relateDataUtils.relatedDataEcho,
+    childRelatedDataCache: relateDataUtils.childRelatedDataCache,
+    relatedDataCacheClear: relateDataUtils.relatedDataCacheClear,
+    childRelatedDataCacheChange: relateDataUtils.childRelatedDataCacheChange,
+    relatedDataTransform: relateDataUtils.relatedDataTransform,
+    initRelatedDataForEdit: relateDataUtils.initRelatedDataForEdit,
+    getCurrentDetailIndex: relateDataUtils.getCurrentDetailIndex,
+    convertStrToDate: convertStrToDate,
+    convertDateToFormatStr: convertDateToFormatStr,
+    getRangeOptionIds: getRangeOptionIds,
+    contactBelongerDefalutValueLoad: contactBelongerDefalutValueLoad,
+    generatorId: generatorId,
+    idCardCodeValid: idCardCodeValid,
+    changeRelationFiledConfig: changeRelationFiledConfig,
+    setComptValueByLoginUser: setComptValueByLoginUser,
+    convertToPercent: numPercentUtils.convertToPercent, //字段组件中将真值转化为百分比值
+    percentConvertToNumValue: numPercentUtils.percentConvertToNumValue, //字段组件中各种计算前，将百分比数值转化为真值
+    numValueAndPercentConvert: numPercentUtils.numValueAndPercentConvert, //针对设置了百分比显示的数字组件、计算公式组件的值进行百分比值回显处理（formData）
+    numValueAndPercentConvertForOne: numPercentUtils.numValueAndPercentConvertForOne, //针对设置了百分比显示的数字组件、计算公式组件的值进行百分比值回显处理（单条compt）
+    getFileVerify: fileVerifyUtils.getFileVerify, // 获取文件校验信息
+    setFileVerify: fileVerifyUtils.setFileVerify, // 设置文件校验不通过，禁止提交信息
+    verifyLimitFileCount: fileVerifyUtils.verifyLimitFileCount,
+    initComptValuesByOcr: ocrUtils.initComptValuesByOcr,//ocr身份证识别结果解析及填充值
+    showBtmTips: showBtmTips,
+    isDetailComptsShow: fieldPermissionUtils.isDetailComptsShow, //横排子表单内字段是否显示（用于三端detail.js中的rowsTitle方法）（不包含visible）
+    postMessageSend: postMessageSend,//向前一个页面（父级页面）发送消息
+    watchSelectList: watchSelectList,
+    isWeiXin: isWeiXin,
+    convertTimestampToFormatStr: convertTimestampToFormatStr, // 时间戳转日期
+    getRangeOptionFieldData:getRangeOptionFieldData,
+    getVerifyInfo: numberInputUtils.getVerifyInfo,
+    doShowErrorMsgFun: numberInputUtils.doShowErrorMsgFun,
+    setVideoNotice: fileVerifyUtils.setVideoNotice, // 视频提示信息
+    setImageNotice: fileVerifyUtils.setImageNotice, // 图片提示信息
+    setUploadFileNotice: fileVerifyUtils.setUploadFileNotice, // 文件上传提示信息
+    verifyVideoDetail: fileVerifyUtils.verifyVideoDetail, // 数据联动，视频文件，格式校验
+    verifyImageDetail: fileVerifyUtils.verifyImageDetail, // 数据联动，图片文件，格式校验
+    verifyUploadDetail: fileVerifyUtils.verifyUploadDetail, // 数据联动，附件文件，格式校验
+    getVideoDuration: fileVerifyUtils.getVideoDuration // 获取文件时长
+  }
+})

@@ -1,0 +1,517 @@
+define(['Vue', 'jquery', 'cookies', 'Area', 'formDataLoadValidateUtil'], function (Vue, $, Cookies, area,formDataLoadValidateUtil) {
+  'use strict'
+
+  var linkConfig = {
+    linkFormConditionFieldObj: {},//所有有数据联动绑定关系的条件字段对象conditionId:[linkInfo]
+    linkResultFieldCondObjs: {},//数据联动自动联动的值所依赖的条件对象集对象configId:{condFieldId:{id: 1, compt: '', val: ''}}
+    linkFieldIdAndVueObjs: {},//数据联动相关组件id-vue实例对象 {configId: {inDetailGroupIndex: {id: 1, vueObj: vueObj}}}
+    isPreview: false,// 是否未编辑页
+    isInit: true// 是否为初始化
+  }
+
+  function doRequest(url, data) {
+    return $.ajax({
+      url: url,
+      type: 'post',
+      data: data,
+      dataType: 'json'
+    })
+  }
+
+  /**
+   * 提取表单结构里所有数据联动字段
+   */
+  function acquireLinkFormField(compts) {
+
+    function doAcquireLinkFormField(compts) {
+      for (var i = 0; i < compts.length; i++) {
+        var ele = compts[i]
+        if (ele.config.compt === 'detailcombox') {
+          if (ele.config.compts.length > 0) {
+            doAcquireLinkFormField(ele.children[0])
+          }
+          continue
+        }
+
+        if (ele.config.linkInfo && ele.config.linkInfo.linked) {
+          var linkInfo = ele.config.linkInfo
+          if (!linkInfo.hasOwnProperty('condFields')) {
+            //只支持单条件时老数据 需要转成多条件形式
+            linkInfo['condFields'] = [{
+              currFormCondFieldId: ele.config.linkInfo.currFormCondFieldId,
+              linkFormCondFieldId: ele.config.linkInfo.linkFormCondFieldId,
+              linkFormCondFieldCompt: ''
+            }]
+            //删除老数据联动条件配置字段
+            delete linkInfo.currFormCondFieldId
+            delete linkInfo.linkFormCondFieldId
+          }
+          //按条件将所有依赖此条件的字段组装在此对象linkFormConditionFieldObj中形成一个数组集合
+          var linkedObj = linkConfig.linkFormConditionFieldObj, condFields = linkInfo.condFields, condFieldObj = {}
+          for (var j = 0; j < condFields.length; j++) {
+            var condField = condFields[j], key = condField.currFormCondFieldId
+            if (!linkedObj[key]) {
+              linkedObj[key] = []
+            }
+            linkInfo['currFormValueFieldId'] = ele.config.id
+            linkInfo['currFormValueFieldCompt'] = ele.config.compt
+            var find = false
+            for (var k = 0; k < linkedObj[key].length; k++) {
+              var subEle = linkedObj[key][k]
+              if (subEle.currFormValueFieldId === ele.config.id) {
+                //判断当前 ele.config.id要联动值的组件是否已在linkedObj[key]中增加过
+                find = true
+                break
+              }
+            }
+            if (!find) {
+              //未增加过才新增配置
+              linkedObj[key].push(linkInfo)
+            }
+            var tempObj = {id: condField.linkFormCondFieldId, compt: condField.linkFormCondFieldCompt, val: ''}
+            if (!condFieldObj.hasOwnProperty(key)) {
+              condFieldObj[key] = []
+            }
+            condFieldObj[key].push(tempObj)
+          }
+          //将所有要通过联动显示值的字段的所有依赖的条件对象组存到此对象中
+          linkConfig.linkResultFieldCondObjs[ele.config.id] = condFieldObj
+        }
+      }
+    }
+
+    doAcquireLinkFormField(compts)
+  }
+
+  function getLinkResultFieldCondArrByFieldId(id) {
+    var condFieldObjs = linkConfig.linkResultFieldCondObjs[id], arr = []
+    for (var condFieldId in condFieldObjs) {
+      var condFields = condFieldObjs[condFieldId]
+      for (var i = 0; i < condFields.length; i++) {
+        var condField = condFields[i]
+        //将有值的条件值配置字段信息组装到数组里作为联动查询条件使用
+        arr.push({id: condField.id, compt: condField.compt, val: condField.val})
+      }
+    }
+    return arr
+  }
+
+  function autoFillFieldValue(context, linkFormFields, payload, index) {
+    var linkFormFieldObj = linkFormFields[index]
+    if (linkFormFieldObj.currFormValueFieldCompt === 'selectbox' || linkFormFieldObj.currFormValueFieldCompt === 'selectmultibox') {
+      var nextIndex = index
+      if (!(linkConfig.isPreview && linkConfig.isInit)) {
+        triggerFieldValues(context, {configId: linkFormFieldObj.currFormValueFieldId, inDetailGroupIndex: payload.inDetailGroupIndex, dataType: payload.dataType}, [])
+        triggerLoading({configId: linkFormFieldObj.currFormValueFieldId, inDetailGroupIndex: payload.inDetailGroupIndex}, false)
+      } else {
+        delete context.state.currFormValueFieldVerify.linkFiled[linkFormFieldObj.currFormValueFieldId]
+      }
+      //如果要联动显示值的字段是下拉单选或下拉多选字段 则不用做处理直接寻找下一个需要请求值的非下拉形字段
+      linkFormFieldObj = linkFormFields[++nextIndex]
+      if (linkFormFieldObj) {
+        autoFillFieldValue(context, linkFormFields, payload, ++index)
+        triggerLoading({configId: linkFormFieldObj.currFormValueFieldId, inDetailGroupIndex: payload.inDetailGroupIndex}, false)
+      }
+    } else {
+      var arr = getLinkResultFieldCondArrByFieldId(linkFormFieldObj.currFormValueFieldId), hasNullCondVal = false
+      for (var i = 0; i < arr.length; i++) {
+        var ele = arr[i]
+        if (!ele.val) {
+          hasNullCondVal = true
+          break
+        }
+      }
+      //如果某个要联动请求值的字段所依赖的条件中有一个没有值 则不去请求获取值
+      if (arr.length <= 0 || hasNullCondVal || (linkConfig.isPreview && linkConfig.isInit)) {
+        //初始化或预览状态不去修改值
+        triggerLoading({configId: linkFormFieldObj.currFormValueFieldId, inDetailGroupIndex: payload.inDetailGroupIndex}, false)
+        if (!(linkConfig.isPreview && linkConfig.isInit)) {
+          triggerFieldValues(context, {configId: linkFormFieldObj.currFormValueFieldId, inDetailGroupIndex: payload.inDetailGroupIndex, dataType: payload.dataType}, [])
+        } else {
+          delete context.state.currFormValueFieldVerify.linkFiled[linkFormFieldObj.currFormValueFieldId]
+        }
+        var nextIndex = index
+        linkFormFieldObj = linkFormFields[++nextIndex]
+        if (linkFormFieldObj) {
+          autoFillFieldValue(context, linkFormFields, payload, ++index)
+        }
+        return
+      } else {
+        // 不请求联动值时，移除相应的未加载完禁止提交校验信息
+        delete context.state.currFormValueFieldVerify.linkFiled[linkFormFieldObj.currFormValueFieldId]
+      }
+
+      var url = 'data/apps/forms/fore/forms/user/link/field/data'
+      if (linkFormFieldObj.linkFormType === 'approveForm') {
+        url = 'data/approve/apps/forms/fore/forms/user/link/field/data'
+      }
+      doRequest(url, {
+        formId: linkFormFieldObj.linkFormId,
+        enc: linkFormFieldObj.linkFormIdEnc,
+        linkFormValueFieldId: linkFormFieldObj.linkFormValueFieldId,
+        linkFormValueFieldCompt: linkFormFieldObj.linkFormValueFieldCompt,
+        condFields: JSON.stringify(arr)
+      }).then(function (res) {
+        var nextIndex = index
+        var result = []
+        if (res.data && res.data.detail && res.data.detail.formValue) {
+          if ((linkFormFieldObj.currFormValueFieldCompt === 'editinput' || linkFormFieldObj.currFormValueFieldCompt === 'edittextarea')
+              && linkFormFieldObj.linkFormValueFieldCompt === 'areacheckbox') {
+            var selectedAreaStr = getSelectedAreaStr(res.data.detail.formValue)
+            result.push({val: selectedAreaStr})
+          } else if (linkFormFieldObj.currFormValueFieldCompt === 'areamultiselect') {
+            var arr = res.data.detail.formValue[0].val.split('/')
+            for (var j = 0; j < arr.length; j++) {
+              result.push({val: arr[j]})
+            }
+          } else {
+            result = res.data.detail.formValue
+          }
+        } else {
+          switch (linkFormFieldObj.currFormValueFieldCompt) {
+            case 'belonger':
+            case 'contact':
+            case 'department':
+            case 'areacheckbox':
+              result = []
+              break
+            case 'location':
+              result = [{}]
+              break
+            case 'dateinput':
+            case 'editinput':
+            case 'edittextarea':
+            case 'numberinput':
+              result = [{val: ''}]
+              break
+            case 'areamultiselect':
+              result = [{val: ''}, {val: ''}, {val: ''}, {val: ''}]
+              break
+          }
+        }
+        triggerLoading({configId: linkFormFieldObj.currFormValueFieldId, inDetailGroupIndex: payload.inDetailGroupIndex}, false)
+        triggerFieldValues(context, {configId: linkFormFieldObj.currFormValueFieldId, inDetailGroupIndex: payload.inDetailGroupIndex, dataType: payload.dataType}, result)
+        linkFormFieldObj = linkFormFields[++nextIndex]
+        if (linkFormFieldObj) {
+          autoFillFieldValue(context, linkFormFields, payload, ++index)
+        }
+      }).fail(function () {
+        // 数据联动接口失败是删除触发数据联动的数据
+       delete context.state.currFormValueFieldVerify.linkFiled[linkFormFieldObj.currFormValueFieldId]
+      })
+    }
+  }
+  
+  /**
+   * 获取地址多选选择地址的名称
+   * @param selectedAreas
+   * @returns {string}
+   */
+  function getSelectedAreaStr(selectedAreas) {
+    if (selectedAreas.length === 0) {
+      return ''
+    }
+    
+    var otherAreas = [] // 附属项数组
+    var areas = [] // 省市县数组
+    for (var i = 0; i < selectedAreas.length; i++) {
+      var selArea = selectedAreas[i]
+      if ($.trim(selArea.areaCode).length < 6) { // 附属项，比如全国 areaCode = 0, 长度小于6
+        otherAreas.push(selArea)
+      } else {
+        areas.push(selArea)
+      }
+    }
+    // 附属项
+    var otherAreaNames = []
+    for (var j = 0; j < otherAreas.length; j++) {
+      otherAreaNames.push(otherAreas[j].val)
+    }
+    // 省市县
+    var areaNames = []
+    if (areas.length > 0) {
+      var lastArea = areas[areas.length - 1]
+      var level = getLevel(lastArea)
+      var pathAreaNameArr
+      
+      for (var k = 0; k < areas.length; k++) {
+        if (k % level === 0) {
+          pathAreaNameArr = []
+        }
+        pathAreaNameArr.push(areas[k].val)
+        if ((k + 1) % level === 0) {
+          areaNames.push(pathAreaNameArr.join('/'))
+        }
+      }
+    }
+    
+    var result = ''
+    if (otherAreaNames.length > 0) {
+      result += otherAreaNames.join(',')
+    }
+    if (otherAreaNames.length > 0 && areaNames.length > 0) {
+      result += ','
+    }
+    if (areaNames.length > 0) {
+      result += areaNames.join(',')
+    }
+    
+    return result
+  }
+  
+  /**
+   * 获取地址多选的层级
+   */
+  function getLevel(area) {
+    var code = area.areaCode + ''
+    var province = code.substring(2)
+    var city = code.substring(4)
+    
+    if (province === '0000') { // 省级
+      return 1
+    }
+    if (city === '00') { // 市级
+      return 2
+    }
+    return 3 // 区县级
+  }
+  
+  /**
+   * 根据文本类型的地址获取地址对象列表
+   * @param pathName
+   * @returns {string}
+   */
+  function getAreaCodesByPathName(pathName) {
+    if (!pathName) {
+      return ''
+    }
+    var pathNameArr = getPathNameArr(pathName)
+    return getAreaCodesByPathNameArr(pathNameArr)
+  }
+  
+  /**
+   * 将地址路径拆分成数组
+   * @param pathName
+   * @returns {[]}
+   */
+  function getPathNameArr(pathName) {
+    var _pathName = $.trim(pathName)
+    var tempPathNames = _pathName.split(',')
+    var pathNames = []
+    for (var i = 0; i < tempPathNames.length; i++) {
+      if (tempPathNames[i]) {
+        pathNames.push(tempPathNames[i])
+      }
+    }
+    
+    var pathNameArr = []
+    for (var j = 0; j < pathNames.length; j++) {
+      var path = pathNames[j]
+      pathNameArr.push(path.split('/'))
+    }
+    return pathNameArr
+  }
+  
+  function getAreaCodesByPathNameArr(pathNameArr) {
+    var result = []
+    // 全国逻辑
+    var country
+    var countryIndex = -1
+    var countryName = '全国'
+    var pathArr
+    for (var i = 0; i < pathNameArr.length; i++) {
+      pathArr = pathNameArr[i]
+      for (var j = 0; j < pathArr.length; j++) {
+        if (pathArr[j] === countryName) {
+          country = {
+            val: countryName,
+            areaCode: 0
+          }
+          countryIndex = i
+          break
+        }
+      }
+      
+      if (countryIndex !== -1) {
+        break
+      }
+    }
+    if (country) {
+      result.push(country.areaCode)
+    }
+    // 省市县逻辑
+    if (countryIndex !== -1) {
+      pathNameArr.splice(countryIndex, 1)
+    }
+    if (pathNameArr.length === 0) {
+      return result.join(',')
+    }
+    
+    for (var k = 0; k < pathNameArr.length; k++) {
+      pathArr = pathNameArr[k]
+      var level = pathArr.length // 地址层级
+      var areas = []
+      getAreas(pathArr, 0, threeLevelArea, level, areas)
+      
+      if (areas.length !== level) { // 解析出错，不能形成地址层级关系，返回空
+        return ''
+      }
+      
+      for (var t = 0; t < areas.length; t++) {
+        result.push(areas[t].areaCode)
+      }
+    }
+    
+    return result.join(',')
+  }
+  
+  function getAreas(pathArr, currIndex, areaList, level, result) {
+    var selArea
+    for (var i = 0; i < areaList.length; i++) {
+      var area = areaList[i]
+      if (area.title === pathArr[currIndex]) {
+        selArea = area
+        result.push({
+          val: area.title,
+          areaCode: area.code
+        })
+        break
+      }
+    }
+    
+    var currLevel = currIndex + 1
+    if (currLevel < level) {
+      getAreas(pathArr, currLevel, selArea.children, level, result)
+    }
+  }
+  
+  /**获取联动组件vue对象*/
+  function getLinkValueFieldObj(payload) {
+    var objs = linkConfig.linkFieldIdAndVueObjs
+    if (objs.hasOwnProperty(payload.configId)) {
+      return objs[payload.configId]
+    }
+    return null
+  }
+
+  /**触发修改组件值*/
+  function triggerFieldValues(context, payload, result) {
+    var comptVueObj = getLinkValueFieldObj(payload)
+    if (!comptVueObj) {
+      // 网速慢或者其他因素导致页面未正常加载，导致中止数据联动时，移除提交校验信息
+      delete context.state.currFormValueFieldVerify.linkFiled[payload.configId]
+      return
+    }
+    // 数据值设置优先级设定，前端事件赋值优先级大于默认值（数据联动、公式编辑、自定义默认值， ...）
+    if (formDataLoadValidateUtil.priorityJudgment(payload, context)) {
+      // 如果是已有进入前端事件赋值的组件，删除数据联动未加载完标识
+      delete context.state.currFormValueFieldVerify.linkFiled[payload.configId]
+      // 数据设置优先级设定规则：
+      // 1. 新增进入表单后，前端事件已经赋值的后，自动赋值的改值不进行覆盖，仅手动触发可修改
+      // 1. 修改进入表单后，已保存的数据最大，前端事件、默认值改值（数据联动、公式编辑、自定义默认值、...）不进行赋值，尽在手动修改后可修改
+      return
+    }
+    if (payload.inDetailGroupIndex !== -1) {
+      //触发字段为子表单内的字段
+      if (comptVueObj.hasOwnProperty(payload.inDetailGroupIndex)) {
+        comptVueObj[payload.inDetailGroupIndex].vueObj.setFieldValue(result)
+      }
+    } else {
+      //触发字段为子表单外的字段
+      for (var indexKey in comptVueObj) {
+        comptVueObj[indexKey].vueObj.setFieldValue(result)
+      }
+    }
+  }
+
+  /**触发相应组件是否在加载数据中*/
+  function triggerLoading(payload, isLoading) {
+    var comptVueObj = getLinkValueFieldObj(payload)
+    if (!comptVueObj) {
+      return
+    }
+    if (payload.inDetailGroupIndex !== -1) {
+      //触发字段为子表单内的字段
+      if (comptVueObj.hasOwnProperty(payload.inDetailGroupIndex)) {
+        comptVueObj[payload.inDetailGroupIndex].vueObj.setLoadingStatus(isLoading)
+      }
+    } else {
+      //触发字段为子表单外的字段
+      for (var indexKey in comptVueObj) {
+        comptVueObj[indexKey].vueObj.setLoadingStatus(isLoading)
+      }
+    }
+  }
+
+  /**
+   * 数据联动提交未加载完，禁止提交校验数据新增
+   */
+  function valueFieldVerify(context, payload) {
+    var linkFormFields = linkConfig.linkFormConditionFieldObj[payload.configId]
+    if (linkFormFields && linkFormFields.length > 0) {
+      for (var i = 0; i < linkFormFields.length; i++) {
+        context.state.currFormValueFieldVerify.linkFiled[linkFormFields[i].currFormValueFieldId] = {
+          id: linkFormFields[i].currFormValueFieldId,
+          type: 1,
+          compt: linkFormFields[i].currFormValueFieldCompt,
+          inDetailGroupIndex: payload.inDetailGroupIndex}
+      }
+    }
+  }
+
+  return {
+    /**初始化数据联动配置信息*/
+    initFieldLinkConfig: function (compts, isPreview) {
+      acquireLinkFormField(compts)
+      linkConfig.isPreview = isPreview
+    },
+    /** 设置isInit */
+    setInit: function (isInit) {
+      linkConfig.isInit = isInit
+    },
+    /**初始化组装数据联动相关组件id-vueObj*/
+    createdFieldLinkTrigger: function (state, payload) {
+      var objs = linkConfig.linkFieldIdAndVueObjs
+      var widget = payload.widget
+      if (!objs.hasOwnProperty(widget.config.id)) {
+        objs[widget.config.id] = {}
+      }
+      objs[widget.config.id][widget.config.inDetailGroupIndex] = {id: payload.widget.id, vueObj: payload.vueObj}
+    },
+    /** 执行联动操作 */
+    operateLinkFiledData: function (context, payload) {
+      //自动填充数据联动字段值
+      var linkFormFields = linkConfig.linkFormConditionFieldObj[payload.configId]
+      if (linkFormFields && linkFormFields.length > 0) {
+        // 数据未加载完禁止提交校验添加
+        valueFieldVerify(context, payload)
+        for (var i = 0; i < linkFormFields.length; i++) {
+          var linkFormFieldObj = linkFormFields[i]
+          var compt = linkFormFieldObj.currFormValueFieldCompt
+          if (compt !== 'selectbox' && compt !== 'selectmultibox') {
+            triggerLoading({configId: linkFormFieldObj.currFormValueFieldId, inDetailGroupIndex: payload.inDetailGroupIndex}, true)
+          }
+        }
+        //补全所有联动显示值的字段的条件值
+        for (var resultFieldId in linkConfig.linkResultFieldCondObjs) {
+          var condFields = linkConfig.linkResultFieldCondObjs[resultFieldId][payload.configId]
+          if (condFields && condFields.length > 0) {
+            for (var i = 0; i < condFields.length; i++) {
+              var condField = condFields[i]
+              if (payload.compt === 'editinput' && condField.compt === 'areacheckbox') {
+                condField.val = getAreaCodesByPathName(payload.value)
+              } else {
+                condField.val = payload.value
+              }
+            }
+          }
+        }
+        autoFillFieldValue(context, linkFormFields, payload, 0, '')
+      }
+    },
+    /** 获取联动条件组件列表 */
+    getLinkResultFieldCondArrByFieldId: function (id) {
+      return getLinkResultFieldCondArrByFieldId(id)
+    }
+  }
+})

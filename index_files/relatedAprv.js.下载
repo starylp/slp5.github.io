@@ -1,0 +1,248 @@
+define(['jquery', 'util', 'popup', 'tipImgs'], function ($, util, popup, tipImgs) {
+  'use strict';
+  return function (widget) {
+
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{widget_error: errorTip}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+            '<h2 class="widget_name"><!--<em class="option-star" v-if="required"></em>-->{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_aprv_forbid" v-if="readonly">',
+              '<div class="form_forbid_edit form_forbid_nodata" v-if="value.length == 0"">',
+                '<p class="form_forbid_word">暂无数据</p>',
+              '</div>',
+              '<ul class="ctat_res" v-if="value.length > 0">',
+                '<li class="ctat_per" v-for="(aprv, index) in value">',
+                  '<span class="ctat_name" @click.stop="openUrl(index)">{{aprv.approveName}}</span>',
+                '</li>',
+              '</ul>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<ul class="ctat_res" v-show="value&&value.length>0">',
+                '<li class="ctat_per" v-for="(aprv, index) in value">',
+                  '<span class="ctat_name" @click.stop="openUrl(index)">{{aprv.approveName}}</span>',
+                  '<span class="ctat_del icon-userdel" @click.stop="delSelApprove(index)"></span>',
+                '</li>',
+              '</ul>',
+              '<div class="temp_button"  @click.stop="selectType">',
+               '<span class="button_icon icon-selectdata"></span>{{name||\'点击选择审批单\'}}',
+              '</div>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorTip">',
+              '<p class="must_word">此项为必填项</p>',
+            '</div>',
+          '</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: []
+        }
+      },
+      methods: {
+        delSelApprove: function (index) {
+          if (this.readonly) {
+            return;
+          }
+          this.value.splice(index, 1);
+        },
+        selectType: function () {
+          if (this.readonly) {
+            return
+          }
+          //将组件的设置存入缓存
+          window.localStorage.setItem('relate_aprv_single', this.single)
+          window.localStorage.setItem('relate_aprv_range', JSON.stringify(this.widget.config.fields[0].fieldType.aprvRange))
+          window.localStorage.setItem('relate_aprv_type_range', JSON.stringify(this.widget.config.fields[0].fieldType.aprvTypeRange))
+          window.localStorage.setItem('relate_aprv_type_list', JSON.stringify(this.widget.config.fields[0].approveTypeList))
+          window.localStorage.setItem('relate_aprv_value', JSON.stringify(this.value))
+          this.$store.commit('setChoseUserData', {
+            id: this.widget.id,
+            show: true,
+            type: 6,
+            value: this.value
+          });
+        },
+        openUrl: function (index) {
+          window.open(this.value[index].approveUrl)
+        }
+      },
+      components: {'tip-imgs': tipImgs},
+      watch: {
+        value: function () {
+          if (!this.value || this.value.length <= 0) {
+            return
+          }
+
+          this.$store.commit('clearChoseUserStrData')
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          });
+        },
+        selRelatedValue: function () {
+          //检查是否当前组件提交数据,不是则退出,如果是取出数据填充到当前组件数据
+          var arr = []
+          if (this.$store.state.choseUserData.id === this.widget.id && this.$store.state.choseUserData.relatedAprvValueStr) {
+            var selResult = JSON.parse(this.$store.state.choseUserData.relatedAprvValueStr)
+            for (var i = 0; i < selResult.length; i++) {
+              arr.push({approveUrl: selResult[i].approveUrl, approveName: selResult[i].approveName})
+            }
+            this.value = arr
+          }
+          return this.$store.getters.getReSelValStatus
+        }
+      },
+      computed: {
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          if (this.required) {
+            return this.value.length !== 0
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true;
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          return this.$store.getters.getReadonlyStatus || (!this.editable && !this.hasRoleId)
+        },
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        name: function () {
+          return this.widget.config.fields[0].name
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs;
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        single: function () {
+          return this.widget.config.fields[0].fieldType.single ? '1' : ''
+        },
+        selRelatedValue: function () {
+          return this.$store.state.choseUserData.relatedAprvValueStr
+        }
+      },
+      created: function () {
+        this.value = this.widget.config.fields[0].values || [];
+        if (this.widget.config.fields[0].hasOwnProperty('unchangeable')) {
+          this.widget.config.fields[0].editable = !this.widget.config.fields[0].unchangeable
+          delete this.widget.config.fields[0].unchangeable
+        }
+      }
+    }
+  }
+})

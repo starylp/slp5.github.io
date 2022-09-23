@@ -1,0 +1,516 @@
+define(['jquery', 'tipImgs'], function ($, tipImgs) {
+  'use strict'
+  return function (widget) {
+
+    function getVerifyInfo(_this) {
+      _this.errorInfo.show = false
+      if (!_this.min && !_this.max) {
+        return true
+      }
+      var checkCount = 0
+      for (var i = 0; i < _this.options.length; i++) {
+        if (_this.options[i].checked) {
+          checkCount++
+        }
+      }
+      if (checkCount === 0) {
+        return true
+      }
+      if (_this.min && _this.max) {
+        if (_this.min === _this.max && checkCount !== _this.min) {
+          _this.errorInfo.verifyMsg = '限选' + _this.min + '个选项'
+          return false
+        }
+        if (checkCount < _this.min || checkCount > _this.max) {
+          _this.errorInfo.verifyMsg = '限选' + _this.min + '~' + _this.max + '个选项'
+          return false
+        }
+        return true
+      }
+      if (_this.min && checkCount < _this.min) {
+        _this.errorInfo.verifyMsg = '最少选' + _this.min + '个选项'
+        return false
+      }
+      if (_this.max && checkCount > _this.max) {
+        _this.errorInfo.verifyMsg = '最多选' + _this.max + '个选项'
+        return false
+      }
+      return true
+    }
+
+    function setCurrOptionSel(_this, idArr) {
+      if (idArr.length > 0) {
+        _this.$store.commit('setCurrOptionSel', {
+          id: _this.widget.id,
+          configId: _this.widget.config.id,
+          compt: _this.widget.config.compt,
+          inDetailGroupIndex: _this.widget.config.inDetailGroupIndex,
+          idxArr: idArr
+        })
+      } else {
+        _this.$store.commit('setCurrOptionSel', {
+          id: _this.widget.id,
+          configId: _this.widget.config.id,
+          compt: _this.widget.config.compt,
+          inDetailGroupIndex: _this.widget.config.inDetailGroupIndex,
+          idxArr: []
+        })
+      }
+    }
+
+    function initOptionSelectStatus(_this) {
+      for (var i = 0; i < _this.options.length; i++) {
+        _this.options[i].checked = false
+      }
+      var idArr = []
+      for (var i = 0; i < _this.value.length; i++) {
+        if (_this.value[i].isOther) {
+          _this.options[_this.options.length - 1].checked = true
+          _this.otherValue = _this.value[i].val
+          idArr.push(_this.options.length - 1)
+        } else {
+          for (var j = 0; j < _this.options.length; j++) {
+            if (!_this.options[j].isOther && _this.value[i].val === _this.options[j].title) {
+              _this.options[j].checked = true
+              idArr.push(j)
+              break
+            }
+          }
+        }
+      }
+      setCurrOptionSel(_this, idArr)
+    }
+  
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      var valArr = []
+      for (var i = 0; i < _this.value.length; i++) {
+        valArr.push(_this.value[i].val)
+      }
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: valArr.join(','),
+        values: _this.value,
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+    
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{noClick:readonly, widget_error: errorTip || (errorInfo.show&&errorInfo.verifyMsg)}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+           '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}<label class="mult_number" style="">{{titleMsg}}</label></h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_forbid_edit" :class="{form_forbid_nodata: !value}" v-if="readonly">',
+              '<p class="form_forbid_word" v-if="!widget.config.optionColor">',
+                '<span v-if="value.length > 0">{{value|showValues}}</span>',
+                '<span v-if="value.length == 0">暂无数据</span>',
+              '</p>',
+              '<div class="chose_color_data" v-if="widget.config.optionColor">',
+                '<span class="chose_color_per color1" v-for="option in value" :class="optionClassNameByValue(option)" :style="{\'background\': widget.config.optionColor?option.color:\'\'}">{{option.val}}</span>',
+              '</div>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<ul class="form_check" :class="{\'form_color_check\': widget.config.optionColor, \'horizontal-check\': widget.config.showType === 1}">',
+                '<li class="form_option" v-for="(option, index) in options" @click.stop="selectVal(index)" :class="{other_option: option.isOther}">',
+                  '<i class="icon_check icon-checkbox" :class="{\'icon-checkboxcheck\':option.checked}"></i>',
+                  '<span class="" :class="optionClassName(option)" :style="{\'background\': widget.config.optionColor?option.color:\'\'}">{{option.title}}{{optionScoreShow?"（"+option.score+"分）":""}}</span>',
+                  '<input type="text" class="other_input" :class="{\'other_active\': option.checked}" v-show="option.isOther" v-model="otherValue" @blur="otherValueCheck" :style="{width:textWidth(otherValue)}" @click.stop="selectVal(index,true)" :readonly="readonly"/>',
+                '</li>',
+              '</ul>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-if="errorInfo.show&&errorInfo.verifyMsg">',
+              '<p class="must_word">{{errorInfo.verifyMsg}}</p>',
+            '</div>',
+            '<div style="display: none;">{{relateFieldValueStatus}}</div>',
+          '</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          lastRelateValue: [],
+          errorInfo: {
+            alertMsg: '',
+            verifyMsg: '',
+            show: false
+          },
+          otherValue: ''
+        }
+      },
+      components: {'tip-imgs': tipImgs},
+      methods: {
+        selectVal: function (index, isOtherInput) {
+          if (this.readonly) {
+            return
+          }
+          this.options[index].checked = isOtherInput ? true : !this.options[index].checked
+
+          var val = [], idArr = []
+          for (var i = 0; i < this.options.length; i++) {
+            if (this.options[i].checked) {
+              idArr.push(i)
+              if (this.options[i].isOther) {
+                val.push({val: $.trim(this.otherValue), isOther: true})
+              } else {
+                val.push({val: this.options[i].title, isOther: false})
+              }
+            }
+          }
+          this.value = val
+          this.$store.commit('setInitStatus', false)
+          setCurrOptionSel(this, idArr)
+          dataLoadInit(this)
+          this.$forceUpdate()
+          this.errorInfo.show = false
+        },
+        optionClassName: function (option) {
+          if (option.isOther && this.widget.config.optionColor) {
+            return 'other_span'
+          }
+          if (this.widget.config.optionColor) {
+            return option.className
+          }
+          return ''
+        },
+        optionClassNameByValue: function (option) {
+          if (option.isOther && this.widget.config.optionColor) {
+            return 'other_span'
+          }
+          if (this.widget.config.optionColor) {
+            if (this.widget.config.fields[0] && this.widget.config.fields[0].options) {
+              var datas =  this.widget.config.fields[0].options.filter(function(item){ return item.title=== option.val })
+              if (datas && datas.length > 0) {
+                return datas[0].className
+              }
+            }
+            return option.className
+          }
+          return ''
+        },
+        otherValueCheck: function () {
+          this.errorInfo.show =  $.trim(this.otherValue) === ''
+        }
+      },
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          var score = 0
+          for (var i = 0; i < this.options.length; i++) {
+            var option = this.options[i]
+            if (option.checked) {
+              score += parseFloat(option.score)
+            }
+          }
+          this.$store.commit('calculateScore', {
+            id: this.widget.id,
+            pid: this.widget.pid,
+            configId: this.widget.config.id,
+            value: score,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            fromDetail: !!this.widget.config.fromDetail
+          })
+          this.$store.commit('setCalculableStatus')
+        },
+        otherValue: function () {
+          var val = $.extend(true, [], this.value)
+          for (var i = 0; i < val.length; i++) {
+            if (val[i].isOther) {
+              val[i].val = this.otherValue
+            }
+            if (this.optionScoreShow) {
+              val['score'] = this.otherOptionScore
+            }
+          }
+          this.value = val
+          this.$forceUpdate()
+        }
+      },
+      filters: {
+        showValues: function (value) {
+          var vals = []
+          for (var i = 0; i < value.length; i++) {
+            vals.push(value[i].val)
+          }
+          return  vals.join(',')
+        }
+      },
+      computed: {
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        min: function () {
+          var verify = this.widget.config.fields[0].verify
+          if (!verify.minValue || !verify.minValue.range) {
+            return ''
+          }
+          return parseInt(verify.minValue.range)
+        },
+        max: function () {
+          var verify = this.widget.config.fields[0].verify
+          if (!verify.maxValue || !verify.maxValue.range) {
+            return ''
+          }
+          return parseInt(verify.maxValue.range)
+        },
+        textWidth: function () {//vue方式动态改变输入框长度
+          return function (value) {
+            var lineLength = 0
+            for (var i = 0; i < value.length; i++) {
+              if (value.charCodeAt(i) > 127 || value.charCodeAt(i) === 94) {
+                lineLength += 0.28
+              } else {
+                lineLength += 0.16
+              }
+            }
+            return lineLength + 'rem'
+          }
+        },
+        titleMsg: function () {
+          if (!this.min && !this.max) {
+            return ''
+          }
+          if (this.min && this.max) {
+            if (this.min === this.max) {
+              return '(限选' + this.min + '个选项)'
+            }
+            return '(限选' + this.min + '~' + this.max + '个选项)'
+          }
+          if (this.min) {
+            return '(最少选' + this.min + '个选项)'
+          }
+          return '(最多选' + this.max + '个选项)'
+        },
+        verified: function () {
+          var verified = true
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if (!getVerifyInfo(this)) {
+            this.errorInfo.show = true
+            verified = false
+            this.errorInfo.alertMsg = '部分字段选项个数不符合要求'
+            this.errorInfo.verifyMsg = '部分字段选项个数不符合要求'
+          } else {
+            //无论是否必填选中“其他选项”必须填写内容otherValue不为空
+            for (var i = 0; i < this.options.length; i++) {
+              if (this.options[i].checked && this.options[i].isOther) {
+                this.errorInfo.alertMsg = '其他选项未填写'
+                if (this.otherValue === '')  {
+                  this.errorInfo.verifyMsg = '其他选项未填写'
+                }
+                verified = $.trim(this.otherValue) !== ''
+              }
+            }
+          }
+          if (this.required && $.trim(this.value) === '') {
+            this.errorInfo.verifyMsg = '此项为必填项'
+          }
+          if (this.required) {
+            return this.value.length !== 0 && verified
+          }
+          return verified
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            this.errorInfo.show = true
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          if (this.$store.getters.getCurrentType) {
+            return this.$store.getters.getReadonlyStatus
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === this.widget.config.inDetailGroupIndex) || !obj.hasOwnProperty('inDetailIndex')) && !this.$store.getters.getReadonlyStatus && (!this.isPreview || !this.isInit)) {
+            var result = obj.fields[0].values
+            if (result && JSON.stringify(this.lastRelateValue) === JSON.stringify(result) && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+              this.value = []
+            }
+            if (result && JSON.stringify(this.lastRelateValue) !== JSON.stringify(result)) {
+              this.value = result
+              this.lastRelateValue = result
+              initOptionSelectStatus(this)
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        optionScoreShow: function () {
+          return this.widget.config.optionScoreShow
+        },
+        options: function () {
+          return this.widget.config.fields[0].options
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = this.$store.state.reloadValSubField
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            if (this.widget.pid > 0 && !this.$store.state.verifieds[this.widget.pid].isShow) {
+              //明细内子组件时 如果明细组件是隐藏状态时 当前子组件也要改成隐藏状态
+              showStatus = false
+            } else {
+              showStatus = true
+            }
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            errMsg: this.errorInfo.alertMsg,
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        otherOptionScore: function() {
+          var _this = this;
+          if (_this.optionScoreShow) {
+            for(var i = 0; i < _this.options.length; i++) {
+              var opt = _this.options[i]
+              if (opt.isOther) {
+                return opt.score
+              }
+            }
+          }
+        }
+      },
+      mounted: function () {
+        //防止子组件中构造各组件实例未执行，导致默认值触发失效问题
+        var _this = this
+        _this.$nextTick(function () {
+          setTimeout(function () {
+            // 默认值触发公式编辑
+            dataLoadInit(_this, _this.$store.getters.getComptDataType('init'))
+          }, 500)
+        })
+      },
+      created: function () {
+        this.value = this.widget.config.fields[0].values || []
+        if (this.widget.config.fields[0].hasOwnProperty('unchangeable')) {
+          this.widget.config.fields[0].editable = !this.widget.config.fields[0].unchangeable
+          delete this.widget.config.fields[0].unchangeable
+        }
+        initOptionSelectStatus(this)
+      }
+    }
+  }
+})

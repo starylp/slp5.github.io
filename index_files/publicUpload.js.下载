@@ -1,0 +1,232 @@
+define(['jquery', 'cookies'], function ($, Cookies) {
+  'use strict'
+  
+  /**
+   * 上传文件：直接调用云盘接口（需要进度条）
+   * @param _this
+   * @param formData 模拟表单对象
+   */
+  function progressUpload(_this, formData) {
+    if (!formData) {
+      return ''
+    }
+    $.ajax({
+      url: 'data/filedata/get/user/token',
+      type: 'GET',
+      data: {},
+      success: function (res) {
+        if (res.success && res.data.token) {
+          var userToken = res.data.token
+          _this.xhr = new XMLHttpRequest()
+          formData.append('puid', Cookies.get('oa_uid'))
+          formData.append('_token', userToken)
+          if (_this.temporary) {
+            //【临时存储】开关，勾选后， 该字段上传接口里会打上临时存储标记， 中心存储服务会2年后自动删除；
+            formData.append('uploadtype', 'temp')
+          } else {
+            formData.append('uploadtype', 'normal')
+          }
+          _this.xhr.upload.addEventListener('progress', _this.uploadProgress, false)//上传进度函数
+          _this.xhr.addEventListener('load', _this.uploadComplete, false)//上传回调函数
+          _this.xhr.addEventListener('error', _this.uploadFailed, false)
+          _this.xhr.addEventListener('abort', _this.uploadCanceled, false)
+          _this.xhr.open('POST', panUrl + '/upload')//直接调用云盘接口地址，不再经过办公后台，减小服务内存压力
+          _this.xhr.send(formData)
+          _this.$forceUpdate()
+        } else {
+          alert('userToken失效，请重新上传')
+        }
+      }
+    })
+  }
+  
+  /**
+   * 普通上传(无需进度条)
+   * @param _this
+   * @param formData 模拟表单对象
+   * @returns {*}
+   */
+  function commonUpload(_this, formData) {
+    if (!formData) {
+      return ''
+    }
+    var dtd = $.Deferred()
+    var result = {success: true, msg: ''}
+    $.ajax({
+      url: 'data/filedata/get/user/token',
+      type: 'GET',
+      data: {},
+      success: function (res) {
+        if (res.success && res.data.token) {
+          var userToken = res.data.token
+          formData.append('puid', Cookies.get('oa_uid'))
+          formData.append('_token', userToken)
+          if (_this.temporary) {
+            //【临时存储】开关，勾选后， 该字段上传接口里会打上临时存储标记， 中心存储服务会2年后自动删除；
+            formData.append('uploadtype', 'temp')
+          } else {
+            formData.append('uploadtype', 'normal')
+          }
+          $.ajax({
+            type: 'POST',
+            url: panUrl + '/upload',
+            data: formData,
+            contentType: false,
+            processData: false,
+            enctype: 'multipart/form-data',
+            dataType: 'json'
+          }).then(function (response) {
+            if (response.result) {
+              var file = response.data
+              result.data = {
+                'objectId': file.objectId,
+                'fileUrl': file.thumbnail,
+                'name': file.name,
+                'suffix': file.suffix,
+                'size': sizeFormat(file.size.toString()),
+                'puid': file.puid,
+                'resid': file.residstr,//返回结果中有resids和residstr两参数，wps接口需要使用residstr
+                'byteSize': file.size//文件原始字节数（暂时存入库，防止后期使用到）
+              }
+              result.previewUrl = file.previewUrl
+            } else {
+              result.success = false
+              result.msg = response.msg || '上传失败'
+            }
+            dtd.resolve(result)
+          })
+        } else {
+          result.success = false
+          result.msg = 'userToken失效，请重新上传'
+          dtd.resolve(result)
+        }
+      }
+    })
+    return dtd.promise()
+  }
+  
+  /**
+   * 文字识别上传
+   * @param _this
+   * @param imageBase64 图片base64
+   * @param previewUrl 图片云盘地址
+   * @param objectId 云盘资源唯一标识
+   * @param formId 表单/审批ID
+   * @param type 0.人像面；1.国徽面
+   * @param ocrType 0.身份证；1.户口本；2.行程码；
+   * @param aprvAppId 审批模板ID
+   */
+  function ocrUpload(_this, imageBase64, previewUrl, objectId, formId, type, ocrType, aprvAppId) {
+    var dtd = $.Deferred()
+    var result = {success: true, metecsg: ''}
+    var dtectPhoto = false
+    if (ocrType === 0 && type === 0) {//身份证ocr识别&&人像面，进行判断是否需要头像base64数据
+      dtectPhoto = _this.widget.config.ocrConfig.fillFields.some(function (value) {
+        return value.fillId === 8
+      })
+    }
+    doRequest('/ocr/data/info', {
+      imageData: imageBase64,
+      previewUrl: previewUrl,
+      objectId: objectId,
+      formType: _this.$store.getters.getApproveModel ? 1 : 2,//1.审批；2.表单
+      formId: formId,
+      dtectPhoto: dtectPhoto,
+      type: type,
+      ocrType: ocrType,
+      aprvAppId: aprvAppId || (formId || 0)
+    }).then(function (res) {
+      if (res.success) {
+        result.data = res.data
+      } else {
+        result.success = false
+        result.msg = res.msg || '识别失败'
+      }
+      dtd.resolve(result)
+    })
+    return dtd.promise()
+  }
+  
+  /**
+   * 根据不同的文字识别上传判断是否增加云盘临时参数
+   * @param _this
+   * @param type 0.上传按钮1；1.上传按钮2
+   * @param ocrType 0.身份证；1.户口本；2.行程码；3.健康码
+   */
+  function setTemporary(_this, type, ocrType) {
+    var fillFields = _this.widget.config.ocrConfig.fillFields//当前文字识别组件的填充配置数据
+    if (fillFields.length > 0) {
+      for (var i = 0; i < fillFields.length; i++) {
+        var fillField = fillFields[i]
+        //根据ocr识别配置类型，获取相应识别内容数据
+        if (ocrType === 0) {//身份证识别组建可设置3个图片填充字段，需要根据不同的上传入口来判断
+          if ((type === 0 && fillField.fillId === 1) || (type === 1 && fillField.fillId === 10)) {
+            _this.temporary = getTemporary(_this, fillField)
+            break
+          }
+        } else {
+          if (fillField.compt === 'imagebox') {//若需要填充图片组件，则根据被填充的图片组件判断是否增加临时标记
+            _this.temporary = getTemporary(_this, fillField)
+            break
+          }
+        }
+      }
+    }
+  }
+  
+  /**
+   * 判断被填充的图片组件是否设置“云盘临时属性”
+   * @param _this
+   * @param fillField
+   * @returns {boolean|*}
+   */
+  function getTemporary(_this, fillField) {
+    var imgCompt = _this.$store.getters.getComptWidgetByConfigId(fillField.id)//被填充的图片组件信息
+    if (imgCompt.config.fields[0].hasOwnProperty('temporary')) {
+      return imgCompt.config.fields[0].temporary
+    } else {
+      return false//若被填充字段无“temporary”属性（老配置），则按照不增加临时标记处理
+    }
+  }
+  
+  
+  function doRequest(reqUrl, param) {
+    return $.ajax({
+      url: reqUrl,
+      type: 'POST',
+      data: param
+    })
+  }
+  
+  /**
+   * 格式化文件大小
+   * @param value
+   * @returns {*}
+   */
+  function sizeFormat(value) {
+    if (!value) {
+      return '--'
+    }
+    if ($.trim(value).indexOf('B') !== -1) {
+      return value
+    }
+    var val = parseFloat(value)
+    if (val < 1024) {
+      return val + 'B'
+    } else if (val >= 1024 && val < 1024 * 1024) {
+      return parseFloat((val / 1024).toFixed(2)) + 'KB'
+    } else if (val >= 1024 * 1024 && val < 1024 * 1024 * 1024) {
+      return parseFloat((val / 1024 / 1024).toFixed(2)) + 'MB'
+    }
+    return parseFloat((val / 1024 / 1024 / 1024).toFixed(2)) + 'GB'
+  }
+  
+  
+  return {
+    progressUpload: progressUpload,
+    commonUpload: commonUpload,
+    ocrUpload: ocrUpload,
+    sizeFormat: sizeFormat,
+    setTemporary: setTemporary
+  }
+})

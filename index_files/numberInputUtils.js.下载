@@ -1,0 +1,106 @@
+define(['jquery', 'numberUtils'], function ($, numberUtils) {
+  
+  /**
+   * 数字输入框输入值校验
+   */
+  function getVerifyInfo(_this, value) {
+    if (_this.percentage) {
+      //百分比显示时 无需转换直接参与计算验证
+    }
+    if (parseFloat(_this.min) === 0 && parseFloat(_this.max) === 0) {
+      //老数据特殊处理
+      _this.widget.config.fields[0].verify.minValue.range = ''
+      _this.widget.config.fields[0].verify.maxValue.range = ''
+    }
+    var errMsg = ''
+    _this.errorInfo.show = false
+    if ($.trim(value) === '' && _this.required) {
+      errMsg = '此项为必填项'
+    } else if (value !== '') {
+      if (!/^(\-|\+)?\d+(\.\d+)?$/.test(value)) {
+        errMsg = '只能填写数字'
+      } else if ((_this.isInteger || (!_this.percentage && _this.precisionLen !== 0 && _this.precision !== '' && parseInt(_this.precision) === 0)) && !/^-?\d+$/.test(value)) {
+        // 保留小数位数、限定小数位数可以同时开启，若保留小数位数开启且为0位，不往后继续校验
+        errMsg = '仅允许填写整数'
+      } else if (!_this.percentage && _this.precision !== '' && (_this.precisionLen === '' || _this.precisionLen > _this.precision)
+                 && parseInt(_this.precision) > 0) {
+        // 保留小数位数、限定小数位数可以同时开启，若保留小数位数开启且小于等于限定位数，不往后继续校验
+        var precisionType = parseInt(_this.precisionType);
+        var reg = new RegExp('^[+-]?([1-9]\\d*|0)(\\.\\d{' + (precisionType === 1 ? '0,' : '') + parseInt(_this.precision) + '})' + (precisionType === 1 ? '?' : '') + '$')
+        if (!reg.test(value)) {
+          errMsg = (precisionType === 1 ? '限小数位数不超过' : '限定小数位数') + ' ' + _this.precision + '位'
+        }
+      }
+      if ($.trim(_this.min) !== '' && !isNaN(_this.min) && parseFloat(value) < parseFloat(_this.min) && $.trim(_this.max) === '') {
+        errMsg = _this.title + '限定数值大于等于' + _this.min + (_this.percentage ? '%' : '')
+      } else if ($.trim(_this.min) === '' && $.trim(_this.max) !== '' && !isNaN(_this.max) && parseFloat(value) > parseFloat(_this.max)) {
+        errMsg = _this.title + '限定数值小于等于' + _this.max + (_this.percentage ? '%' : '')
+      } else if ($.trim(_this.min) !== '' && !isNaN(_this.min) && $.trim(_this.max) !== '' && !isNaN(_this.max) && (parseFloat(value) < parseFloat(_this.min) || parseFloat(value) > parseFloat(_this.max))) {
+        errMsg = '限定数值范围 ' + _this.min + (_this.percentage ? '%' : '') + '-' + _this.max + (_this.percentage ? '%' : '')
+      }
+    }
+    _this.errorInfo.errMsg = errMsg
+    return errMsg
+  }
+  
+  /**
+   * 计算实际结果并展示错误信息
+   * @param _this 组件vueObj
+   * @param isPc 是否pc组件
+   * @param isHorizontal 是否子表单横排组件
+   */
+  function doShowErrorMsgFun(_this, isPc, isHorizontal) {
+    var flag = isPc ? (_this.readonly && !_this.fromManage) : _this.readonly
+    if (flag) {// 加载时调用需判断，同横向子表单
+      return
+    }
+    setTimeout(function () {
+      if (/^(\-|\+)?\d+(\.\d+)?$/.test(_this.value)) {// 有值且为数字在进行计算
+        _this.value = Number(_this.value)
+        if (parseInt(_this.precisionLen) >= 0) {
+          _this.value = dealPrecisionLen(_this.value, _this.precisionLen, -1)
+        }
+        if (_this.percentage && _this.value) {
+          _this.value = dealPrecisionLen(_this.value, _this.precisionLen ? _this.precisionLen : 2)
+        }
+      }
+      // pc 横排子表单数字输入组件特殊处理
+      if (isPc && isHorizontal) {
+        if (_this.errorInfo.errMsg) {
+          _this.errorInfo.show = true
+          _this.$store.commit('setDetailComptErrorTip', {
+            id: _this.widget.id,
+            pid: _this.widget.pid,
+            showTip: true,
+            verified: _this.verified,
+            errMsg: _this.title + _this.errorInfo.errMsg
+          })
+          return
+        }
+  
+        _this.$store.commit('setDetailComptErrorTip', {
+          id: _this.widget.id,
+          pid: _this.widget.pid,
+          verified: _this.verified,
+          showTip: false
+        })
+        return
+      }
+      //百分比显示时 input失去焦点后修改其边框样式控制状态值
+      _this.inputFocusStatus = false
+      _this.errorInfo.show = true
+    }, 200)
+  }
+  
+  function dealPrecisionLen(val, len) {
+    if (isNaN(val)) {
+      return 0
+    }
+    return numberUtils.addDecimalPlace(numberUtils.round(val, len), len);
+  }
+  
+  return {
+    getVerifyInfo: getVerifyInfo,
+    doShowErrorMsgFun: doShowErrorMsgFun
+  }
+})

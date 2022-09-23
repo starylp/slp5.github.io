@@ -1,0 +1,44 @@
+define(['jquery', 'cookies'], function ($, Cookies) {
+  'use strict'
+  
+  function getUrlParam() {
+    var search = window.location.search
+    if (search.length === 0) {
+      return ''
+    }
+    var kvArr = search.substring(1).split('&'), params = {}
+    for (var i = 0; i < kvArr.length; i++) {
+      var kv = kvArr[i].split('='), k = kv[0]
+      if (kv.length !== 2 || kv[1] === '') {
+        continue
+      }
+      var v = decodeURIComponent(kv[1])
+      if (params.hasOwnProperty(k)) {
+        if ($.isArray(params[k])) {
+          params[k].push(v)
+        } else {
+          params[k] = [params[k], v]
+        }
+      } else {
+        params[k] = v
+      }
+    }
+    return JSON.stringify(params)
+  }
+  
+  return {
+    loadStcs: function (type, aid) {
+      var params = [
+        'deptid=' + (Cookies.get('oa_deptid') || 0),
+        'uid=' + (Cookies.get('oa_uid') || 0),
+        'type=' + type,
+        'aid=' + aid,
+        'page=' + encodeURIComponent(window.location.pathname),
+        'params=' + encodeURIComponent(getUrlParam())
+      ]
+      var domain = 'https://stcs.chaoxing.com'
+      var stcsUrl = domain + '/api/stcs/log/add?' + params.join('&')
+      $('body').append('<img src="' + stcsUrl + '" width="0" height="0"/>')
+    }
+  }
+})

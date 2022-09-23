@@ -1,0 +1,228 @@
+define(['jquery', 'util', 'popup', 'tipImgs', 'cookies'], function ($, util, popup, tipImgs, Cookies) {
+  'use strict';
+  return function (widget) {
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{noClick:readonly, widget_error: errorTip}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+            '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+            '<!--填写区域-->',
+            '<div class="form_widget_data">',
+              '<!--禁止编辑-->',
+              '<div class="form_forbid_edit form_forbid_nodata" v-if="readonly">',
+                '<p class="form_forbid_word">暂无数据</p>',
+              '</div>',
+              '<!--可编辑-->',
+              '<div class="form_widget_cont" v-if="!readonly">',
+                '<div class="form_live_video">',
+                  '<div class="live_data" @click="previewLive"  v-show="playUrl">',
+                    /*'<img src="images/icons/mov.png" alt="" class="live_img" />',*/
+                    '<span class="live_play_icon icon-play"></span>',
+                    '<div class="live_info">',
+                      '<p class="live_user_name">{{userInfo.uname}}的直播</p>',
+                      '<p class="live_type">',
+                        '<span>{{liveStatus === 0?"未开始":(liveStatus === 1?"正在直播":(liveStatus === 4?(ifreview === 1?"直播结束":"直播回放"):""))}}</span>',
+                        '<!--已结束:icon-live_end  未开始:icon-live_wait 直播会放:icon-live_back  直播中:icon-living-->',
+                        '<span class="live_type_icon" :class="{\'icon-livewait\': liveStatus === 0,\'icon-living\': liveStatus === 1,\'icon-liveback\': ifreview === 1, \'icon-liveend\': (liveStatus === 4 && ifreview === 1) || liveStatus === 0}">',
+                          '<span class="path1"></span>',
+                          '<span class="path2"></span>',
+                          '<span class="path3"></span>',
+                        '</span>',
+                      '</p>',
+                    '</div>',
+                    '<i class="icon-userdel icon_del_live" v-if="false"></i>',
+                  '</div>',
+                  '<div class="temp_button" v-show="!playUrl"><span class="button_icon icon-live"></span>请在学习通打开表单进行直播</div>',
+                '</div>',
+              '<div>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorTip">',
+              '<p class="must_word">此项为必填项</p>',
+            '</div>',
+          '</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          playUrl: '',
+          ifreview: 1,//不允许回放
+          liveStatus: -1,
+          userInfo: {
+            uid: Cookies.get('oa_uid'),
+            uname: Cookies.get('oa_name')
+          }
+        }
+      },
+      components: {'tip-imgs': tipImgs},
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          });
+        }
+      },
+      methods: {
+        previewLive: function () {
+          var _this = this;
+          if (_this.liveStatus === 4 && _this.ifreview === 1) {
+            popup.alert('不支持回放');
+            return;
+          }
+          location.href = _this.playUrl;
+        },
+        delLive: function () {
+          if (this.readonly) {
+            return;
+          }
+          this.value = [];
+          this.ifreview = 1;
+          this.liveStatus = -1;
+          this.playUrl ='';
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label;
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required;
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          if (this.required) {
+            return this.value.length !== 0
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel;
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true;
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs;
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false;
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false;
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true;
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow;
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id];
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus;
+        }
+      },
+      created: function () {
+        this.value = this.widget.config.fields[0].values || [];
+        var liveResult = this.value.length > 0 ? this.value[0] : {};
+        this.ifreview = liveResult.hasOwnProperty('ifreview') ? liveResult.ifreview : 1;
+        this.liveStatus = liveResult.hasOwnProperty('liveStatus') ? liveResult.liveStatus : -1;
+        this.playUrl = liveResult.playUrl || '';
+      }
+    };
+  }
+});

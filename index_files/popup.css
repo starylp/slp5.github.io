@@ -1,0 +1,394 @@
+html, body, div, span, applet, object, iframe, h1, h2, h3, h4, h5, h6, p, blockquote, pre, a, abbr, acronym,
+address, big, cite, code, del, dfn, em, font, img, ins, kbd, q, s, samp, small, strike, strong, sub, sup, tt,
+var, dl, dt, dd, ol, ul, li, fieldset, form, label, legend, table, caption, tbody, tfoot, thead, tr, th, td {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    -webkit-box-sizing: border-box;
+    -moz-box-sizing: border-box;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+}
+
+html, body {
+    font: 12px/1.5 "思源黑体","PingFang SC",sans-serif;
+    color: #333;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-size: 100%;
+}
+
+article, aside, details, figcaption, figure, footer, header, hgroup, menu, nav, section {
+    display: block;
+}
+
+input, textarea {
+    margin: 0;
+    padding: 0;
+    outline: 0;
+    -webkit-appearance: none;
+    border-radius: 0;
+}
+
+/*a, a:link, a:visited, a:hover, a:active {
+    text-decoration: none;
+    color: #333;
+    -webkit-tap-highlight-color: transparent;
+}*/
+
+table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+ol, ul {
+    list-style: none;
+}
+
+hr {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    color: #000;
+    background-color: #000;
+    height: 1px
+}
+
+.Absolute-Center {
+    margin: auto;
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: 0;
+}
+
+.clear {
+    clear: both;
+    height: 0px;
+    font-size: 0px;
+    line-height: 0px;
+    overflow: hidden;
+}
+
+.clearfix:after {
+    content: "";
+    display: block;
+    height: 0;
+    clear: both;
+    visibility: hidden;
+}
+
+.clearfix:after {
+    clear: both;
+}
+
+.clearfix {
+    zoom: 1;
+}
+
+/* IE 6/7 */
+.fl {
+    float: left;
+}
+
+.fr {
+    float: right;
+}
+
+/*单行文本省略号*/
+.word {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.words2 {
+    display: -webkit-box;
+    display: box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: break-all;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+/*多行文本省略号*/
+.words3 {
+    display: -webkit-box;
+    display: box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: break-all;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+}
+
+/*垂直居中,容器设置宽高*/
+.ycenter {
+    align-items: center;
+    display: -webkit-flex;
+}
+
+/*水平居中,容器设置宽高*/
+.xcenter {
+    justify-content: center;
+    display: -webkit-flex;
+}
+
+/*弹性布局水平垂直居中 兼容性高*/
+.xycenterbox {
+    display: -webkit-box; /* 老版本语法: Safari, iOS, Android browser, older WebKit browsers. */
+    display: -moz-box; /* 老版本语法: Firefox (buggy) */
+    display: -ms-flexbox; /* 混合版本语法: IE 10 */
+    display: -webkit-flex; /* 新版本语法: Chrome 21+ */
+    display: flex; /* 新版本语法: Opera 12.1, Firefox 22+ */
+    -webkit-box-pack: center;
+    -moz-justify-content: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    -webkit-box-align: center;
+    -moz-align-items: center;
+    -webkit-align-items: center;
+    align-items: center;
+}
+
+/*弹性布局水平居中 兼容性高*/
+.xcenterbox {
+    display: -webkit-box; /* 老版本语法: Safari, iOS, Android browser, older WebKit browsers. */
+    display: -moz-box; /* 老版本语法: Firefox (buggy) */
+    display: -ms-flexbox; /* 混合版本语法: IE 10 */
+    display: -webkit-flex; /* 新版本语法: Chrome 21+ */
+    display: flex; /* 新版本语法: Opera 12.1, Firefox 22+ */
+    -webkit-box-pack: center;
+    -moz-justify-content: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+}
+
+/*弹性布局垂直居中 兼容性高*/
+.ycenterbox {
+    display: -webkit-box; /* 老版本语法: Safari, iOS, Android browser, older WebKit browsers. */
+    display: -moz-box; /* 老版本语法: Firefox (buggy) */
+    display: -ms-flexbox; /* 混合版本语法: IE 10 */
+    display: -webkit-flex; /* 新版本语法: Chrome 21+ */
+    display: flex; /* 新版本语法: Opera 12.1, Firefox 22+ */
+    -webkit-box-align: center;
+    -moz-align-items: center;
+    -webkit-align-items: center;
+    align-items: center;
+}
+
+/*0.5px底边框*/
+.bottomLine {
+    background: -webkit-linear-gradient(top, transparent 50%, #ebebeb 50%) center bottom no-repeat;
+    background: -moz-linear-gradient(top, transparent 50%, #ebebeb 50%) center bottom no-repeat;
+    background: -ms-linear-gradient(top, transparent 50%, #ebebeb 50%) center bottom no-repeat;
+    background-size: 100% 1px;
+}
+
+/*设置隐藏*/
+.none {
+    display: none;
+}
+
+.hidden {
+    visibility: hidden;
+}
+
+/*加载更多动画*/
+.pullUp {
+    height: 40px;
+    line-height: 40px;
+    font-size: 14px;
+    text-align: center;
+    color: #b3b3b3;
+}
+
+.pullUp .pullUpIcon {
+    display: inline-block;
+    vertical-align: top;
+    width: 16px;
+    height: 16px;
+    margin: 12px 9px 0 0;
+    background: url(http://img.learn.16q.cn/home/2/new/refresh.png) no-repeat;
+    background-size: contain;
+    -webkit-transform: rotate(0deg) translateZ(0);
+    -webkit-transition-duration: 0ms;
+    -webkit-animation-name: loading;
+    -webkit-animation-duration: 2s;
+    -webkit-animation-iteration-count: infinite;
+    -webkit-animation-timing-function: linear;
+}
+
+@-webkit-keyframes loading {
+    from {
+        -webkit-transform: rotate(0deg) translateZ(0);
+    }
+    to {
+        -webkit-transform: rotate(360deg) translateZ(0);
+    }
+}
+
+/*媒体查询*/
+@media screen and (max-width: 240px) {
+    html {
+        font-size: 7.7px
+    }
+}
+
+@media screen and (min-width: 241px) and (max-width: 320px) {
+    html {
+        font-size: 10.2px
+    }
+}
+
+@media screen and (min-width: 321px) and (max-width: 360px) {
+    html {
+        font-size: 11.5px
+    }
+}
+
+@media screen and (min-width: 361px) and (max-width: 375px) {
+    html {
+        font-size: 12px
+    }
+}
+
+@media screen and (min-width: 376px) and (max-width: 414px) {
+    html {
+        font-size: 13.2px
+    }
+}
+
+@media screen and (min-width: 415px) and (max-width: 540px) {
+    html {
+        font-size: 15.4px
+    }
+}
+
+@media screen and (min-width: 541px) and (max-width: 640px) {
+    html {
+        font-size: 20.5px
+    }
+}
+
+@media screen and (min-width: 641px) and (max-width: 720px) {
+    html {
+        font-size: 23px
+    }
+}
+
+@media screen and (min-width: 721px) {
+    html {
+        font-size: 24px
+    }
+}
+
+@media only screen and (min-width: 768px) {
+    .wrap {
+        width: 768px;
+        margin: 0 auto;
+    }
+}
+
+/*body,html{
+	width: 100%;
+	height: 100%;
+}*/
+
+.popbg {
+    /*display: none;*/
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 500;
+}
+
+.popbg .popBox {
+    position: relative;
+    width: 70%;
+    max-width: 300px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #eeeeee;
+    text-align: center;
+    margin: 0 auto;
+    top: 30%;
+    padding-top: 2px;
+}
+
+.pop1 .title {
+    font-size: 20px;
+    line-height: 30px;
+    text-align: center;
+    height: 30px;
+    margin-top: 5px;
+}
+
+.popbg .content {
+    font-size: 14px;
+    line-height: 18px;
+    text-align: center;
+    width: 76%;
+    margin: 0 auto;
+    text-align: center;
+    word-break: break-all;
+}
+
+.popbg .content p {
+    flex: 1;
+}
+
+.popbg .btn {
+    width: 100%;
+    height: 44px;
+    /*border-top: solid 1px #dadade;*/
+    background: -webkit-linear-gradient(top, transparent 50%, #dadade 50%) center top no-repeat;
+    background: -moz-linear-gradient(top, transparent 50%, #dadade 50%) center top no-repeat;
+    background: -ms-linear-gradient(top, transparent 50%, #dadade 50%) center top no-repeat;
+    background-size: 100% 1px;
+}
+
+.popBox .btn p {
+    text-align: center;
+    font-size: 16px;
+    line-height: 45px;
+    color: #007aff;
+}
+
+.pop2 .contentWrap {
+    min-height:68px;
+    max-height:260px;
+    overflow:auto;
+}
+.pop1 .popBox {
+    height: 150px;
+    /*min-height: 135px;*/
+}
+
+.pop1 .content {
+    height: 68px;
+}
+
+.pop1 .btn p {
+    float: left;
+    width: 50%;
+    text-align: center;
+    font-size: 16px;
+}
+
+.pop1 .btn p:first-child {
+    /*border-right: solid 1px #dadade;*/
+    background: -webkit-linear-gradient(right, transparent 50%, #dadade 50%) right center no-repeat;
+    background: -moz-linear-gradient(right, transparent 50%, #dadade 50%) right center no-repeat;
+    background: -ms-linear-gradient(right, transparent 50%, #dadade 50%) right center no-repeat;
+    background-size: 1px 100%;
+}
+.pop2 .content{
+    margin: 25px auto;
+}

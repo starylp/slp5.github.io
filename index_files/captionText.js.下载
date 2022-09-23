@@ -1,0 +1,95 @@
+define(['tipFiles'], function (tipFiles) {
+  'use strict';
+  return function (widget) {
+    return {
+      id: widget.id,
+      template: [
+        '<div v-if="tipTextData != \'\' || tipImgsData.length > 0" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title" style="display:none;">',
+            '<h2 class="widget_name"></h2>',
+          '</div>',
+          '<!--内容-->',
+          '<tip-files :id="widget.id" :tip-text="tipTextData" :tip-file-arr="tipImgsData"></tip-files>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget
+        };
+      },
+      components: {'tip-files': tipFiles},
+      computed: {
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs;
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = false
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel;
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus;
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true;
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow;
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id];
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [],
+            verified: true,
+            isShow: showStatus
+          })
+          return showStatus
+        }
+      }
+    };
+  }
+});

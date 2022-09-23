@@ -1,0 +1,2060 @@
+define(['Vue', 'Vuex', 'jquery', 'util', 'cacheUtils', 'eventTriggerUtils', 'fieldLinkTriggerUtils', 'fieldFormulaTriggerUtils', 'detailComboxFieldLinkTriggerUtils', 'cookies', 'publicUtils', 'formulaUtil', 'formSubmitValidateUtil', 'fieldNoRepeatTriggerUtils', 'formDataLoadValidateUtil'], function (Vue, Vuex, $, Utils, cacheUtils, eventTriggerUtils, fieldLinkTriggerUtils,  fieldFormulaTriggerUtils, detailComboxFieldLinkTriggerUtils, Cookies, publicUtils, formulaUtil, formSubmitValidateUtil, fieldNoRepeatTriggerUtils, formDataLoadValidateUtil) {
+  Vue.use(Vuex)
+  
+  var _id = 0
+  
+  function generatorId() {
+    return ++_id
+  }
+  
+  function doRequest(url, data) {
+    return $.ajax({
+      url: url,
+      type: 'post',
+      data: data,
+      dataType: 'json'
+    })
+  }
+  
+  var idAndFatherId = {}, isShowExecuteFields = {}
+  
+  function initWidgets(state, pid, widgets, compts, isFormData, formConfig, formBaseConfig, horizontalCompts, addIndex) {
+    if (!compts) {
+      return
+    }
+    var formInNum = cacheUtils.getFormInNum()
+    var children = []//detailcombox组件的children是二维数组
+    var comptCache = formDataLoadValidateUtil.getComptCache(state.formType === 'approveForm' ? 1: 0)
+    for (var i = 0; i < compts.length; i++) {
+      var n = compts[i], id = generatorId(), widget = {id: id, pid: pid, config: n, children: []}
+      if (horizontalCompts && horizontalCompts[i]) {
+        var obj = JSON.parse(JSON.stringify(widget.config)), hcompts = JSON.parse(JSON.stringify(horizontalCompts))
+        for (var m = 0; m < hcompts[i].fields.length; m++) {
+          if (widget.config.fields[m].hasOwnProperty('values')) {
+            if (!state.formCache || (state.formCache && (state.formCache && formInNum && parseFloat(formInNum) === 1)) || (comptCache && !comptCache.hasOwnProperty(widget.config.id))) {
+              // 未开启缓存或 开启缓存且没有缓存进入页面时 子表单子字段的值用 子表单整体默认值的设置中对应字段来给赋值 (除此之外的子字段值以子字段右侧设置的默认值设置来赋值- 遵守赋值优化级逻辑)
+              delete hcompts[i].fields[m].values
+            }
+            delete hcompts[i].fields[m].hasDefaultValue
+            delete hcompts[i].fields[m].defaultValueStr
+          }
+        }
+        widget.config = $.extend(true, obj, hcompts[i])
+      }
+      if (formBaseConfig && n.compt === 'detailcombox') {
+        //明细内原始组件组:其它业务功能不要调用和操作此值
+        widget['resignConfig'] = $.extend(true, {}, formBaseConfig[i])
+      }
+      idAndFatherId[id] = pid
+      //初始化widgets索引表
+      // widgets[pid].children.push(widget)
+      if (!isFormData) {
+        //第一次进入填写页时
+        if (n.compt === 'numberinput' && n.fields[0].percentage && n.fields[0].values && n.fields[0].values.length > 0 && n.fields[0].values[0].val) {
+          n.fields[0].values[0].val = (n.fields[0].values[0].val * 100).toFixed(n.fields[0].verify.realNumber.precisionLen || 2)
+        }
+      }
+      children.push(widget)
+      widgets[id] = widget
+      if (n.compt === 'detailcombox'
+          || n.compt === 'matrixradio'
+          || n.compt === 'matrixcheckbox') {
+        if (isFormData) {
+          if (n.defaultCompts && n.defaultCompts.length > 0 && n.defaultCompts[0] && n.defaultCompts[0].length > 0) {
+            for (var j = 0; j < n.defaultCompts.length; j++) {
+              initWidgets(state, id, widgets, n.defaultCompts[j], isFormData, formConfig, formConfig, n.compts[j])
+            }
+          } else {
+            for (var j = 0; j < n.compts.length; j++) {
+              initWidgets(state, id, widgets, n.compts[j], isFormData, formConfig)
+            }
+          }
+        } else {
+          if (n.defaultCompts && n.defaultCompts.length > 0 && n.defaultCompts[0] && n.defaultCompts[0].length > 0) {
+            for (var j = 0; j < n.defaultCompts.length; j++) {
+              initWidgets(state, id, widgets, n.defaultCompts[j], isFormData, formConfig, formConfig, n.compts)
+            }
+          } else {
+            initWidgets(state, id, widgets, n.compts, isFormData, formConfig)
+          }
+        }
+      }
+    }
+    
+    if (pid === 0) {//如果是根组件
+      widgets[pid].children = children
+    } else if ($.trim(addIndex) !== '') {//如果是detailcombox组件
+      //子表单内子组件列表通过复制生成
+      widgets[pid].children.splice(addIndex, 0, children)
+    } else {
+      //如果是detailcombox组件
+      //子表单内组件组件列表通过添加到最后一行
+      widgets[pid].children.push(children)
+    }
+  }
+  
+  function initVerifieds(state, widgets) {
+    var verifieds = {}
+    for (var i = 0; i < widgets.length; i++) {
+      var formAuthority = state.formAuthority[widgets[i].config.compt + widgets[i].config.id]
+      var auth = (formAuthority instanceof Object) ? formAuthority.authority : formAuthority
+      if (auth && parseInt(auth) !==2 && parseInt(auth) !== 3) {
+        //审批配置的节点中的表单操作权限中存在至少一个组件开了可编辑
+        state.existEditAuthority = true
+      }
+      if (state.approveModel && state.defaultType === 2 && auth !== 3) {
+        //审批默认是只读页面(本次定制修改,新版审批第二版需要去掉)
+        if (widgets[i].config.compt === 'captiontext') {
+          verifieds[widgets[i].id] = {verified: true, isShow: true, errorTip: false, fvalues: [], errMsg: ''}
+          continue
+        }
+        if (widgets[i].config.compt === 'detailcombox') {
+          var detailCompts = widgets[i].children
+          for (var j = 0; j < detailCompts.length; j++) {
+            initVerifieds(state, detailCompts[j])
+          }
+          //明细字段显示状态
+          verifieds[widgets[i].id] = {verified: true, isShow: true, fvalues: []}
+          continue
+        }
+        verifieds[widgets[i].id] = {verified: true, isShow: true, errorTip: false, fvalues: [], errMsg: ''}
+        continue
+      }
+      if (widgets[i].config.compt === 'captiontext') {
+        verifieds[widgets[i].id] = {verified: true, isShow: true, hasAuthority: true, errorTip: false, fvalues: [], errMsg: ''}
+        continue
+      }
+      if (widgets[i].config.compt === 'detailcombox'
+          || widgets[i].config.compt === 'matrixradio'
+          || widgets[i].config.compt === 'matrixcheckbox') {
+        var detailCompts = widgets[i].children
+        for (var j = 0; j < detailCompts.length; j++) {
+          initVerifieds(state, detailCompts[j])
+        }
+        //明细字段显示状态
+        verifieds[widgets[i].id] = {verified: true, isShow: false, hasAuthority: false, fvalues: []}
+        continue
+      }
+      verifieds[widgets[i].id] = {verified: false, isShow: true, hasAuthority: false, errorTip: false, fvalues: [], errMsg: ''}
+    }
+    state.verifieds = $.extend(true, {}, state.verifieds, verifieds)
+  }
+
+  function delMoreGroupComptsForHideDetail(groupCompts) {
+    groupCompts.splice(1, groupCompts.length - 1)
+    if (groupCompts.length > 1) {
+      groupCompts = delMoreGroupComptsForHideDetail(groupCompts)
+      return
+    }
+    return groupCompts
+  }
+
+  function toFormData(state, widgets, isShowStatus, isSubmit) {
+    if (isSubmit) {
+      // 条件审批会清空isShow的值，导致缓存刷新两次数据丢失
+      widgets = $.extend(true, [], widgets)
+    }
+    var formData = []
+    for (var i = 0; i < widgets.length; i++) {
+      if (widgets[i].config.compt === 'detailcombox'
+          || widgets[i].config.compt === 'matrixradio'
+          || widgets[i].config.compt === 'matrixcheckbox') {
+        if (widgets[i].config.hasOwnProperty('tip') && !(widgets[i].config.tip instanceof Object)) {
+          var detailTipInfo = widgets[i].config.tip.trim()
+          widgets[i].config.tip = {
+            text: '',
+            imgs: []
+          }
+          if (!widgets[i].config.addDetail) {
+            widgets[i].config['addDetail'] = {
+              text: detailTipInfo,
+              open: true
+            }
+          }
+        }
+        var isShow = null
+        if (!state.verifieds[widgets[i].id]) {
+          state.verifieds[widgets[i].id] = {}
+        }
+        if (!state.verifieds[widgets[i].id].isShow) {
+          if (widgets[i].children.length > 1 && isSubmit) {
+            widgets[i].children = delMoreGroupComptsForHideDetail(widgets[i].children)
+          }
+          isShow = false
+        }
+        var detailWidgets = widgets[i].children, detailCompts = []
+        for (var j = 0; j < detailWidgets.length; j++) {
+          detailCompts.push(toFormData(state, detailWidgets[j], isShow, isSubmit))
+        }
+        widgets[i].config.compts = detailCompts
+        widgets[i].config['isShow'] = state.verifieds[widgets[i].id] ? !!state.verifieds[widgets[i].id].isShow : false
+        widgets[i].config['hasAuthority'] = state.verifieds[widgets[i].id] ? !!state.verifieds[widgets[i].id].hasAuthority : false
+        formData.push(widgets[i].config)
+        continue
+      }
+      widgets[i].config['isShow'] = isShowStatus !== null ? isShowStatus : state.verifieds[widgets[i].id] ? !!state.verifieds[widgets[i].id].isShow : false
+      widgets[i].config['hasAuthority'] = state.verifieds[widgets[i].id] ? !!state.verifieds[widgets[i].id].hasAuthority : false
+      if (!widgets[i].config.isShow && isSubmit) {
+        //清空选项关联时隐藏字段的值
+        var fields = widgets[i].config.fields
+        for (var j = 0; j < fields.length; j++) {
+          fields[j].values = []
+        }
+      }
+      switch (widgets[i].config.compt) {
+        case 'datetimerange':
+          reConstructTip(widgets[i].config.fields[0])
+          reConstructTip(widgets[i].config.fields[1])
+          break
+        case 'leavekit':
+          reConstructTip(widgets[i].config.fields[0])
+          reConstructTip(widgets[i].config.fields[1])
+          reConstructTip(widgets[i].config.fields[2])
+          break
+        case 'leavecancellationkit':
+          reConstructTip(widgets[i].config.fields[0])
+          reConstructTip(widgets[i].config.fields[1])
+          reConstructTip(widgets[i].config.fields[2])
+          reConstructTip(widgets[i].config.fields[3])
+          reConstructTip(widgets[i].config.fields[4])
+          break
+        default:
+          try {
+            reConstructTip(widgets[i].config.fields[0])
+          } catch (e) {
+            console.log(e)
+          }
+          break
+      }
+      
+      formData.push(widgets[i].config)
+    }
+    return formData
+  }
+  
+  function acquireComptWidgetByConfigId(widgets, id) {
+    for (var i = 0; i < widgets.length; i++) {
+      if (widgets[i].config.compt === 'detailcombox') {
+        var detailWidgets = widgets[i].children
+        for (var j = 0; j < detailWidgets.length; j++) {
+          var compt = acquireComptWidgetByConfigId(detailWidgets[j], id)
+          if (compt) {
+            return compt
+          }
+        }
+        continue
+      }
+      if (widgets[i].config.id === id) {
+        return widgets[i]
+      }
+    }
+    return null
+  }
+
+  function acquireComptArrWidgetByConfigId(widgets, id) {
+    var arr = []
+    for (var i = 0; i < widgets.length; i++) {
+      if (widgets[i].config.compt === 'detailcombox') {
+        var detailWidgets = widgets[i].children
+        for (var j = 0; j < detailWidgets.length; j++) {
+          var resultArr = acquireComptArrWidgetByConfigId(detailWidgets[j], id)
+          if (resultArr.length > 0) {
+            arr = arr.concat(resultArr)
+          }
+        }
+        continue
+      }
+      if (widgets[i].config.id === id) {
+        arr.push(widgets[i])
+      }
+    }
+    return arr
+  }
+
+  function reConstructTip(obj) {
+    if (obj.hasOwnProperty('tip') && !(obj.tip instanceof Object)) {
+      var tipInfo = obj.tip.trim()
+      obj.tip = {
+        text: tipInfo,
+        imgs: []
+      }
+    }
+  }
+  
+  function initRelationConfig(state, compts) {
+    if (!compts) {
+      return
+    }
+    var firstSingleSel = true
+    for (var i = 0; i < compts.length; i++) {
+      var ele = compts[i]
+      if (/^radiobutton|checklist|selectbox|selectmultibox$/.test(ele.config.compt)) {
+        var flag = 0
+        for (var j = 0; j < ele.config.fields[0].options.length; j++) {
+          var option = ele.config.fields[0].options[j], idObj = {}
+          if (!state.optionConfigObj[ele.config.id]) {
+            state.optionConfigObj[ele.config.id] = {}
+          }
+          if (option.idArr && option.idArr.length > 0) {
+            for (var k = 0; k < option.idArr.length; k++) {
+              var idEle = option.idArr[k]
+              var id = 0
+              for (var m = 0; m < compts.length; m++) {
+                var subEle = compts[m]
+                if (subEle.config.id === idEle) {
+                  id = subEle.id
+                  break
+                }
+              }
+              idObj[idEle] = {configId: idEle, id: id}
+            }
+          } else {
+            flag++
+          }
+          state.optionConfigObj[ele.config.id][j] = idObj
+        }
+        
+        if (flag !== ele.config.fields[0].options.length && firstSingleSel) {
+          //找第一个设置了关联关系的单选择字段永远显示
+          state.foreverShow[ele.config.id] = true
+          firstSingleSel = false
+        }
+      } else if (ele.config.compt === 'detailcombox') {
+        initRelationConfig(state, state.widgets[ele.id].children[0])
+      }
+    }
+    //查找除第一个单选外所有永远显示的组件
+    var tempObj = {}
+    for (var idKey in state.optionConfigObj) {
+      for (var idxKey in state.optionConfigObj[idKey]) {
+        for (var relationIdKey in state.optionConfigObj[idKey][idxKey]) {
+          tempObj[relationIdKey] = state.optionConfigObj[idKey][idxKey][relationIdKey]
+        }
+      }
+    }
+    for (var i = 0; i < compts.length; i++) {
+      var ele = compts[i]
+      if (!tempObj[ele.config.id]) {
+        //找到除第一个单选外所有永远显示的组件
+        state.foreverShow[ele.config.id] = true
+      }
+    }
+  }
+
+  //清除所有历史选择的单选显示项
+  function deleteAllChildrenId(state, pid, groupIndex, idArr, ignoreObj) {
+    for (var idxKey in state.optionConfigObj[pid]) {
+      if (idArr && idArr.length > 0 && idArr.indexOf(Number(idxKey)) > -1) {
+        continue
+      }
+      for (var idKey in state.optionConfigObj[pid][idxKey]) {
+        if (state.optionConfigObj[idKey]) {
+          //防死循环开始
+          if (state.checkIsExecuteDelObj[pid + '-' + idKey] || state.checkIsExecuteDelObj[idKey + '-' + pid]) {
+            continue
+          }
+          state.checkIsExecuteDelObj[pid + '-' + idKey] = 1
+          //防死循环结束
+          deleteAllChildrenId(state, idKey, groupIndex, [])
+          if (ignoreObj) {
+            if (!ignoreObj.hasOwnProperty(idKey)) {
+              delete state.historyDisSingleFieldSel[groupIndex][idKey]
+            }
+          } else {
+            delete state.historyDisSingleFieldSel[groupIndex][idKey]
+          }
+        }
+      }
+    }
+  }
+
+  function getCurrWidget(state, id) {
+    var widgets = state.widgets['0'].children
+    for (var i = 0; i < widgets.length; i++) {
+      if (widgets[i].config.compt === 'detailcombox' && widgets[i].config.id === id && widgets[i].children.length > 0) {
+        return widgets[i]
+      }
+    }
+    return null
+  }
+
+  function initFieldLastVal(state, compts, payload) {
+    for (var i = 0; i < compts.length; i++) {
+      var ele = compts[i]
+      if (ele.config.compt === 'detailcombox') {
+        if (ele.config.compts.length > 0) {
+          if (ele.config.compts[0] instanceof Array) {
+            for (var j = 0; j < ele.config.compts.length; j++) {
+              var sumCompt = ele.config.compts[j]
+              for (var k = 0; k < sumCompt.length; k++) {
+                var subEle = sumCompt[k]
+                if (subEle.hasOwnProperty('latestValShow') && subEle.latestValShow) {
+                  state.latestValShowFields[subEle.id + '_' + j] = []
+                }
+              }
+            }
+          } else {
+            for (var j = 0; j < ele.config.compts.length; j++) {
+              var sumCompt = ele.config.compts[j]
+              if (sumCompt.hasOwnProperty('latestValShow') && sumCompt.latestValShow) {
+                state.latestValShowFields[sumCompt.id + '_0'] = []
+              }
+            }
+          }
+        }
+        continue
+      }
+      if (ele.config.compt === 'matrixradio' || ele.config.compt === 'matrixcheckbox') {
+        if (ele.config.hasOwnProperty('latestValShow') && ele.config.latestValShow) {
+          if (ele.config.compts.length > 0) {
+            if (ele.config.compts[0] instanceof Array) {
+              for (var j = 0; j < ele.config.compts.length; j++) {
+                var sumCompt = ele.config.compts[j]
+                for (var k = 0; k < sumCompt.length; k++) {
+                  var subEle = sumCompt[k]
+                  state.latestValShowFields[subEle.id + '_' + j] = []
+                }
+              }
+            } else {
+              for (var j = 0; j < ele.config.compts.length; j++) {
+                var sumCompt = ele.config.compts[j]
+                state.latestValShowFields[sumCompt.id + '_0'] = []
+              }
+            }
+          }
+        }
+        continue
+      }
+      if (ele.config.hasOwnProperty('latestValShow') && ele.config.latestValShow) {
+        state.latestValShowFields[ele.config.id] = []
+      }
+    }
+    var cacheCompt = ''
+    if (payload && payload.vm && payload.vm.forms && payload.vm.forms.cache) {
+      //判断是否存在缓存（三端使用同一工具脚本）
+      cacheCompt = cacheUtils.existDataCache(formId, payload.formType === 'approveForm' ? aprvAppId : formAppId, payload.formType === 'approveForm' ? 1 : 0)
+    }
+    //当前用户不为“免登录用户UID”时才获取用户最后一次提交数据
+    var isNoLoginUid = Cookies.get('oa_uid') !== '173679788'
+    if (!$.isEmptyObject(state.latestValShowFields) && !cacheCompt && isNoLoginUid) {
+      // 禁止自动填充上一次填充值: 1. 存在发起填表、发起审批的表单/审批 2. 开启缓存后，距上一次提交前，进第一次进入页面，可填充上一次提交的数据
+      var formInNum = cacheUtils.getFormInNum()
+      if (state.formCache && formInNum && formInNum > 1) {
+        state.reLoadValShow = true
+        return
+      }
+      var url = 'data/apps/forms/fore/forms/user/last/info', data = {}
+      if (payload.formType === 'approveForm') {
+        url = 'data/approve/apps/forms/fore/forms/user/last/info'
+        data = {formId: formId, aprvAppId: aprvAppId, pageEnc: pageEnc}
+      } else {
+        data = {formId: formId, formAppId: formAppId, enc: enc}
+      }
+      $.get(url, data, function (res) {
+        if (res.success) {
+          var formsUser = res.data.formsUser
+          if (!formsUser) {
+            state.reLoadValShow = true
+            return
+          }
+          for (var i = 0; i < formsUser.formData.length; i++) {
+            var compt = formsUser.formData[i]
+            if (compt.compt === 'detailcombox'
+                || compt.compt === 'matrixradio'
+                || compt.compt === 'matrixcheckbox') {
+              if (compt.compts.length > 0 && compt.compts[0].length > 0) {
+                for (var j = 0; j < compt.compts.length; j++) {
+                  var groupCompts = compt.compts[j]
+                  var currWidget = getCurrWidget(state, compt.id)
+                  if (currWidget && !currWidget.children[j]) {
+                    //明细字段
+                    initWidgets(state, currWidget.id, state.widgets, groupCompts, false, null)
+                    for (var k = 0; k < groupCompts.length; k++) {
+                      var subEle = groupCompts[k]
+                      state.latestValShowFields[subEle.id + '_' + j] = []
+                    }
+                  }
+                  for (var k = 0; k < groupCompts.length; k++) {
+                    var sumCompt = groupCompts[k]
+                    if (state.latestValShowFields[sumCompt.id + '_' + j]) {
+                      var values = sumCompt.fields[0].values
+                      if (values && values.length > 0) {
+                        var enableAdd = false
+                        for (var m = 0; m < values.length; m++) {
+                          var value = values[m]
+                          if (value.val || value.address || value.puid) {
+                            enableAdd = true
+                            break
+                          }
+                        }
+                        if (enableAdd) {
+                          state.latestValShowFields[sumCompt.id + '_' + j] = sumCompt.fields[0].values
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+              continue
+            }
+            if (state.latestValShowFields[compt.id]) {
+              var values = compt.fields[0].values
+              if (values && values.length > 0) {
+                var enableAdd = false
+                for (var k = 0; k < values.length; k++) {
+                  var value = values[k]
+                  if (value.val || value.address || value.puid) {
+                    enableAdd = true
+                    break
+                  }
+                }
+                if (enableAdd) {
+                  state.latestValShowFields[compt.id] = compt.fields[0].values
+                }
+              }
+            }
+          }
+          var widgets = state.widgets['0'].children
+          for (var i = 0; i < widgets.length; i++) {
+            if (widgets[i].config.compt === 'detailcombox') {
+              if (widgets[i].children.length > 0) {
+                for (var j = 0; j < widgets[i].children.length; j++) {
+                  var groupCompts = widgets[i].children[j]
+                  for (var k = 0; k < groupCompts.length; k++) {
+                    var sumCompt = groupCompts[k]
+                    if (state.latestValShowFields[sumCompt.config.id + '_' + j]) {
+                      // 当联系人字段配置从多条改成一条，并且上次填写了多条，则不进行赋值，这里 multiple 取第0条的配置
+                      if (sumCompt.config.compt === 'contact' && !widgets[i].children[0][k].config.fields[0].fieldType.multiple && state.latestValShowFields[sumCompt.config.id + '_' + j].length > 1) {
+                        state.latestValShowFields[sumCompt.config.id + '_' + j] = []
+                      }
+                      sumCompt.config.fields[0].values = state.latestValShowFields[sumCompt.config.id + '_' + j]
+                    }
+                  }
+                }
+              }
+              continue
+            }
+            if (widgets[i].config.compt === 'matrixradio' || widgets[i].config.compt === 'matrixcheckbox') {
+              if (widgets[i].config.compts.length > 0) {
+                for (var j = 0; j < widgets[i].config.compts.length; j++) {
+                  var sumCompt = widgets[i].config.compts[j]
+                  if (state.latestValShowFields[sumCompt.id + '_0']) {
+                    sumCompt.fields[0].values = state.latestValShowFields[sumCompt.id + '_0']
+                  }
+                }
+              }
+              continue
+            }
+            if (state.latestValShowFields[widgets[i].config.id]) {
+              // 当联系人字段配置从多条改成一条，并且上次填写了多条，则不进行赋值
+              if (widgets[i].config.compt === 'contact' && !widgets[i].config.fields[0].fieldType.multiple && state.latestValShowFields[widgets[i].config.id].length > 1) {
+                state.latestValShowFields[widgets[i].config.id] = []
+              }
+              widgets[i].config.fields[0].values = state.latestValShowFields[widgets[i].config.id]
+            }
+          }
+          state.reLoadValShow = true
+        }
+      })
+    } else {
+      state.reLoadValShow = true
+    }
+  }
+
+  /**
+   * 存储表单结构里所有计算公式字段
+   */
+  function addComputeInputField(state, ele, pid, index, fromDetail) {
+    if (ele.config.compt === 'computeinput' && ele.config.fields[0].expression && ele.config.fields[0].expression.length > 0) {
+      var expression = ele.config.fields[0].expression
+      var tempObj = {}, arr = [], key = ''
+      var firstComputeInCurrDetail = null
+      if (index && index > 0) {
+        //如果当前计算公式是明细内第二组及以上内的字段
+        for (var idKey in state.computInputsObj) {
+          if (ele.config.id === state.computInputsObj[idKey].configId) {
+            //找当前计算公式所在明细内的第一组计算公式字段
+            firstComputeInCurrDetail = state.computInputsObj[idKey]
+            break
+          }
+        }
+      }
+      for (var j = 0; j < expression.length; j++) {
+        var id = expression[j].id, key = id
+        if (id.indexOf('computeinput') !== -1 || id.indexOf('radiobutton') !== -1 || id.indexOf('checklist') !== -1 || id.indexOf('selectbox') !== -1
+            || id.indexOf('numberinput') !== -1 || id.indexOf('datetimerange') !== -1 || id.indexOf('slider') !== -1) {
+          var val = '%d'
+          //如果当前计算公共里绑定的字段不是明细内的字段
+          if (firstComputeInCurrDetail && state.unDetailFieldsObj[id.replace(/[computeinput|radiobutton|checklist|selectbox|numberinput|datetimerange|slider]/ig, '')]) {
+            //将当前计算公式所在明细内第一组内对应的计算公式所保存的非明细字段的值赋值给当前计算公式内的非明细字段的值
+            val = firstComputeInCurrDetail.scoreFieldObj[id]
+          }
+          tempObj[id] = val
+          key = '{' + id + '}'
+        }
+        arr.push(key)
+      }
+      state.computInputsObj[ele.id] = {
+        id: ele.id,
+        pid: pid,
+        index: index,
+        configId: ele.config.id,
+        scoreFieldObj: tempObj,
+        expressionStr: arr.join(''),
+        fromDetail: fromDetail
+      }
+    }
+  }
+  
+  /**
+   * 提取表单结构里所有计算公式字段
+   * fromDetail 是否是明细内的计算公式字段
+   */
+  function acquireComputeInputField(state, compts, fromDetail, pid, index) {
+    for (var i = 0; i < compts.length; i++) {
+      var ele = compts[i]
+      if (ele.config.compt === 'detailcombox') {
+        if (ele.config.compts.length > 0) {
+          if (ele.config.compts[0] instanceof Array) {
+            for (var j = 0; j < ele.children.length; j++) {
+              for (var k = 0; k < ele.children[j].length; k++) {
+                addComputeInputField(state, ele.children[j][k], ele.id, j, true)
+              }
+            }
+          } else {
+            for (var j = 0; j < ele.children.length; j++) {
+              var groupCompts = ele.children[j]
+              for (var k = 0; k < groupCompts.length; k++) {
+                addComputeInputField(state, groupCompts[k], ele.id, j, true)
+              }
+            }
+          }
+        }
+        continue
+      }
+      if (!index || index <= 0 && ele.config.compt !== 'computeinput') {
+        //所有非明细内 非计算公式字段对象组
+        state.unDetailFieldsObj[ele.config.id] = true
+      }
+      addComputeInputField(state, ele, pid, index, fromDetail)
+    }
+  }
+
+
+  /**
+   * 提取校验公式中所有计算公式字段
+   */
+  function addSubmitVerifyField(state) {
+    var submitVerifyConfig = state.submitVerifyConfig
+    state.submitVerifyObj = {}
+    for (var i = 0; i < submitVerifyConfig.length; i++) {
+      var expression = submitVerifyConfig[i].expression
+      if (!expression) {
+        continue
+      }
+      var tempObj = {}, arr = [], key = ''
+      var firstComputeInCurrDetail = null
+      for (var j = 0; j < expression.length; j++) {
+        var id = expression[j].id, key = id
+        if (id.indexOf('radiobutton') !== -1 || id.indexOf('checklist') !== -1 || id.indexOf('computeinput') !== -1 || id.indexOf('selectbox') !== -1 || id.indexOf('numberinput') !== -1 || id.indexOf('slider') !== -1) {
+          var val = '%d'
+          //如果当前计算公共里绑定的字段不是明细内的字段
+          if (firstComputeInCurrDetail && state.unDetailFieldsObj[id.replace(/[radiobutton|selectbox|numberinput|computeinput|slider]/ig, '')]) {
+            //将当前计算公式所在明细内第一组内对应的计算公式所保存的非明细字段的值赋值给当前计算公式内的非明细字段的值
+            val = firstComputeInCurrDetail.scoreFieldObj[id]
+          }
+          tempObj[id] = val
+          key = '{' + id + '}'
+        }
+        arr.push(key)
+      }
+      state.submitVerifyObj[i] = {
+        promptText: submitVerifyConfig[i].promptText,
+        scoreFieldObj: tempObj,
+        expressionStr: arr.join('')
+      }
+    }
+  }
+
+
+  /**
+   * 提取表单结构里设置第三方Url中的当前表字段
+   */
+  function acquireOptionsFromUrlField(state, compts) {
+
+    function doAcquireOptionsFromUrlField(state, arr) {
+      for (var i = 0; i < arr.length; i++) {
+        var ele = arr[i], id = ele.id
+        if (ele.config.compt === 'detailcombox') {
+          if (ele.config.compts.length > 0) {
+            doAcquireOptionsFromUrlField(state, ele.children[0])
+          }
+          continue
+        }
+        //判断是否设置了第三方Url
+        if (ele.config.optionsLoadFromUrl && ele.config.optionsLoadFromUrl.isLoadFromUrl) {
+          var optionsLoadFromUrl = ele.config.optionsLoadFromUrl
+          var insertObj = state.optionsLoadFromUrlObj, url = optionsLoadFromUrl.url
+          //循环url，获取绑定字段的cid
+          for (var j = 0; j < url.length; j++) {
+            var insertLinkId = ele.config.id
+            if (url[j].cid) {
+              var key = url[j].cid
+              if (!insertObj[key]) {
+                insertObj[key] = []
+              }
+              //获取key为该cid的对象，并添加一个对象，里边包含要被清空值的组件Id和configId
+              var optionsLoadFromUrlIdObj = insertObj[key], optionsLoadFromUrlId = {}
+              optionsLoadFromUrlId['id'] = id
+              optionsLoadFromUrlId['configId'] = insertLinkId
+              optionsLoadFromUrlIdObj[optionsLoadFromUrlIdObj.length] = optionsLoadFromUrlId
+            }
+          }
+        }
+      }
+    }
+
+    doAcquireOptionsFromUrlField(state, compts)
+  }
+  
+  function doSetLocationRelated(state, compt) {
+    if (compt.compt !== 'location' || $.isEmptyObject(compt.locationScope) || $.isEmptyObject(compt.locationScope.linkedInfo)) {
+      return
+    }
+    var relatedInfo = compt.locationScope.linkedInfo
+    if ($.isEmptyObject(relatedInfo)) {
+      return
+    }
+    if (state.locationRelates.hasOwnProperty(relatedInfo.comptId)) {
+      state.locationRelates[relatedInfo.comptId].push({id: compt.id, locationScope: compt.locationScope})
+    } else {
+      state.locationRelates[relatedInfo.comptId] = [{id: compt.id, locationScope: compt.locationScope}]
+    }
+  }
+  
+  /**
+   * 增加缓存
+   * @param _this
+   * @param state
+   */
+  function addDataCache(_this, state) {
+    if(state.whetherToCache === 1) {//自动添加添加缓存
+      if (state.approveModel) {
+        cacheUtils.addDataCache(_this.getters.getFormData(), 1)//添加审批缓存数据
+      } else if ($.isEmptyObject(state.customFormsGatherFieldIds)) {
+        cacheUtils.addDataCache(_this.getters.getFormData(), 0)//添加表单缓存数据
+      }
+    }
+  }
+
+  return new Vuex.Store({
+    // strict: true,
+    state: {
+      readonly: false,
+      btnObj: {
+        btnName: '提交',
+        editable: false
+      },
+      submitVerifyObj: {},
+      submitVerifyConfig: [],
+      widgets: {
+        0: {id: 0, config: null, children: []}//detailcombox组件的children是二维数组
+      },
+      optionConfigObj: {},//所有单选组件内选项及关联字段id组 singleId:{optionIndex:{relationId:{configId:relationId, id:generateId}}}
+      currOptionSel: {},
+      checkIsExecuteDelObj: {},//{关联configId-被关联configId:1, 被关联configId-关联configId:1}
+      currFieldShowStatus: {},//当前状态下所有字段的显示状态对象generateId:{isShow: true/false}
+      historyDisSingleFieldSel: {}, //历史选择过的单选字段项对象 {singleId:optionIndex}
+      foreverShow: {},//所有一直显示的组件对象
+      verifieds: {},
+      sendable: false, //提交按钮状态值（是否可提交表单）
+      currWidgetId: -1, //当前参与验证的组件页面配置id 非是组件后台配置的本身的id
+      verifyFaultStatus: false, //目前只用于矩阵单选和矩阵多选组件使用 验证通过或不通过通知组件改变状态值
+      errMsg: '有必填项未填',
+      reLoadValShow: false,
+      reLoadCompStatus: false,
+      reloadValSubField: false,//明细内子组件在有选项关联的表单中是否重新调用isShow
+      latestValShowFields: {},//所有设置过需要显示上次填写记录的字段集合
+      currActiveFieldId: -1,
+      computInputsObj: {},//所有计算公式字段generateId:{id: generateId, configId: compt.id, scoreFieldObj: {numberinput1:'',selectbox1:''}}
+      computResultObj: {},//所有计算公式字段计算结果
+      unDetailFieldsObj: {},//所有明细外字段configId:true
+      refreshResult: {}, //计算公式字段计算结果通知变更
+      gatherModel: false,
+      customFormsGatherFieldIds: {},
+      customFormsGatherEditableIds: {},
+      gatherFatherShowFields: [],
+      approveModel: false,//自建审批使用 审批流程设置里设置某些字段是否可编辑 是否可见
+      defaultType: 0,//自建审批使用 审批流程设置里设置某些字段是否可编辑 是否可见
+      formAuthority: {},//自建审批使用 审批流程设置里设置某些字段是否可编辑 是否可见
+      currFormValueFieldVerify:{
+        formLoad:{}, // 表单、审批数据加载
+        linkFiled:{}, // 数据联动
+        formula:{}, // 公式编辑
+        relatedData:{}, // 选择数据
+        childRelatedData:{}, // 子表单选择数据
+        calculate:{}, // 计算公式
+        events:{}, // 前端事件
+        upload:{}, // 文件上传：图片、附件
+        detailLoad: {} // 子表单加载
+      },
+      hasLinkFieldRealLoadValue: {},//数据联动某组件是否被重新设置过值
+      relevance: null, // 关联表单配置
+      conditionData: {
+        value: ''
+      },
+      reSelValStatus: false,//联系人、所属人、部门组件
+      choseUserData: {
+        id: -1,
+        show: false,
+        type: -1,//1:审批人 2:抄送人 3:联系人组件 4:自选主管 5:选择部门组件
+        multiple: 0,//0:单选 1:多选
+        value: [],
+        tip: '请选择',
+        index: 0,
+        contactValueStr: '',
+        departmentValueStr: '',
+        relatedAprvValueStr: '',
+        leaveCancellationKitStr: ''
+      },
+      calculableStatus: true, //计算公式字段本身是否可以继续参与计算其它计算公式的值
+      isEdit: false, //用于编辑时缓存判断
+      formContactDeptFieldData: [], //表单内联系人与部门字段关联数据
+      uniqueErrorFields: {},
+      isPreview: false, //用于判断是否来源于编辑页
+      isInit: true, //用于判断是否第一次加载页面
+      fromDetailApprove: false, //判断是否来自审批详情页
+      existEditAuthority: false, //审批配置节点是否存在权限为可编辑的组件
+      readonlyOfComts: {}, //记录要设置为只读状态的组件id {widgetId1:1, widgetId2:1, widgetId3:1}
+      relateFieldValueStatus: false,
+      relateFieldValue: {}, //关联数据关联当前表单的对应组件id:fields对象{configId:fields...}
+      //组件多标签
+      fieldTab: {
+        open: false,
+        dataList: [], //{title: '标签1', fieldIdObjs: {}, fieldIds: []}
+        activeIndex: -1,
+        leftBtn: {
+          show: false,
+          disable: true
+        },
+        rightBtn: {
+          show: false,
+          disable: true
+        }
+      },
+      submitPromptShow: false, //提交提示是否展示
+      buttonFieldValue: [], // 记录按钮字段弹窗回传数据，用于赋值给其他字段
+      ocrFieldValue: [], // 记录文字识别组件返回数据，用于赋值给其他字段,需要支持子表单（标识为inDetailGroupIndex+'_'alias）
+      systemFields: '', //审批、表单系统字段列表
+      optionsLoadFromUrlObj: {}, //请求url中的当前表字段
+      optionsLoadFieldObj: [], //清空组件id值
+      isClearFromUrl: false,
+      formFid: 0, //表单或审批的fid
+      formsUserDeptId: 0, //审批记录单位id
+      isClearRelatedData: false, //用来判断是否清空选择数据关联的值
+      startApprove: false, //自建审批使用 判断当前页面是否为审批发起页
+      signViewShow: false, //表单使用 判断移动端子表单内手写签名弹窗是否显示
+      concatBelongerRelationValueConfig: {}, //联系人所属人根据表单内提交填充值 关联关系
+      concatBelongerRelationValueConfigStatus: false,
+      locationRelates: {}, // 记录定位限制范围组件关联关系
+      locationComptValueList: [], // 所有定位组件值集合
+      locationComptErrMsgList: [], // 定位组件限制范围错误信息
+      whetherToCache: 0,//当前表单（审批）是否需要缓存数据（0：否；1：是；）
+      hasRoleId: false, //是否有roleId，有roleId则按后台权限设置中的字段权限处理
+      comptDataType: {
+        init: 1, // 初始化数据
+        eventEnter: 2, // 前端事件进入修改的值
+        eventChange: 2, // 前端事件值变动修改的值
+        blurChange: 3 // 失去焦点触发改的值
+      },
+      comptDataTypeValue: {}, // 组件Id，触发修改的类型，{comptConfigId1: comptDataType.init, comptConfigId2: comptDataType.eventEnter}
+      formCache: true,
+      currentUserDeptId: 0,//当前用户deptId
+      approveData: {//审批数据
+        formId: 0,
+        aprvAppId: 0
+      },
+      deptStructure: {//指定组织架构信息
+        name: '',
+        serviceId: null
+      },
+      leaveUnFinishedDialogShow: false,//待销假窗口是否打开
+      viewerObj: { //viewer组件数据
+        data:[],
+        viewer:{} //view组件对象
+      },
+      appendOtherOptionIndex: {}, //格式:{id:索引} 下拉框/下拉复选框在关联其他表单数据/数据联动状态时,且开启"其他"选项,记录"其他"选项追加的索引,目的是保证分页情况下,"其他"选项必须追加到最后
+      formType: 'form',
+      idsKey: ''
+    },
+    getters: {
+      rootWidgets: function (state) {
+        return state.widgets['0'].children
+      },
+      getFormData: function (state) {
+        return function (isSubmit) {
+          return toFormData(state, state.widgets['0'].children, null, isSubmit)
+        }
+      },
+      getComptByConfigId: function (state) {
+        return function (id) {
+          var widget = acquireComptWidgetByConfigId(state.widgets['0'].children, id), compt = {compt: ''}
+          if (widget) {
+            compt = widget.config
+          }
+          return compt
+        }
+      },
+      getComptWidgetByConfigId: function (state) {
+        return function (id) {
+          return acquireComptWidgetByConfigId(state.widgets['0'].children, id)
+        }
+      },
+      getComptArrWidgetByConfigId: function (state) {
+        return function (id) {
+          return acquireComptArrWidgetByConfigId(state.widgets['0'].children, id)
+        }
+      },
+      getComptWidgetById: function (state) {
+        return function (id) {
+          return state.widgets[id]
+        }
+      },
+      getSubmitVerifyResult: function (state) {
+        return function () {
+          return formSubmitValidateUtil.calculateSubmitVerify(state)//进行校验计算
+        }
+      },
+      getErrMsg: function (state) {
+        return state.errMsg
+      },
+      getReloadValShow: function (state) {
+        return state.reLoadValShow
+      },
+      getReadonlyStatus: function (state) {
+        return state.readonly
+      },
+      getReadonlyOfComts: function (state) {
+        return state.readonlyOfComts
+      },
+      getCurrActiveFieldId: function (state) {
+        return state.currActiveFieldId
+      },
+      getGatherModel: function (state) {
+        return state.gatherModel
+      },
+      getFieldGatherShowStatusById: function (state) {
+        return function (id) {
+          return state.customFormsGatherFieldIds[id]
+        }
+      },
+      getFieldGatherReadOnlyStatusById: function (state) {
+        return function (id) {
+          return state.customFormsGatherEditableIds[id]
+        }
+      },
+      getGatherFatherShowFields: function (state) {
+        return state.gatherFatherShowFields
+      },
+      getApproveModel: function (state) {
+        return state.approveModel
+      },
+      getApproveFieldShowStatus: function (state) {
+        return function (configId, compt) {
+          if ($.isEmptyObject(state.formAuthority) || !state.formAuthority[compt + configId]) {
+            return true
+          }
+          //检测后台表单设置是否显示
+          var auth = (state.formAuthority[compt + configId] instanceof Object) ?
+                     state.formAuthority[compt + configId].authority :
+                     state.formAuthority[compt + configId]
+          return auth !== 3
+        }
+      },
+      getApproveFieldEditableStatus: function (state) {
+        return function (configId, compt) {
+          if ($.isEmptyObject(state.formAuthority)) {
+            return state.defaultType === 1
+          }
+          //检测后台表单设置是否可编辑
+          var editableStatus = state.formAuthority[compt + configId]
+          if (!editableStatus) {
+            editableStatus = state.defaultType
+          }
+
+          var auth = editableStatus instanceof Object ? editableStatus.authority : editableStatus
+          return auth !== 2
+        }
+      },
+      getApproveExtEditAuthority: function (state) { // 用于审批流程可编辑扩展选项获取附加权限
+        return function (configId, compt) {
+          if ($.isEmptyObject(state.formAuthority)) {
+            if (state.defaultType === 1) { // 审批的发起页
+              return { // 权限为可编辑，默认可增加、编辑、删除附件
+                id: compt + configId,
+                authority: 1,
+                download: true,
+                add: true,
+                edit: true,
+                delete: true
+              }
+            }
+            return null
+          }
+
+          var auth = state.formAuthority[compt + configId]
+          if (!auth) {
+            if (state.defaultType === 1) { // 审批的发起页
+              return { // 权限为可编辑，默认可增加、编辑、删除附件
+                id: compt + configId,
+                authority: 1,
+                download: true,
+                add: true,
+                edit: true,
+                delete: true
+              }
+            }
+            return null
+          }
+
+          if (!(auth instanceof Object)) {
+            if (auth !== 1) { //权限为 只读 或隐藏，返回空对象
+              return null
+            }
+            return { // 权限为可编辑，默认可增加、编辑、删除附件
+              id: compt + configId,
+              authority: 1,
+              download: true,
+              add: true,
+              edit: true,
+              delete: true
+            }
+          }
+
+          if (auth.authority !== 1) {
+            return null
+          }
+          return auth
+        }
+      },
+      getRelateFieldValueStatus: function (state) {
+        return state.relateFieldValueStatus
+      },
+      getRelateFieldValue: function (state) {
+        return state.relateFieldValue
+      },
+      getFieldTab: function (state) {
+        //获取组件多标签对象
+        return state.fieldTab
+      },
+      getFormConditionFormulaFieldObj: function () {
+        return function (id) {
+          return fieldFormulaTriggerUtils.getFormConditionFormulaFieldObj(id)
+        }
+      },
+      getFormulaFiledAuto: function () {
+        return function (id) {
+          return fieldFormulaTriggerUtils.getFormulaFiledAuto(id)
+        }
+      },
+      getRelevance: function (state) {
+        return state.relevance
+      },
+      getPermissionSetHideFields: function (state) {
+        return state.permissionSetHideFields
+      },
+      getCurrentType: function (state) {
+        return state.defaultType > 0
+      },
+      getReSelValStatus: function (state) {
+        return state.reSelValStatus
+      },
+      getPreviewStatus: function (state) {
+        return state.isPreview
+      },
+      getInitStatus: function (state) {
+        return state.isInit
+      },
+      getFromDetailApprove: function (state) {
+        return state.fromDetailApprove
+      },
+      getExistEditAuthority: function (state) {
+        return state.existEditAuthority
+      },
+      getUniqueErrorFields: function (state) {
+        return state.uniqueErrorFields
+      },
+      getFormContactDeptFieldData: function (state) {
+        return function (contactId) {
+          var arr = []
+          for (var i = 0; i < state.formContactDeptFieldData.length; i++) {
+            if (state.formContactDeptFieldData[i].contactId === contactId) {
+              arr.push(state.formContactDeptFieldData[i])
+            }
+          }
+          return arr
+        }
+      },
+      getSubmitPromptShow: function (state) {
+        return state.submitPromptShow
+      },
+      getButtonFieldValue: function (state) {
+        return function (alias) {
+          var result = null
+          for (var i = 0; i < state.buttonFieldValue.length; i++) {
+            var fieldValue = state.buttonFieldValue[i]
+            if ($.trim(fieldValue.alias) === $.trim(alias)) {
+              result = fieldValue
+              state.buttonFieldValue.splice(i, 1)//组件取值后删除数组中数据，防止再次加载填充
+              break
+            }
+          }
+          return result
+        }
+      },
+      getOcrFieldValue: function (state) {
+        return function (alias) {
+          var result = null
+          for (var i = 0; i < state.ocrFieldValue.length; i++) {
+            var fieldValue = state.ocrFieldValue[i]
+            if ($.trim(fieldValue.alias) === $.trim(alias)) {
+              result = fieldValue
+              state.ocrFieldValue.splice(i, 1)//组件取值后删除数组中数据，防止再次加载填充
+              break
+            }
+          }
+          return result
+        }
+      },
+      getSystemFields: function (state) { //获取表单、审批系统字段列表
+        return state.systemFields
+      },
+      getInsertFiledIdById: function (state) {
+        return function (id) {
+          return state.optionsLoadFromUrlObj[id]
+        }
+      },
+      getOptionsLoadFieldObj: function (state) {
+        return state.optionsLoadFieldObj
+      },
+      getIsClearFromUrl: function (state) {
+        return state.isClearFromUrl
+      },
+      getIsClearRelatedData: function (state) {
+        return state.isClearRelatedData
+      },
+      getIsEdit: function (state) {
+        return state.isEdit
+      },
+      getStartApprove: function (state) {
+        return state.startApprove
+      },
+      getFormFid: function (state) {
+        return state.formFid
+      },
+      getConcatBelongerRelationValueConfig: function (state) {
+        return state.concatBelongerRelationValueConfig
+      },
+      getConcatBelongerRelationValueConfigStatus: function (state) {
+        return state.concatBelongerRelationValueConfigStatus
+      },
+      getCurrFormValueFieldVerify: function (state) {
+        return function () {
+          for (var key in state.currFormValueFieldVerify) {
+            if (!$.isEmptyObject(state.currFormValueFieldVerify[key])) {
+              return false
+            }
+          }
+          return true
+        }
+      },
+      getCurrFormValueFieldDetail: function (state) {
+        return function () {
+          for (var key in state.currFormValueFieldVerify) {
+            if (!$.isEmptyObject(state.currFormValueFieldVerify[key])) {
+              for (var param in state.currFormValueFieldVerify[key]) {
+                return state.currFormValueFieldVerify[key][param]
+              }
+              return false
+            }
+          }
+          return null
+        }
+      },
+      getLocationComptValueForInspect: function (state) { // 获取需要校验的定位数据
+        return function (id, generalId) {
+          var arr = []
+          for (var i = 0; i < state.locationComptValueList.length; i++) {
+            var existDta = state.locationComptValueList[i]
+            if ($.isEmptyObject(existDta.value)) {
+              continue
+            }
+            if (existDta.id === id && (generalId === -1 || generalId === existDta.inDetailGroupGeneralId)){
+              arr.push(existDta)
+            }
+          }
+          return arr
+        }
+      },
+      getLocationComptValueByIdGeneralId: function (state) { // 根据批标识和组件id获取对应值
+        return function (id, generalId) {
+          for (var i = 0; i < state.locationComptValueList.length; i++) {
+            var existData = state.locationComptValueList[i]
+            if (existData.id === id && (existData.inDetailGroupGeneralId === generalId || existData.inDetailGroupGeneralId === -1)){
+              return existData.value
+            }
+          }
+          return {}
+        }
+      },
+      getLocationErrMsgByIdGeneralId: function (state) { // 获取本组件的定位错误信息
+        return function (id, generalId) {
+          for (var i = 0; i < state.locationComptErrMsgList.length; i++) {
+            var existData = state.locationComptErrMsgList[i]
+            if (existData.id === id && existData.inDetailGroupGeneralId === generalId){
+              return existData.msg
+            }
+          }
+        }
+      },
+      getLocationRelatesById: function (state) {
+        return function (id) {
+          return state.locationRelates[id] || []
+        }
+      },
+      getLinkResultFieldCondArrByFieldId: function (state) {
+        return function (id) {
+          return fieldLinkTriggerUtils.getLinkResultFieldCondArrByFieldId(id)
+        }
+      },
+      getHasRoleId: function (state) {
+        return state.hasRoleId
+      },
+      getDetailComboxLinkResultFieldCondArrByFieldId: function (state) {
+        return function (id) {
+          return detailComboxFieldLinkTriggerUtils.getLinkResultFieldCondArrByFieldId(id)
+        }
+      },
+      getWhetherToCache: function (state) {
+        return state.whetherToCache
+      },
+      getComptDataType: function (state) {
+        return function (key) {
+          return state.comptDataType[key]
+        }
+      },
+      getFormType: function (state) {
+        return state.formType
+      },
+      getAppendOtherOptionIndex: function (state) {
+        return function (id) {
+          return state.appendOtherOptionIndex[id]
+        }
+      },
+      getDeptStructure: function (state) {
+        return state.deptStructure
+      },
+      getIdsKey: function (state) {
+        return state.idsKey
+      }
+    },
+    mutations: {
+      initWidgets: function (state, payload) {
+        if (payload.isFormData) {
+          publicUtils.numValueAndPercentConvert(payload.compts, 'toPercent')
+        }
+        if (payload.hasOwnProperty('formType')) {
+          state.formType = payload.formType
+        }
+        // 刷新后，记录刷新页面次数更新
+        if (payload && payload.vm && payload.vm.forms && payload.vm.forms.cache && payload.vm.forms.cache === 1) {
+          // 距离上一次提交刷新，进入页面的访问次数
+          cacheUtils.setFormInNum()
+          state.formCache = true
+        } else {
+          state.formCache = false
+        }
+        
+        initWidgets(state, 0, state.widgets, payload.compts, payload.isFormData, payload.formConfig, payload.formBaseConfig)
+        // console.log('init',state.widgets)
+        initVerifieds(state, state.widgets['0'].children)
+        // console.log('verify', state.verifieds)
+        initRelationConfig(state, state.widgets[0].children)
+  
+        //审批详情页屏蔽上次填写功能
+        if (!state.defaultType || state.defaultType != 2) {
+          initFieldLastVal(state, state.widgets[0].children, payload)
+        }
+        
+        //提取表单结构里所有计算公式字段
+        acquireComputeInputField(state, state.widgets[0].children, false, 0)
+        //提取表单结构里所有数据联动字段
+        fieldLinkTriggerUtils.initFieldLinkConfig(state.widgets[0].children, state.isPreview)
+        //提取表单结构里所有子表单数据联动字段
+        detailComboxFieldLinkTriggerUtils.initFieldLinkConfig(state.widgets[0].children)
+        //提取表单结构里所有自动识别默认值的条件字段
+        fieldFormulaTriggerUtils.initFieldFormulaConfig(state.widgets[0].children)
+        if (payload.isEdit) {
+          state.isEdit = true
+          publicUtils.delRelatedDataCache(payload.vm, null, true)
+          publicUtils.initRelatedDataForEdit(payload.vm, payload.compts)
+        }
+        //提取表单结构里设置第三方Url中的当前表字段
+        acquireOptionsFromUrlField(state, state.widgets[0].children)
+      },
+      initGatherModel: function (state, payload) {
+        state.gatherModel = true
+        var fatherRelevanceConfig = payload.customFormsGather.fatherRelevanceConfig
+        if (fatherRelevanceConfig) {
+          state.gatherFatherShowFields = fatherRelevanceConfig.fatherShowFields || []
+          if (fatherRelevanceConfig.relevanceFields) {
+            this.commit('setRelevance', fatherRelevanceConfig.relevanceFields)
+          }
+        }
+        var fields = payload.customFormsGather.fieldIds//可见ID
+        var editables = payload.customFormsGather.editableIds//可编辑ID
+        fields = fields.concat(editables.filter(function (val) {
+          return !(fields.indexOf(val) > -1)
+        }))
+        for (var i = 0; i < fields.length; i++) {
+          state.customFormsGatherFieldIds[fields[i]] = fields[i]
+        }
+        for (var j = 0; j < editables.length; j++) {
+          state.customFormsGatherEditableIds[editables[j]] = editables[j]
+        }
+      },
+      initApproveFieldConfig: function (state, payload) {
+        state.approveModel = true
+        state.formAuthority = payload.formAuthority
+        state.defaultType = payload.defaultType
+      },
+      updatePreImgData: function(state, payload){
+        state.viewerObj.data = payload
+      },
+      bindingViewer: function(state, payload){
+        state.viewerObj.viewer = payload
+      },
+      triggerPreview: function(state, payload){
+        this.commit('updatePreImgData', payload.value)
+        setTimeout(function(){
+          state.viewerObj.viewer.update()
+          $('#viewImg' + payload.index).click()
+        })
+      },
+      watchValues: function (state, payload) {
+        state.conditionData.value = payload.fvalues
+        if (!state.widgets[payload.id]) {
+          return
+        }
+        if (!state.verifieds[payload.id]) {
+          state.verifieds[payload.id] = {}
+        }
+        state.verifieds[payload.id].verified = payload.verified
+        state.verifieds[payload.id].isShow = payload.isShow
+        state.widgets[payload.id].config['isShow'] = payload.isShow
+        state.verifieds[payload.id].hasAuthority = payload.hasAuthority
+        state.verifieds[payload.id].fvalues = payload.fvalues
+        state.verifieds[payload.id].errMsg = payload.errMsg
+        for (var i = 0; i < payload.fvalues.length; i++) {
+          var fval = payload.fvalues[i]
+          state.widgets[payload.id].config.fields[fval.fidx].values = fval.values
+        }
+        if (payload.configId && !state.isEdit) {
+          //增加缓存
+          addDataCache(this, state)
+        }
+        this.commit('checkSendable')
+      },
+      isShowWatchValues: function (state, payload) {
+        if (payload.configId) {
+          var config = this.getters.getComptWidgetByConfigId(payload.configId).config
+          config.isShow = payload.isShow
+          state.verifieds[payload.id].verified = payload.verified
+        }
+        if (isShowExecuteFields[payload.id]) {
+          //防止组件里isShow一直执行导致死循环
+          return
+        }
+        isShowExecuteFields[payload.id] = 1
+        this.commit('watchValues', payload)
+      },
+      setSignViewShowStatus: function (state, signViewShow) {
+        state.signViewShow = signViewShow
+      },
+      operateInsertFiledData: function (state, payload) {
+        //清楚下拉框\下拉选框的值
+        var insertUrlFields = state.optionsLoadFromUrlObj[payload.configId]
+        state.optionsLoadFieldObj = []
+        var optionsLoadFieldObj = state.optionsLoadFieldObj
+        //如果该字段被插入在了url中，获取对应要清空值的组件集合
+        if (insertUrlFields && insertUrlFields.length > 0) {
+          for (var i = 0; i < insertUrlFields.length; i++) {
+            var id = insertUrlFields[i].id, configId = insertUrlFields[i].configId
+            if (state.widgets[id].config.id === configId) {
+              optionsLoadFieldObj[optionsLoadFieldObj.length] = configId
+            }
+          }
+        }
+        state.isClearFromUrl = true
+      },
+      setCalculableStatus: function (state) {
+        //设置计算公式字段重新参与计算其它计算公式字段值的状态值
+        state.calculableStatus = !state.calculableStatus
+      },
+      setApproveData: function (state, payload) {
+        state.approveData = payload
+      },
+      calculateScore: function (state, payload) {
+        if (state.fromDetailApprove && !state.existEditAuthority) {
+          return
+        }
+        //根据计算公式计算汇总值
+        if (/[\.]$/.test(payload.value) || payload.id < 0) {
+          return
+        }
+        var config = state.widgets[payload.id].config
+        if (!(/^computeinput|numberinput|radiobutton|checklist|selectbox|datetimerange|slider$/.test(config.compt))) {
+          return
+        }
+        if ((config.compt === 'radiobutton' || config.compt === 'selectbox' || config.compt === 'checklist') && !config.optionScoreUsed) {
+          return
+        }
+        this.commit('setCurrFormValueFieldVerify', {id: payload.configId, type: 4, inDetailGroupIndex: payload.inDetailGroupIndex})
+        //给所有计算公式字段存储用户输入的值
+        for (var idKey in state.computInputsObj) {
+          var currComputeInputObj = state.computInputsObj[idKey]
+          if (currComputeInputObj.scoreFieldObj.hasOwnProperty(config.compt + payload.configId)
+              && $.trim(currComputeInputObj.scoreFieldObj[config.compt + payload.configId]) !== '') {
+            var isValEmpty = $.trim(payload.value) === ''
+            var val = isValEmpty ? 0 : $.trim(payload.value)
+            if (payload.fromDetail && !currComputeInputObj.fromDetail) {
+              //明细内输入值的绑定字段
+              var detailGroupCompts = state.widgets[payload.pid].children
+              val = 0//对于明细外的计算公式字段 如果绑定汇总字段是明细内的要把明细内各组的当前字段值相加后再计算
+              for (var i = 0; i < detailGroupCompts.length; i++) {
+                for (var j = 0; j < detailGroupCompts[i].length; j++) {
+                  if (payload.configId === detailGroupCompts[i][j].config.id) {
+                    switch (config.compt) {
+                      case 'slider':
+                      case 'computeinput':
+                      case 'numberinput':
+                        var values = detailGroupCompts[i][j].config.fields[0].values
+                        if (values && values.length > 0) {
+                          val += parseFloat(values[0].val ? values[0].val : 0)
+                        }
+                        break
+                      case 'datetimerange':
+                        var values = detailGroupCompts[i][j].config.fields[2].values
+                        if (values && values.length > 0) {
+                          val += parseFloat(values[0].val ? values[0].val : 0)
+                        }
+                        break
+                      default:
+                        for (var k = 0; k < detailGroupCompts[i][j].config.fields[0].options.length; k++) {
+                          var option = detailGroupCompts[i][j].config.fields[0].options[k]
+                          if (option.checked) {
+                            val += parseFloat(option.score ? option.score : 0)
+                            // break
+                          }
+                        }
+                        break
+                    }
+                    break
+                  }
+                }
+              }
+            }
+            if (payload.fromDetail && currComputeInputObj.fromDetail &&
+                (payload.inDetailGroupIndex !== currComputeInputObj.index || payload.pid !== currComputeInputObj.pid)) {
+              continue
+            }
+            if ($.trim(val) !== '' && !isNaN(val) && /^(\-|\+)?\d+(\.\d+)?$/.test(val)) {
+              currComputeInputObj.scoreFieldObj[config.compt + payload.configId] = val
+            }
+          }
+        }
+        var resultObj = {}
+        var isExecute = true
+        //按公式计算结果值
+        for (var idKey in state.computInputsObj) {
+          for (var fieldCompt in state.computInputsObj[idKey].scoreFieldObj) {
+            if (state.computInputsObj[idKey].scoreFieldObj[fieldCompt] === '%d') {
+              state.computInputsObj[idKey].scoreFieldObj[fieldCompt] = 0
+            }
+          }
+          if (isExecute) {
+            var expressionStr = state.computInputsObj[idKey].expressionStr
+            //判断当前字段是否在公式当中
+            if (expressionStr.indexOf('{' + (config.compt + config.id) + '}') === -1) {
+              continue
+            }
+            for (var fieldComptKey in state.computInputsObj[idKey].scoreFieldObj) {
+              expressionStr = expressionStr.replace(new RegExp('\\{' + fieldComptKey + '\\}', 'gm'), state.computInputsObj[idKey].scoreFieldObj[fieldComptKey])
+            }
+            try {
+              expressionStr = expressionStr.replace(/--/g, '+')
+              var resultVal = parseFloat(eval('(' + expressionStr + ')')), chineseName = ''
+              if ($.trim(resultVal) !== '' && /^(\-|\+)?\d+(\.\d+)?$/.test(resultVal) && !isNaN(resultVal)) {
+                var currComputeInputConfig = state.widgets[idKey].config, result = ''
+                // 默认保留两位
+                var precisionLen = (currComputeInputConfig.fields[0].precisionLen || currComputeInputConfig.fields[0].precisionLen === 0) ? parseInt(currComputeInputConfig.fields[0].precisionLen) : 2
+                if (currComputeInputConfig.fields[0].verify.percentage.show) {
+                  result = (resultVal / 100).toFixed(currComputeInputConfig.fields[0].verify.percentage.precision || 2) + '%'
+                } else if (currComputeInputConfig.fields[0].verify.chinese) {
+                  //显示大写（汉字）
+                  result = resultVal.toFixed(precisionLen)
+                  chineseName = publicUtils.digitUpperConvert(result)
+                } else if (currComputeInputConfig.fields[0].percentage) {
+                  //百分比存的数据除了100，小数位数要多加两位
+                  result = resultVal.toFixed(precisionLen + 2)
+                } else {
+                  result = resultVal.toFixed(precisionLen)
+                  chineseName = publicUtils.digitUpperConvert(result)
+                }
+                currComputeInputConfig.fields[0].values = [{val: parseFloat(result), chineseName: chineseName}]
+                resultObj[idKey] = {id: idKey, value: parseFloat(result), chineseName: chineseName}
+                state.computResultObj[idKey] = {id: idKey, value: parseFloat(result), chineseName: chineseName}
+              } else {
+                //if ((resultVal + '').indexOf('Infinity') !== -1)
+                state.widgets[idKey].config.fields[0].values = [{val: '计算错误', chineseName: ''}]
+                resultObj[idKey] = {id: idKey, value: '计算错误', chineseName: ''}
+                state.computResultObj[idKey] = {id: idKey, value: '计算错误', chineseName: ''}
+              }
+              state.refreshResult = resultObj
+            } catch (e) {
+              console.log('' + e)
+              resultObj[idKey] = {id: idKey, value: '', chineseName: ''}
+              state.computResultObj[idKey] = {id: idKey, value: '', chineseName: ''}
+              state.refreshResult = resultObj
+            }
+          }
+        }
+        this.commit('removeCurrFormValueFieldVerify', {id: payload.configId, type: 4, inDetailGroupIndex: payload.inDetailGroupIndex})
+      },
+      setSubmitVerifyConfig: function (state, submitVerifyConfig) {
+        if (submitVerifyConfig) {
+          state.submitVerifyConfig = submitVerifyConfig
+          addSubmitVerifyField(state)
+        }
+      },
+      setRelevance: function (state, relevance) {
+        state.relevance = relevance
+      },
+      checkSendable: function (state) {
+        for (var id in state.verifieds) {
+          state.verifyFaultStatus = false//目前只用于矩阵单选和矩阵多选组件使用 验证通过或不通过通知组件改变状态值(重置通知状态值)目的是让矩阵组件重新获取验证状态值同步更新页面显示
+          state.verifieds[id].errorTip = false//重置各组件错误验证状态值
+          if (state.verifieds.hasOwnProperty(id) && !state.verifieds[id].verified && state.verifieds[id].isShow && state.verifieds[id].hasAuthority) {
+            if (idAndFatherId[id] && idAndFatherId[id] > 0 && (!state.verifieds[idAndFatherId[id]].isShow || !state.verifieds[idAndFatherId[id]].hasAuthority)) {
+              //如果当前校验失败的字段的父明细字段不显示,则暂跳过此字段
+              continue
+            }
+            state.sendable = false
+            state.errMsg = state.verifieds[id].errMsg || '有必填项未填'
+            state.currWidgetId = id //记录当前验证未通过的组件的id
+            return
+          }
+        }
+        state.sendable = true
+      },
+      updateVerifiedOfErrorTip: function (state, id) {
+        //更新当前验证字段的验证状态值
+        var verified = state.verifieds[id]
+        if (verified) {
+          //设置当前未验证通过组件验证错误状态值为true 供页面交互显示
+          state.verifieds[id].errorTip = true
+          //目前只用于矩阵单选和矩阵多选组件使用 验证通过或不通过通知组件改变状态值 目的是让矩阵组件重新获取验证状态值同步更新页面显示
+          state.verifyFaultStatus = true
+        }
+      },
+      addDetailWidgets: function (state, payload) {
+        var pid = payload.id, resignComptsObjs = payload.resignCompts
+        initWidgets(state, pid, state.widgets, resignComptsObjs, false, null, null, null, payload.addIndex)
+        var children = state.widgets[pid].children
+        var addIndex = children.length - 1
+        if ($.trim(payload.addIndex) !== '') {
+          addIndex = payload.addIndex
+        }
+        initVerifieds(state, children[addIndex])
+        
+        //提取表单结构里所有计算公式字段
+        acquireComputeInputField(state, children[addIndex], true, pid, addIndex)
+        //用户在填写页操作表单数据后未提交表单时保存操作的表单结构数据
+        addDataCache(this, state)
+        //重新计算计算公式字段的值开始
+        var subCompts = children[addIndex]
+        for (var i = 0; i < subCompts.length; i++) {
+          var ele = subCompts[i]
+          if (ele.config.compt === 'radiobutton' || ele.config.compt === 'selectbox') {
+            this.commit('setCurrOptionSel', {
+              id: ele.id,
+              configId: ele.config.id,
+              inDetailGroupIndex: addIndex,
+              idxArr: []
+            })
+          }
+          if (((ele.config.compt === 'radiobutton' || ele.config.compt === 'selectbox' || ele.config.compt === 'checklist') &&
+              ele.config.optionScoreUsed) || ele.config.compt === 'numberinput'
+              || ele.config.compt === 'computeinput' || ele.config.compt === 'slider') {
+            this.commit('calculateScore', {
+              id: ele.id,
+              pid: pid,
+              configId: ele.config.id,
+              value: 0,
+              inDetailGroupIndex: addIndex,
+              fromDetail: true
+            })
+            //重新设置计算公式字段可继续参与计算其它计算公式值的状态
+            this.commit('setCalculableStatus')
+            break
+          }
+          var formFormulaFields = this.getters.getFormConditionFormulaFieldObj(ele.config.id)
+          if (formFormulaFields && formFormulaFields.length > 0) {
+            var arr = []
+            arr.push(ele.config.id + '_' + ele.config.inDetailGroupIndex)
+            this.dispatch('operateFormulaFiledData', {
+              id: ele.id,
+              configId: ele.config.id,
+              inDetailGroupIndex: payload.index,
+              value: '',
+              values: ele.config.fields[0].values
+            })
+          }
+        }
+        //重新计算计算公式字段的值结束
+        this.commit('checkSendable')
+      },
+      removeDetailWidgets: function (state, payload) {
+        var detailWidgets = state.widgets[payload.id].children[payload.index]
+        if (detailWidgets) {
+          //重新计算计算公式字段的值开始
+          var subCompts = detailWidgets
+          for (var i = 0; i < subCompts.length; i++) {
+            var ele = subCompts[i]
+            delete state.readonlyOfComts[ele.id]
+            if (((ele.config.compt === 'radiobutton' || ele.config.compt === 'selectbox' || ele.config.compt === 'checklist') &&
+                 ele.config.optionScoreUsed) || ele.config.compt === 'numberinput'
+                || ele.config.compt === 'computeinput' || ele.config.compt === 'slider') {
+              switch (ele.config.compt) {
+                case 'slider':
+                case 'computeinput':
+                case 'numberinput':
+                  var values = ele.config.fields[0].values
+                  if (values && values.length > 0) {
+                    values[0].val = 0
+                  }
+                  break
+                case 'datetimerange':
+                  var values = ele.config.fields[2].values
+                  if (values && values.length > 0) {
+                    values[0].val = 0
+                  }
+                  break
+                default:
+                  for (var k = 0; k < ele.config.fields[0].options.length; k++) {
+                    var option = ele.config.fields[0].options[k]
+                    if (option.checked) {
+                      option.score = 0
+                    }
+                  }
+                  break
+              }
+              this.commit('calculateScore', {
+                id: ele.id,
+                pid: payload.id,
+                configId: ele.config.id,
+                value: 0,
+                inDetailGroupIndex: payload.index,
+                fromDetail: true
+              })
+              //重新设置计算公式字段可继续参与计算其它计算公式值的状态
+              this.commit('setCalculableStatus')
+            }
+            //移动选择数据组件缓存下标
+            if (ele.config.compt === 'relateddata') {
+              publicUtils.childRelatedDataCacheChange(payload.vm, ele.config, state, payload, state.widgets[payload.id].children)
+            }
+          }
+          for (var i = 0; i < subCompts.length; i++) {
+            var ele = subCompts[i]
+            this.commit('operateFormulaFiledRecordData', [])
+            var formFormulaFields = this.getters.getFormConditionFormulaFieldObj(ele.config.id)
+            if (formFormulaFields && formFormulaFields.length > 0) {
+              var arr = []
+              arr.push(ele.config.id + '_' + ele.config.inDetailGroupIndex)
+              this.commit('operateFormulaFiledRecordData', arr)
+              this.dispatch('operateFormulaFiledData', {
+                id: ele.id,
+                configId: ele.config.id,
+                inDetailGroupIndex: payload.index,
+                isDelete: true,
+                value: ''
+              })
+            }
+          }
+          //重新计算计算公式字段的值结束
+          for (var i = 0; i < detailWidgets.length; i++) {
+            delete state.widgets[detailWidgets[i].id]
+            delete state.verifieds[detailWidgets[i].id]
+            //删除明细内的计算公式字段
+            delete state.computInputsObj[detailWidgets[i].id]
+          }
+        }
+        state.widgets[payload.id].children.splice(payload.index, 1)
+        //删除子表单单条数据后，修改此记录之后的inDetailGroupIndex
+        for (var i = payload.index; i < state.widgets[payload.id].children.length; i++) {
+          for (var j = 0; j < state.widgets[payload.id].children[i].length; j++) {
+            state.widgets[payload.id].children[i][j].config.inDetailGroupIndex = i
+          }
+        }
+        //用户在填写页操作表单数据后未提交表单时保存操作的表单结构数据
+        addDataCache(this, state)
+        this.commit('checkSendable')
+      },
+      setReadonlyStatus: function (state, payload) {
+        state.readonly = payload && !$.isEmptyObject(payload) ? payload.readonly : true
+      },
+      addReadonlyCompts: function (state, payload) {
+        state.readonlyOfComts = payload.readonlyOfComts
+      },
+      setSubmitBtnObj: function (state, payload) {
+        state.btnObj.btnName = payload.btnName
+        state.btnObj.editable = payload.editable
+      },
+      setFormsUserDeptId: function (state, value) {
+        state.formsUserDeptId = value
+      },
+      setCurrActiveFieldId: function (state, currActiveFieldId) {
+        state.currActiveFieldId = currActiveFieldId
+      },
+      setCurrOptionSel: function (state, payload) {
+        if (!state.optionConfigObj[payload.configId] || !state.widgets[payload.id]) {
+          return
+        }
+        //重置isShow执行状态
+        isShowExecuteFields = {}
+        if (!state.historyDisSingleFieldSel[payload.inDetailGroupIndex]) {
+          state.historyDisSingleFieldSel[payload.inDetailGroupIndex] = {}
+        }
+        //每一次切换单选项时清空上一次操作的防死循环控制对象
+        state.checkIsExecuteDelObj = {}
+        if (payload.idxArr.length > 0) {
+          //历史选择过的单选字段项对象
+          state.historyDisSingleFieldSel[payload.inDetailGroupIndex][payload.configId] = payload.idxArr
+        }
+        //清除所有历史选择的单选显示项
+        if (payload.compt === 'checklist' || payload.compt === 'selectmultibox') {
+          deleteAllChildrenId(state, payload.configId, payload.inDetailGroupIndex, payload.idxArr)
+        } else {
+          if (payload.idxArr.length > 0) {
+            deleteAllChildrenId(state, payload.configId, payload.inDetailGroupIndex, [], state.optionConfigObj[payload.configId][payload.idxArr[0]])
+          } else {
+            deleteAllChildrenId(state, payload.configId, payload.inDetailGroupIndex)
+          }
+        }
+        if (payload.idxArr.length <= 0) {
+          //清除当前操作单选项选中状态
+          delete state.historyDisSingleFieldSel[payload.inDetailGroupIndex][payload.configId]
+        }
+        var currOptionSel = {}
+        for (var groupIndexKey in state.historyDisSingleFieldSel) {
+          if (parseInt(groupIndexKey) !== payload.inDetailGroupIndex && payload.inDetailGroupIndex >= 0 && parseInt(groupIndexKey) >= 0) {
+            continue
+          }
+          for (var idKey in state.historyDisSingleFieldSel[groupIndexKey]) {
+            var arr = state.historyDisSingleFieldSel[groupIndexKey][idKey]
+            for (var i = 0; i < arr.length; i++) {
+              currOptionSel = $.extend(true, currOptionSel, state.optionConfigObj[idKey][arr[i]])
+            }
+          }
+        }
+        var obj = {fromDetail: false, inDetailGroupIndex: payload.inDetailGroupIndex}
+        if (state.widgets[payload.id].config.fromDetail) {
+          obj.fromDetail = true
+        }
+        state.currFieldShowStatus = {}
+        if (payload.idxArr.length <= 0) {
+          state.currOptionSel = $.extend(true, obj, currOptionSel)
+        } else {
+          var centerArr = payload.idxArr, tempObj = {}
+          for (var i = 0; i < centerArr.length; i++) {
+            tempObj = $.extend(true, tempObj, state.optionConfigObj[payload.configId][centerArr[i]])
+          }
+          state.currOptionSel = $.extend(true, obj, currOptionSel, tempObj)
+        }
+        for (var key in state.verifieds) {
+          state.currFieldShowStatus[key] = {isShow: state.verifieds[key].isShow}
+        }
+        state.reloadValSubField = !state.reloadValSubField
+      },
+      initEvents: eventTriggerUtils.initEvents,
+      createdEventTrigger: eventTriggerUtils.createdEventTrigger,
+      createdFieldLinkTrigger: fieldLinkTriggerUtils.createdFieldLinkTrigger,
+      createdDetailComboxFieldLinkTrigger: detailComboxFieldLinkTriggerUtils.createdFieldLinkTrigger,
+      createdFieldFormulaTrigger: fieldFormulaTriggerUtils.createdFieldFormulaTrigger,
+      createdNoRepeatFieldTrigger: fieldNoRepeatTriggerUtils.createdNoRepeatFieldTrigger,
+      operateNoRepeatFieldValue: fieldNoRepeatTriggerUtils.operateNoRepeatFieldValue,
+      updateForOperateSub: fieldNoRepeatTriggerUtils.updateForOperateSub,
+      setReSelValStatus: function (state) {
+        state.reSelValStatus = !state.reSelValStatus
+      },
+      setChoseUserData: function (state, payload) {
+        state.choseUserData = $.extend(state.choseUserData, payload)
+      },
+      clearChoseUserStrData: function (state) {
+        if (state.choseUserData.type === 3) {
+          state.choseUserData.contactValueStr = ''
+        } else if (state.choseUserData.type === 5) {
+          state.choseUserData.departmentValueStr = ''
+        }
+        state.choseUserData.id = -1
+        state.choseUserData.type = -1
+      },
+      cacheCurPageWidget: function (state) {
+        //缓存当前表单的值
+        localStorage.setItem("signature_form_data", JSON.stringify(state.widgets))
+      },
+      watchWidget: function (state) {
+        //从缓存中读取当前表单的值
+        var widgets = localStorage.getItem("signature_form_data")
+        if(widgets && !$.isEmptyObject(widgets)){
+          state.widgets = JSON.parse(widgets)
+          localStorage.removeItem("signature_form_data")
+        }
+      },
+      setPreviewStatus: function (state, isPreview) {
+        state.isPreview = isPreview
+      },
+      setInitStatus: function (state, isInit) {
+        state.isInit = isInit
+        fieldLinkTriggerUtils.setInit(isInit)
+        fieldFormulaTriggerUtils.setInit(isInit)
+      },
+      setFromDetailApprove: function (state, fromDetailApprove) {
+        state.fromDetailApprove = fromDetailApprove
+      },
+      setFormContactDeptFieldData: function (state, payload) {
+        var index = -1
+        for (var i = 0; i < state.formContactDeptFieldData.length; i++) {
+          var data = state.formContactDeptFieldData[i]
+          if (data.departmentId === payload.departmentId && data.contactId === payload.contactId) {
+            index = i
+            break
+          }
+        }
+
+        if (index === -1) {
+          state.formContactDeptFieldData.push(payload) // 不存在
+        } else {
+          state.formContactDeptFieldData.splice(index, 1, payload) // 存在进行替换
+        }
+      },
+      setUniqueErrorFields: function (state, uniqueErrorFields) {
+        state.uniqueErrorFields = uniqueErrorFields
+      },
+      setRelateFieldValueStatus: function (state) {
+        state.relateFieldValueStatus = !state.relateFieldValueStatus
+      },
+      clearRelateFieldValue: function (state) {
+        state.relateFieldValue = {}
+      },
+      setRelateFieldValue: function (state, payload) {
+        state.relateFieldValue[payload.id] = payload
+      },
+      doReLoadCompStatus: function (state) {
+        state.reLoadCompStatus = !state.reLoadCompStatus
+      },
+      setSubmitPromptShow: function (state) {
+        state.submitPromptShow = true
+      },
+      setButtonFieldValue: function (state, payload) {
+        state.buttonFieldValue = payload
+      },
+      setOcrFieldValue: function (state, payload) {
+        state.ocrFieldValue = payload
+      },
+      setSystemFields: function (state, payload) { //保存表单、审批系统字段列表
+        state.systemFields = payload
+      },
+      initPermissionSetHideFields: function (state, payload) {
+        state.permissionSetHideFields = payload
+      },
+      setIsClearRelatedData: function (state, isClearRelatedData) {
+        return state.isClearRelatedData = isClearRelatedData
+      },
+      setFormFid: function (state, value) {
+        state.formFid = value
+        fieldFormulaTriggerUtils.setFormFid(value)
+      },
+      setStartApprove: function (state, startApprove) {
+        state.startApprove = startApprove
+      },
+      setConcatBelongerRelationValueConfig: function (state, payload) {
+        state.concatBelongerRelationValueConfig[payload.id] = payload.config
+      },
+      setConcatBelongerRelationValueConfigStatus: function (state) {
+        state.concatBelongerRelationValueConfigStatus = !state.concatBelongerRelationValueConfigStatus
+      },
+      setErrMsg: function (state, payload) {
+        this.state.errMsg = payload.errMsg
+      },
+      setWhetherToCache: function (state, whetherToCache) {
+        state.whetherToCache = whetherToCache
+      },
+      setCurrentUserDeptId: function (state, currentUserDeptId) {
+        state.currentUserDeptId = currentUserDeptId
+      },
+      setCurrFormValueFieldVerify: function (state, payload) {
+        if (payload && !payload.hasOwnProperty('type')) {
+          return
+        }
+        switch (payload.type) {
+          case 1 : // 数据联动
+            state.currFormValueFieldVerify.linkFiled[payload.id] = payload
+            break
+          case 2 : // 公式编辑
+            state.currFormValueFieldVerify.formula[payload.id] = payload
+            break
+          case 3 : // 选择数据
+            state.currFormValueFieldVerify.relatedData[payload.id] = payload
+            break
+          case 4 : // 计算公式
+            state.currFormValueFieldVerify.calculate[payload.id] = payload
+            break
+          case 5 : // 表单、审批数据获取
+            state.currFormValueFieldVerify.formLoad[payload.id] = payload
+            break
+          case 6 : // 子表单选择数据渲染
+            state.currFormValueFieldVerify.childRelatedData[payload.id] = payload
+            break
+          case 7 : // 文件上传数据加载，未上传结束，禁止提交，图片、附件
+            state.currFormValueFieldVerify.upload[payload.id] = payload
+            break
+          case 8 : // 子表单加载
+            state.currFormValueFieldVerify.detailLoad[payload.id] = payload
+            break
+          default:
+            break
+        }
+      },
+      removeCurrFormValueFieldVerify: function (state, payload) {
+        if (payload && !payload.hasOwnProperty('type')) {
+          return
+        }
+        switch (payload.type) {
+          case 1 : // 数据联动
+            delete state.currFormValueFieldVerify.linkFiled[payload.id]
+            break
+          case 2 : // 公式编辑
+            delete state.currFormValueFieldVerify.formula[payload.id]
+            break
+          case 3 : // 选择数据
+            if (payload.inDetailGroupIndex > 0) {
+              delete state.currFormValueFieldVerify.relatedData[payload.id + "_" + payload.inDetailGroupIndex]
+            } else {
+              delete state.currFormValueFieldVerify.relatedData[payload.id]
+            }
+            break
+          case 4 : // 计算公式
+            delete state.currFormValueFieldVerify.calculate[payload.id]
+            break
+          case 5 : // 表单、审批数据获取
+            delete state.currFormValueFieldVerify.formLoad[payload.id]
+            break
+          case 6 : // 子表单选择数据
+            if (payload.inDetailGroupIndex > 0) { // 支持子表单
+              delete state.currFormValueFieldVerify.childRelatedData[payload.id + "_" + payload.inDetailGroupIndex]
+            } else {
+              delete state.currFormValueFieldVerify.childRelatedData[payload.id]
+            }
+            break
+          case 7 : // 表单、审批数据获取
+            delete state.currFormValueFieldVerify.upload[payload.id]
+            break
+          case 8 : // 子表单加载
+            delete state.currFormValueFieldVerify.detailLoad[payload.id]
+            break
+          default:
+            break
+        }
+      },
+      setLocationComptValue: function (state, payload) {
+        // 每次值变动都改变状态
+        for (var i = 0; i < state.locationComptValueList.length; i++) {
+          var existData = state.locationComptValueList[i]
+          if (existData.id === payload.id && existData.inDetailGroupGeneralId === payload.inDetailGroupGeneralId) {
+            state.locationComptValueList.splice(i, 1)
+            state.locationComptValueList.push(payload)
+            return
+          }
+        }
+        state.locationComptValueList.push(payload)
+      },
+      setLocationErrMsg: function (state, payload) {
+        for (var i = 0; i < state.locationComptErrMsgList.length; i++) {
+          var existData = state.locationComptErrMsgList[i]
+          if (existData.id === payload.id && existData.inDetailGroupGeneralId === payload.inDetailGroupGeneralId) {
+            state.locationComptErrMsgList.splice(i, 1)
+            state.locationComptErrMsgList.push(payload)
+            return
+          }
+        }
+        state.locationComptErrMsgList.push(payload)
+      },
+      setLocationRelates: function (state, payload) {
+        if (!payload || payload.length <= 0) {
+          return
+        }
+        // 从全部组件配置信息中取出定位组件关联配置信息
+        for (var i = 0; i < payload.length; i++) {
+          var compt = payload[i]
+          if (compt.compt === 'detailcombox') { // 子表单
+            for (var j = 0; j < compt.compts.length; j++) {
+              doSetLocationRelated(state, compt.compts[j])
+            }
+          }
+          doSetLocationRelated(state, compt)
+        }
+      },
+      setHasRoleId: function (state, payload) {
+        state.hasRoleId = payload
+      },
+      setRowCurrOptionSel: function(state, payload) { // 子表单横版支持关联选项查看已经有的值
+        if (payload.idxArr.length > 0) {
+          var centerArr = payload.idxArr, tempObj = {}
+          for (var i = 0; i < centerArr.length; i++) {
+            tempObj = $.extend(true, tempObj, state.optionConfigObj[payload.configId][centerArr[i]])
+          }
+          state.currOptionSel = $.extend(state.currOptionSel, tempObj)
+        }
+      },
+      setCurrentUserDeptId: function (state, currentUserDeptId) {
+        state.currentUserDeptId = currentUserDeptId
+      },
+      setDeptStructure: function (state, payload) {
+        state.deptStructure.serviceId = payload.serviceId
+        state.deptStructure.name = payload.name
+      },
+      setAppendOtherOptionIndex: function (state, payload) {
+        state.appendOtherOptionIndex[payload.id] = payload.index
+      },
+      setLeaveUnFinishedDialogShow: function (state, status) {
+        state.leaveUnFinishedDialogShow = status
+      },
+      setFormType: function (state, formType) {
+        state.formType = formType
+      },
+      setIdsKey: function (state, idsKey) {
+        state.idsKey = idsKey
+      }
+    },
+    actions: {
+      triggerEvent: eventTriggerUtils.triggerEvent,
+      operateLinkFiledData: fieldLinkTriggerUtils.operateLinkFiledData,
+      operateDetailComboxLinkFiledData: detailComboxFieldLinkTriggerUtils.operateLinkFiledData,
+      operateFormulaFiledData: fieldFormulaTriggerUtils.operateFormulaFiledData,
+      dataLoadInit: formDataLoadValidateUtil.dataLoadInit
+    }
+    
+  })
+})

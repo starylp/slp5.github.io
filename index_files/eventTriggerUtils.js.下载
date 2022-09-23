@@ -1,0 +1,831 @@
+define(['Vue', 'jquery', 'cookies', 'moment', 'cacheUtils'], function (Vue, $, Cookies, moment, cacheUtils) {
+  'use strict'
+  
+  let events = {
+    origins: {},
+    triggers: {},
+    triggerEventStatus: null,
+    triggerEventInitComptInfo: {}
+  }
+  
+  function initTriggerEventInitComptInfo() {
+    if (events.origins[-1]) {
+      var urlArray = events.origins[-1].map(function (item) {
+        return item.url
+      })
+      var flatArray = [];
+      for (var i = 0; i < urlArray.length; i++) {
+        flatArray = flatArray.concat(urlArray[i])
+      }
+      var comptArray = flatArray.filter(function (item) {
+        return item.hasOwnProperty("compt")
+      })
+      for (var i = 0; i < comptArray.length; i++) {
+        events.triggerEventInitComptInfo[comptArray[i].cid] = 0
+      }
+    }
+  }
+  
+  function setTriggerEventInitComptInfo(id, _this) {
+    if(events.triggerEventInitComptInfo[id] === 0) {
+      events.triggerEventInitComptInfo[id] = 1
+    }
+    setTriggerEventStatus(_this)
+  }
+  
+  function setTriggerEventStatus(_this) {
+    var dataArr = []
+    if (!Object.values) {
+      dataArr = Object.keys(events.triggerEventInitComptInfo).map(function (key) {
+        return events.triggerEventInitComptInfo[key]
+      })
+    } else {
+      dataArr = Object.values(events.triggerEventInitComptInfo)
+    }
+    var arr = dataArr.filter(function (item) {
+      return item === 0
+    })
+    if (arr.length === 0) {
+      // false 说明执行没有初始化好就执行了triggerEvent，现在初始化好了，再执行一下
+      if (events.triggerEventStatus === false){
+        _this.$store.dispatch('triggerEvent', {widget: {config: {id: -1, inDetailGroupIndex: -1}, pid: 0, id: -1}})
+      }
+      events.triggerEventStatus = true
+    }
+  }
+  
+  /**根据组件id找出当前组件widget，如果detailRowIndex有值，则找明细这一行的组件，如果没值则找第一行*/
+  function getComptWidgetByConfigId(state, cid, detailRowIndex) {
+    if (detailRowIndex === undefined) {
+      detailRowIndex = 0
+    }
+    // 对需要拆分字段组件获取ID，如日期区间1_0,1_1， 对于_0、_1分别对应开始时间、结束时间
+    var cidStr = new String(cid)
+    if (cidStr.indexOf("_") !== -1) {
+      var cidArr = cidStr.split('_')
+      cid = cidArr[0]
+    }
+    
+    for (let widget of state.widgets['0'].children) {
+      if (widget.config.id == cid) {
+        return widget
+      }
+      
+      if (widget.config.compt === 'detailcombox') {
+        if (detailRowIndex > (widget.children.length - 1)) {
+          continue
+        }
+        for (let subWidget of widget.children[detailRowIndex]) {
+          if (subWidget.config.id == cid) {
+            return subWidget
+          }
+        }
+      }
+    }
+    return null
+  }
+  
+  /** 获取当前组件的值和组件名 */
+  function getComptValueInfo(isDetailPop, pcid, cid, detailRowIndex) {
+    if (detailRowIndex === undefined) {
+      detailRowIndex = 0
+    }
+    
+    // {pcid:{rows:[{cid:{eventRef},cid2:{}}, {cid:{}}], eventRef, popEventRef, waitAdd:{cid:{rowNum, addFinished}}}
+    if (!events.triggers[pcid]) {
+      return null
+    }
+    var cidStr = new String(cid)
+    if (cidStr.indexOf("_") !== -1) {
+      var cidArr = cidStr.split('_')
+      cid = cidArr[0]
+    }
+    let trigger = events.triggers[pcid].rows[detailRowIndex][cid]
+    if (!trigger) {
+      return null
+    }
+    if (isDetailPop && pcid) {
+      if (!trigger.popEventRef) {
+        return null
+      }
+      return {comptName: trigger.popEventRef.$parent.widget.config.compt, values: trigger.popEventRef.triggerGetComptValueEvent()}
+    }
+  
+    if (!trigger.eventRef) {
+      return null
+    }
+    return {comptName: trigger.eventRef.$parent.widget.config.compt, values: trigger.eventRef.triggerGetComptValueEvent()}
+  }
+  
+  /**根据pid和id从state中找出当前id所在明细组件中的哪一行*/
+  function getRowIndexInDetailById(state, wpid, wid) {
+    if (wpid === 0) {
+      return 0
+    }
+    
+    let rowIndex = -1
+    root:for (let [n, row] of state.widgets[wpid].children.entries()) {
+      for (let r of row) {
+        if (r.id === wid) {
+          rowIndex = n
+          break root
+        }
+      }
+    }
+    return rowIndex
+  }
+  
+  /** 判断是否是在 移动端/学习通 子表单某一行的弹窗编辑组件 */
+  function isDetailPopCompt(state, wpid, compose) {
+    if (!wpid || !compose) {
+      return false
+    }
+    
+    if (compose === 'col') {
+      let pconfig = state.widgets[wpid].config
+      if (pconfig.hasOwnProperty('displayStyle') && pconfig.displayStyle.hasOwnProperty('pcDisplayStyle')
+          && pconfig.displayStyle.pcDisplayStyle === 'row') {
+        return true
+      }
+    }
+    
+    return false
+  }
+  
+  /**触发相应组件是否在加载数据中*/
+  function triggerLoading(config, efieldPcid, rowIndex, isLoading) {
+    for (let res of config.response) {
+      let resPcid = res.pcid || 0
+      let ptrigger = events.triggers[resPcid]
+      if (!ptrigger) {
+        continue
+      }
+      
+      // 触发事件的字段是主字段
+      if (!efieldPcid) {
+        // 返回值字段是主字段，只更新一条记录
+        if (!resPcid && ptrigger.rows[0][res.cid]) {
+          ptrigger.rows[0][res.cid].eventRef.triggerLoadingEvent(isLoading)
+        } else {
+          // 返回值字段是子字段，更新多条记录
+        }
+      } else {
+        // 子表单内的触发操作，只更新当前这一条的记录
+        ptrigger.rows[rowIndex][res.cid] && ptrigger.rows[rowIndex][res.cid].eventRef &&
+        ptrigger.rows[rowIndex][res.cid].eventRef.triggerLoadingEvent(isLoading)
+      }
+    }
+  }
+  
+  /**将http请求返回的结果值转换成组件所需要的值*/
+  function convertResponseValToComptVal(resComptName, val) {
+    // 返回值是数组类型的组件
+    let multiValCompts = ['selectmultibox', 'contact']
+    
+    // 如果组件所需要的值不是数据, 返回字符串值
+    if (!multiValCompts.includes(resComptName)) {
+      if (Array.isArray(val)) {
+        val = (val.length > 0) ? val[0] : ''
+      }
+      return val
+    }
+    // 联系人组件处理
+    if (resComptName === 'contact') {
+      if ($.trim(val) === '' || (val && val.length === 0)) {
+        val = []
+      } else {
+        val = JSON.parse(val)
+      }
+    }
+    // 如果组件所需要的值是数组, 返回数组值
+    if (!Array.isArray(val)) {
+      val = [val]
+    }
+    return val
+  }
+  
+  /**
+   * 数据联动触发
+   */
+  function dataLoadInit(context, widget, value, dataType) {
+    //根据不同的组件构造value
+    var val = '', valArr = []
+    try {
+      switch (widget.config.compt) {
+        case 'belonger':
+        case 'contact':
+          if (!value instanceof Array) {
+            value = JSON.parse(value)
+          }
+          for (var i = 0; i < value.length; i++) {
+            valArr.push(value[i].puid)
+          }
+          val = valArr.join(',')
+          break
+        case 'department':
+          if (!value instanceof Array) {
+            value = JSON.parse(value)
+          }
+          for (var i = 0; i < value.length; i++) {
+            valArr.push(value[i].departmentId)
+          }
+          val = valArr.join(',')
+          break
+        case 'selectbox':
+        case 'checklist':
+        case 'radiobutton':
+        case 'selectmultibox':
+          if (!value instanceof Array) {
+            value = JSON.parse(value)
+          }
+          for (var i = 0; i < value.length; i++) {
+            valArr.push(value[i].val)
+          }
+          val = valArr.join(',')
+          break
+        default:
+          val = $.trim(value)
+      }
+    } catch (e) {
+      val = $.trim(value)
+    }
+    //存在当前字段被做为数据联动条件字段
+    context.dispatch('operateLinkFiledData', {
+      id: widget.id,
+      compt: widget.config.compt,
+      configId: widget.config.id,
+      inDetailGroupIndex: widget.config.inDetailGroupIndex,
+      value: val
+    })
+  
+    context.dispatch('dataLoadInit', {widget: widget, compose:'col', value: val, dataType: dataType})
+  }
+  
+  /**
+   * 获取触发组件配置信息
+   */
+  function acquireContactMultipleConfig(state, response) {
+    var contactMultipleConfig = {}
+    for (var res of response) {
+      var resWidget = getComptWidgetByConfigId(state, res.cid), resComptName = resWidget.config.compt
+      if (resComptName !== 'contact') {
+        continue
+      }
+      contactMultipleConfig[resWidget.config.id] = resWidget.config.fields[0].fieldType.multiple || false
+    }
+    return contactMultipleConfig
+  }
+  
+  /**
+   * 赋值优先级判断
+   */
+  function setValueJudge(cid, context, widget, config, val) {
+    var result = {
+      val: val,
+      mustLinkedData: true,
+      dataType: context.state.comptDataType['eventChange']
+    }
+    
+    var valStr = '', values = widget.config.fields[0].values
+    if (values && values.length > 0) {
+      switch (widget.config.compt) {
+        case 'radiobutton':
+        case 'selectbox':
+        case 'checklist':
+        case 'selectmultibox':
+        case 'department':
+        case 'belonger':
+        case 'contact':
+          valStr = JSON.stringify(values)
+          break
+        default:
+          if (values && values.length > 0) {
+            var cidStr = new String(cid)
+            if (cidStr.indexOf('_') !== -1) {
+              var cidArr = cidStr.split('_')
+              cid = cidArr[0]
+              var fieldId = parseInt(cidArr[1])
+              if (values.length >= fieldId && values[fieldId]) {
+                valStr = values[fieldId].val
+              }
+            } else {
+              valStr = values[0].val
+            }
+        
+          } else {
+            valStr = ''
+          }
+      }
+    }
+    // 进入表单赋值优先级，表单前台缓存、表单填写缓存存在的值优先级大于前端事件, 默认值优先级小于前端事件, 即存在数据联动、公式编辑、常用公式、自定义默认值，..., 均会被数据覆盖
+    // 存在前端缓存的情况，直接赋值，不是根据制定类型取值
+    var formInNum = cacheUtils.getFormInNum()
+    if (config.efield.cid && config.efield.cid === -1
+        && ((!$.isEmptyObject(context.state.launchFillValues) && context.state.launchFillValues.indexOf(widget.config.id) !== -1) // 发起填报、发起审批，发起填报、发起审批存在赋空值
+            || (widget.config.latestValShow && /^selectbox|radiobutton|checklist|selectmultibox$/.test(widget.config.compt))// 选项类缓存缓存上次选择内容,优先级高于前端事件、默认值
+            || (context.state.formCache && formInNum && formInNum > 1 && $.trim(valStr) !== '' && $.trim(valStr) !== '[]'))) {
+      // 当前值与新获取的前端事件的值相同时，不触发数据联动
+      if ($.trim(val) === $.trim(valStr)) {
+        result.mustLinkedData = false
+      }
+      context.state.comptDataTypeValue[widget.config.id] = context.state.comptDataType['eventEnter']
+      // 当且仅当开启缓存后或组件未开启缓存但启用了同时绑定了默认值类型数据时，进入表单时前端事件不能修改当前值
+      result.val = valStr ? valStr : ''
+      result.dataType = context.state.comptDataType['eventEnter']
+    }
+    return result
+  }
+  
+  /**
+   * 前端赋值逻辑，修改兼容单个组件拆分成多个组件进行前端事件赋值
+   * @param cid ：组件不拆分：1，2，3 组件拆分成多个组件赋值：1_0、1_1、1_2(其中组件Id_field第几个)
+   * @param targetCidData： 通过ref获取数据
+   * @param compt 组件名字
+   * @param val ： 需要赋值的值
+   * @param response ： 配置在后台的前端配置数据
+   * @param eventType 事件触发类型，子表单存在不一样的逻辑，将赋值逻辑抽取后，由类型进行判断
+   */
+  function triggerDetailEventByCompt(cid, targetCidData, compt, val, response, eventType) {
+    if (!targetCidData) {
+      return
+    }
+    switch (compt) {
+      case 'datetimerange': // 需要拆分，赋值根据field[0]下的顺序配置数据
+      case 'leavekit':
+      case 'overtimekit':
+      case 'gooutkit':
+        // 日期范围组件组件拆分成多个组件赋值：1_0、1_1、1_2(其中组件Id_field第几个)
+        var cidStr = new String(cid)
+        if (cidStr.indexOf('_') !== -1) {
+          var cidArr = cidStr.split('_')
+          cid = cidArr[0]
+        }
+        if (eventType === 'popEvent') {
+          if (targetCidData[cid] && targetCidData[cid].popEventRef) {
+            targetCidData[cid].popEventRef.triggerValueEventByType(val, cidArr[1])
+          }
+        } else {
+          if (targetCidData[cid] && targetCidData[cid].eventRef) {
+            targetCidData[cid].eventRef.triggerValueEventByType(val, cidArr[1])
+          }
+        }
+        break
+      default: // 默认不拆分组件，一个Id即赋值一个前端配置
+        if (eventType === 'popEvent') {
+          if (targetCidData[cid] && targetCidData[cid].popEventRef) {
+            targetCidData[cid].popEventRef.triggerValueEvent(val)
+          }
+        } else {
+          if (targetCidData[cid] && targetCidData[cid].eventRef) {
+            targetCidData[cid].eventRef.triggerValueEvent(val)
+          }
+        }
+        break
+    }
+    
+  }
+  
+  /**
+   * 组件搜索条件拼接
+   * 日期范围组件组件拆分成多个组件赋值：1_0、1_1、1_2(其中组件Id_field第几个)
+   */
+  function setUrlParameter(comptValInfo, url) {
+    let vals = []
+    switch (comptValInfo.comptName) {
+      case 'overtimekit':
+      case 'gooutkit':
+      case 'datetimerange': // 需要拆分，赋值根据field[0]下的顺序配置数据
+        var vs = comptValInfo.values[0]
+        var cidStr = new String(url.cid)
+        var type = 0
+        // 获取拆分字段的值的配置
+        if (cidStr.indexOf('_') !== -1) {
+          var cidArr = cidStr.split('_')
+          type = parseInt(cidArr[1])
+        }
+        // 根据配置值获取指定的值，并转换成时间错
+        var timestamp = 0
+        if (type === 0) {
+          timestamp = moment(vs.svalue).valueOf()
+        } else if (type === 1) {
+          timestamp = moment(vs.evalue).valueOf()
+        }
+        vals.push(timestamp)
+        break
+      case 'leavekit':
+        var vs = comptValInfo.values[0]
+        var cidStr = new String(url.cid)
+        var type = 0
+        // 获取拆分字段的值的配置
+        if (cidStr.indexOf('_') !== -1) {
+          var cidArr = cidStr.split('_')
+          type = parseInt(cidArr[1])
+        }
+        // 根据配置值获取指定的值，并转换成时间错
+        var timestamp = 0
+        if (type === 1) {
+          timestamp = moment(vs.svalue).valueOf()
+        } else if (type === 2) {
+          timestamp = moment(vs.evalue).valueOf()
+        }
+        vals.push(timestamp)
+        break
+      case 'dateinput':
+        var vs = comptValInfo.values
+        for (let v of vs) {
+          var timestamp = moment(v.val).valueOf()
+          vals.push(timestamp)
+        }
+        break
+      case 'contact':
+      case 'belonger': {
+        let vs = comptValInfo.values
+        for (let v of vs) {
+          if (url.ftype === 'uname') {
+            vals.push(v.uname)
+          } else if (url.ftype === 'uid') {
+            vals.push(v.puid)
+          }
+        }
+        break
+      }
+      case 'fileupload': {
+        let vs = comptValInfo.values
+        for (let v of vs) {
+          vals.push(v.objectId)
+        }
+        break
+      }
+      case 'location': {
+        let vs = comptValInfo.values
+        for (let v of vs) {
+          vals.push(JSON.stringify(v))
+        }
+        break
+      }
+      default: {
+        let vs = comptValInfo.values
+        for (let v of vs) {
+          vals.push(v.val)
+        }
+        break
+      }
+    }
+    return vals
+  }
+  
+  return {
+    /**初始化events配置信息*/
+    initEvents: function (state, payload) {
+      if (!payload || payload.length === 0) {
+        return
+      }
+      
+      var defaultEventConfig = {efield: {label: ''}, url: [], urlHeaders: [], response: []}
+      // 过滤配置中的组件 如果找不到当前组件则过滤掉
+      root:for (var i = 0; i < payload.length; i++) {
+        var event = payload[i]
+        
+        if (!(event.config && event.config.efield)) {
+          continue
+        }
+        
+        //过滤efield
+        var efieldCid = event.config.efield.cid
+        if (efieldCid > 1) {
+          let efieldWidget = getComptWidgetByConfigId(state, efieldCid)
+          if (!efieldWidget) {
+            continue
+          }
+        }
+        
+        //过滤url
+        if (event.config.url.length === 0) {
+          continue
+        }
+        for (let url of event.config.url) {
+          if (url.type === 2 && url.cid > 0) {
+            let urlWidget = getComptWidgetByConfigId(state, url.cid)
+            if (!urlWidget) {
+              continue root
+            }
+          }
+        }
+        
+        //过滤response
+        let response = event.config.response
+        if (response.length === 0) {
+          continue
+        }
+        for (let response of event.config.response) {
+          let responseWidget = getComptWidgetByConfigId(state, response.cid)
+          if (!responseWidget) {
+            continue root
+          }
+        }
+        
+        if (!events.origins[efieldCid]) {
+          events.origins[efieldCid] = []
+        }
+        let eventConfig = $.extend({}, defaultEventConfig, event.config)
+        events.origins[efieldCid].push(eventConfig)
+
+        // cid ：组件不拆分格式：1，2，3 组件拆分成多个组件赋值：1_0、1_1、1_2(其中组件Id_field第几个)
+        var efieldCidStr = new String(efieldCid)
+        // 追加被拆分的组件信息
+        if (efieldCidStr.indexOf("_") !== -1) {
+          var efieldCidStr = efieldCidStr.split("_")
+          events.origins[efieldCidStr[0]].push(eventConfig)
+        }
+      }
+      initTriggerEventInitComptInfo()
+    },
+    
+    /** eventTrigger组件创建后，对triggers数据进行初始化 */
+    createdEventTrigger: function (state, payload) {
+      /*
+        {pcid:{rows:[{cid:{eventRef},cid2:{}}, {cid:{}}], eventRef, popEventRef, waitAdd:{cid:{rowNum, addFinished}}}
+        popEventRef 移动端横版编辑某一行记录的时候,会弹出窗口,并临时创建竖版组件,此时用来记录竖版的组件ref
+       */
+      if ('detailcombox' === payload.widget.config.compt) {
+        let pcid = payload.widget.config.id, ptrigger = events.triggers[pcid]
+        if (!ptrigger) {
+          ptrigger = {rows: [], eventRef: payload.eventRef, waitAdd: {}}
+          events.triggers[pcid] = ptrigger
+          setTriggerEventInitComptInfo(payload.widget.config.id, payload.eventRef)
+          return
+        }
+        ptrigger.eventRef = payload.eventRef
+        setTriggerEventInitComptInfo(payload.widget.config.id, payload.eventRef)
+        return
+      }
+      
+      let pcid = 0, isDetailPop = false
+      if (payload.widget.pid > 0) {
+        pcid = state.widgets[payload.widget.pid].config.id
+        isDetailPop = isDetailPopCompt(state, payload.widget.pid, payload.compose)
+      }
+      let ptrigger = events.triggers[pcid], cid = payload.widget.config.id
+      if (!ptrigger) {
+        ptrigger = {rows: [], waitAdd: {}}
+        events.triggers[pcid] = ptrigger
+      }
+      //初始化主字段
+      if (!pcid) {
+        if (ptrigger.rows.length === 0) {
+          ptrigger.rows.push({})
+        }
+        ptrigger.rows[0][cid] = {eventRef: payload.eventRef}
+        setTriggerEventInitComptInfo(payload.widget.config.id, payload.eventRef)
+        return
+      }
+      //初始化子字段
+      let rowIndex = getRowIndexInDetailById(state, payload.widget.pid, payload.widget.id)
+      if (rowIndex > (ptrigger.rows.length - 1)) {
+        for (let n = (rowIndex - (ptrigger.rows.length - 1)); n > 0; n--) {
+          ptrigger.rows.push({})
+        }
+      }
+      if (!ptrigger.rows[rowIndex][cid]) {
+        ptrigger.rows[rowIndex][cid] = {}
+      }
+      if (isDetailPop) {
+        ptrigger.rows[rowIndex][cid]['popEventRef'] = payload.eventRef
+      } else {
+        ptrigger.rows[rowIndex][cid]['eventRef'] = payload.eventRef
+      }
+      // 如果waitAdd下有值，则说明是执行触发后明细表单动态创建的，当达到创建的行数后执行addFinished函数来实现promise的执行
+      if (ptrigger.waitAdd.hasOwnProperty(cid)) {
+        if (ptrigger.waitAdd[cid].rowNum === rowIndex) {
+          ptrigger.waitAdd[cid].addFinished()
+          delete ptrigger.waitAdd[cid]
+        }
+      }
+      setTriggerEventInitComptInfo(payload.widget.config.id, payload.eventRef)
+    },
+    
+    /** 执行触发事件操作 */
+    triggerEvent: function (context, payload) {
+      // 没有初始化完成为null
+      if (events.triggerEventStatus === null) {
+        events.triggerEventStatus = false
+      }
+      let configId = payload.widget.config.id
+      if (!events.origins.hasOwnProperty(configId)) {
+        return
+      }
+      let configs     = events.origins[configId],
+          wpid        = payload.widget.pid,
+          wid         = payload.widget.id,
+          rowIndex    = getRowIndexInDetailById(context.state, wpid, wid),
+          isDetailPop = isDetailPopCompt(context.state, wpid, payload.compose)
+
+      for (let config of configs) {
+        // 从根据url的配置,从组件中提取对应的值,生成请求url串
+        let link = '', efieldPcid = config.efield.pcid || 0
+        for (let i = 0; i < config.url.length; i++) {
+          let url = config.url[i]
+          //纯文字,直接添加
+          if (url.type === 1) {
+            link += url.label
+            continue
+          }
+          //不是组件类型,可能配置异常
+          if (url.type !== 2) {
+            continue
+          }
+          switch (parseInt(url.cid)) {
+              //配置的填写人
+            case -1: {
+              let uname = Cookies.get('oa_name')
+              if (uname) {
+                link += uname
+              }
+              continue
+            }
+              // 配置的填写人uid
+            case -2: {
+              let uid = Cookies.get('oa_uid')
+              if (uid) {
+                link += uid
+              }
+              continue
+            }
+              //配置的单位id
+            case -3: {
+              let fid = context.state.formFid
+              if (fid) {
+                link += fid
+              }
+              continue
+            }
+          }
+          // 从组件中提取对应的值. 触发字段是主字段，url串中的字段也只能是主字段; 触发字段是子字段，url串中的字段主，子都可能有
+          let comptValInfo = null
+          //触发字段是主字段
+          if (!efieldPcid) {
+            comptValInfo = getComptValueInfo(isDetailPop, 0, url.cid, rowIndex)
+          } else {
+            //触发字段是子字段
+            let urlPcid = url.pcid || 0
+            //根据urlPcid, rowIndex,获取主/子表单rowIndex那一行的组件
+            comptValInfo = getComptValueInfo(isDetailPop, urlPcid, url.cid, rowIndex)
+          }
+          
+          if (!comptValInfo) {
+            return
+          }
+          let vals = setUrlParameter(comptValInfo, url)
+          link += encodeURIComponent(vals.join(','))
+        }
+
+        triggerLoading(config, efieldPcid, rowIndex, true)
+
+        // 前端事件提交未完成校验
+        if (context.state.hasOwnProperty("currFormValueFieldVerify")
+            && context.state.currFormValueFieldVerify.hasOwnProperty("events")
+            && config.hasOwnProperty("response")) {
+          var inDetailGroupIndex = -1
+          if (payload.widget.config.hasOwnProperty("inDetailGroupIndex")) {
+            inDetailGroupIndex = payload.widget.config.inDetailGroupIndex
+          }
+          for (var res of config.response) {
+            context.state.currFormValueFieldVerify.events[res.cid] = {
+              id: res.cid,
+              type: 5,
+              compt: res.compt,
+              inDetailGroupIndex: inDetailGroupIndex}
+          }
+        }
+        
+        var contactMultipleConfig = acquireContactMultipleConfig(context.state, config.response)
+
+        $.post('front/open/share/apps/forms/fore/events/requesturl',
+            {url: link, response: JSON.stringify(config.response), urlHeaders: JSON.stringify(config.urlHeaders),
+              contactMultipleConfig: JSON.stringify(contactMultipleConfig)},
+            function (resp) {
+              /*
+              {pcid:{rows:[{cid:{eventRef},cid2:{}}, {cid:{}}]}, eventRef, waitAdd:{cid:{rowNum, addFinished}}}
+              触发字段是主字段,返回字段是主字段,是一条记录;返回字段是子字段,是多条记录
+              触发字段是子字段,返回字段也只能是子字段，并且是该行的一条记录
+               */
+              if (!resp.success || !resp.data || resp.data.length === 0) {
+                triggerLoading(config, efieldPcid, rowIndex, false)
+              }
+              
+              // 如果有多个返回值是多条记录，先将明细要触发的事件信息记录下来，在最后执行触发，避免相同的明细表单多次触发导致最终赋值异常 {eventRef: ptrigger.eventRef, rowLength: val.length}
+              let detailCreateRowEvents = {}
+              
+              for (let res of config.response) {
+                // 接口调用失败或无返回值, 都按空值来处理
+                let data = resp.data && resp.data.find(d => d.cid == res.cid), val = data && data.val
+                let resWidget = getComptWidgetByConfigId(context.state, res.cid), resComptName = resWidget.config.compt
+                if (val === undefined) {
+                  // 空字符串不能直接赋值给联系人等数据结构为数组的组件，直接赋值会导致后台格式转换异常
+                  switch (resComptName) {
+                    case 'department':
+                    case 'belonger':
+                    case 'contact':
+                      val = []
+                      break
+                    default:
+                      val = ''
+                  }
+                }
+                
+                let resPcid = res.pcid || 0
+                let ptrigger = events.triggers[resPcid]
+                if (!ptrigger) {
+                  continue
+                }
+
+                // 数据赋值优先级数据设置规则，数据库数据 > 缓存 >  前端事件 > 默认值（自定义默认值、数据联动、公式编辑，...）
+                var result = setValueJudge(res.cid, context, resWidget, config, val)
+                val = result.val
+                // 触发事件的字段是主字段
+                if (!efieldPcid) {
+                  // 返回值字段是主字段，只更新一条记录
+                  if (!resPcid) {
+                    val = convertResponseValToComptVal(resComptName, val)
+                    triggerDetailEventByCompt(res.cid, ptrigger.rows[0], resComptName, val, res, 'event')
+                  } else {
+                    // 返回值字段是子字段，更新多条记录; 如果返回值不是数组，转换成数组
+                    if (!Array.isArray(val)) {
+                      val = [val]
+                    }
+                    
+                    let detailWidgets = getComptWidgetByConfigId(context.state, resPcid)
+                    if (!detailWidgets) {
+                      continue
+                    }
+                    // 返回值数组长度 不等于 子表单的行数; 需要明细表单去创建（或删除）子表单, 等完成后，再触发更新值操作
+                    if (detailWidgets.children.length !== val.length) {
+                      let resolve = null,
+                          promise = new Promise(function (res) {
+                            resolve = res
+                          })
+                      promise.then(function () {
+                        for (let [n, v] of val.entries()) {
+                          v = convertResponseValToComptVal(resComptName, v)
+                          triggerDetailEventByCompt(res.cid, ptrigger.rows[n], resComptName, v, res, 'event')
+                        }
+                      })
+                      // 这里设置promise，等子表单创建的行数等于rowNum时，会执行addFinished函数，promise会执行批量更新值操作
+                      ptrigger.waitAdd[res.cid] = {rowNum: (val.length - 1), addFinished: resolve}
+                      // 记录到detailCreateRowEvents里边，最response循环外执行触发事件，避免相同的明细多次触发
+                      if (!detailCreateRowEvents.hasOwnProperty(resPcid)) {
+                        detailCreateRowEvents[resPcid] = {eventRef: ptrigger.eventRef, rowLength: val.length}
+                      } else {
+                        // rowLength记录明细组件最大的行，最终按个这行数来创建缺失的行
+                        if (detailCreateRowEvents[resPcid].rowLength !== val.length) {
+                          detailCreateRowEvents[resPcid].rowLength = val.length
+                        }
+                      }
+                    } else {
+                      // 返回值数组长度等于子表单的行数， 直接批量更新组件的值
+                      for (let [n, v] of val.entries()) {
+                        v = convertResponseValToComptVal(resComptName, v)
+                        triggerDetailEventByCompt(res.cid, ptrigger.rows[n], resComptName, v, res, 'event')
+                      }
+                    }
+                  }
+                } else {
+                  // 子表单内的触发操作，只更新当前这一条的记录;  如果返回的是数组，只取第一条值
+                  val = convertResponseValToComptVal(resComptName, val)
+                  if (isDetailPop) {
+                    triggerDetailEventByCompt(res.cid, ptrigger.rows[rowIndex], resComptName, val, res, 'popEvent')
+                  } else {
+                    triggerDetailEventByCompt(res.cid, ptrigger.rows[rowIndex], resComptName, val, res, 'event')
+                  }
+                }
+                if (result.mustLinkedData) {
+                  dataLoadInit(context, resWidget, val, result.dataType)
+                }
+              }
+              
+              // 如果明细表单行数少于返回值的行数，这里统一触发创建缺少的行
+              for (let pcid in detailCreateRowEvents) {
+                detailCreateRowEvents[pcid].eventRef.triggerDetailEvent(detailCreateRowEvents[pcid].rowLength)
+                delete detailCreateRowEvents[pcid]
+              }
+
+              // 前端事件提交未完成校验
+              if (context.state.hasOwnProperty("currFormValueFieldVerify")
+                  && context.state.currFormValueFieldVerify.hasOwnProperty("events")
+                  && config.hasOwnProperty("response")) {
+                for (var res of config.response) {
+                  delete context.state.currFormValueFieldVerify.events[res.cid]
+                }
+              }
+            })
+      }
+    },
+    getTriggerEvent: function (context, payload) { // 当前组件是否配置了前端事件
+      var configId = payload.widget.config.id
+      if (!events.origins.hasOwnProperty(configId)) {
+        return false
+      }
+      return true
+    }
+  }
+})

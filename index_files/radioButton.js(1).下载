@@ -1,0 +1,469 @@
+define(['jquery', 'util', 'VueUtils'], function ($, util, VueUtils) {
+  'use strict'
+  return function (widget) {
+
+    function reloadOptionSel(_this) {
+      var score = ''
+      for (var i = 0; i < _this.options.length; i++) {
+        var option = _this.options[i]
+        if (option.checked) {
+          score = option.score
+          break
+        }
+      }
+      _this.$store.commit('calculateScore', {
+        id: _this.widget.id,
+        pid: _this.widget.pid,
+        configId: _this.widget.config.id,
+        value: score,
+        inDetailGroupIndex: _this.widget.config.inDetailGroupIndex,
+        fromDetail: !!_this.widget.config.fromDetail
+      })
+      _this.$store.commit('setCalculableStatus')
+
+      var index = 0
+      for (var i = 0; i < _this.value.length; i++) {
+        if (_this.value[i].isOther) {
+          _this.options[_this.options.length - 1].checked = true
+          _this.otherValue = _this.value[i].val
+          index = _this.options.length - 1
+        } else {
+          for (var j = 0; j < _this.options.length; j++) {
+            if (_this.value[i].val === _this.options[j].title) {
+              _this.options[j].checked = true
+              index = j
+              break
+            }
+          }
+        }
+      }
+      if (_this.options[index].checked) {
+        _this.$store.commit('setCurrOptionSel', {
+          id: _this.widget.id,
+          configId: _this.widget.config.id,
+          inDetailGroupIndex: _this.widget.config.inDetailGroupIndex,
+          idxArr: [index]
+        })
+      } else {
+        _this.$store.commit('setCurrOptionSel', {
+          id: _this.widget.id,
+          configId: _this.widget.config.id,
+          inDetailGroupIndex: _this.widget.config.inDetailGroupIndex,
+          idxArr: []
+        })
+      }
+      _this.$forceUpdate()
+      _this.errorInfo.show = _this.value.length <= 0
+    }
+  
+    function valShowFun(_this) {
+      if ((!_this.widget.config.hasOwnProperty('optionBindInfo') || !_this.widget.config.optionBindInfo.isBinded) &&
+          (!_this.widget.config.hasOwnProperty('linkInfo') || !_this.widget.config.linkInfo.linked) &&
+          (!_this.widget.config.hasOwnProperty('optionsLoadFromUrl') || !_this.widget.config.optionsLoadFromUrl.isLoadFromUrl)) {
+        initValueShowAndOptionSelectStatus(_this)
+        if (_this.isShow) {
+          for (var i = 0; i < _this.options.length; i++) {
+            var option = _this.options[i]
+            if (option.checked) {
+              _this.initSelectVal(i, true)
+            }
+          }
+        }
+      }
+    }
+  
+    function initValueShowAndOptionSelectStatus(_this) {
+      _this.options = _this.widget.config.fields[0].options
+      for (var i = 0; i < _this.options.length; i++) {
+        _this.options[i].checked = false
+      }
+    
+      for (var i = 0; i < _this.value.length; i++) {
+        if (_this.value[i].isOther) {
+          _this.options[_this.options.length - 1].checked = true
+          _this.otherValue = _this.value[i].val
+          _this.value[i].score = _this.options[_this.options.length - 1].score
+        } else {
+          for (var j = 0; j < _this.options.length; j++) {
+            if (_this.value[i].val === _this.options[j].title) {
+              _this.options[j].checked = true
+              _this.value[i].score = _this.options[j].score
+              _this.value[i].className = _this.options[j].className
+              _this.value[i].color = _this.options[j].color
+              break
+            }
+          }
+        }
+      }
+    }
+    
+    return {
+      id: widget.id,
+      template: [
+        '<div>',
+        '<div class="cell_cont" v-show="isShow && hasAuthority">',
+          /*文字选项*/
+          '<span class="cell_text" v-show="!optionColor">{{value|valueShow}}</span>',
+          /*彩色选项*/
+          '<i v-show="valuesShow.length>0&&optionColor" v-for="valObj in valuesShow" :class="valObj.className" :style="{\'background\': optionColor?valObj.color:\'\'}" >{{valObj.val}}</i>',
+          '<span class="cell_nodata" v-show="valuesShow.length<=0"></span>',
+        '</div>',
+        '<div style="display: none;">{{relateFieldValueStatus}}</div>',
+        '<event-trigger :widget="widget" :compose="\'row\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event="triggerValueEvent" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          lastRelateValue: [],
+          valShow: '',
+          errorInfo: {
+            alertMsg: '',
+            verifyMsg: '',
+            show: false
+          },
+          initComplete: false,
+          clickedForRelateFiled: false
+        }
+      },
+      components: {
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue')
+      },
+      props: {
+        onlySetValue: {
+          //在明细内弹出iframe并加载当前组件时 只显示组件值设置区域标识值 横排明细时使用
+          type: Boolean,
+          default: function () {
+            return false
+          }
+        }
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          // this.loadStatus = isLoading
+        },
+        triggerValueEvent: function (val) {
+          // this.loadStatus = false
+          let hasIsOther = -1, found = false
+          for (var i = 0; i < this.options.length; i++) {
+            let option = this.options[i]
+            if (option.hasOwnProperty('isOther')) {
+              option.checked = false
+              hasIsOther = i
+              continue
+            }
+            if (option.title === val) {
+              found = true
+              option.checked = true
+              this.value = [{val: val}]
+              this.valShow = val
+            }else{
+              option.checked = false
+            }
+          }
+    
+          if (found) {
+            return
+          }
+    
+          // 有其他选项设置
+          if (hasIsOther !== -1) {
+            this.options[hasIsOther].checked = true
+            this.value = [{val:val, isOther: true}]
+            this.valShow = val
+          }
+        },
+        triggerGetValueEvent:function (callback) {
+          callback(this.value)
+        },
+        $reloadValueFun: function (vueObj) {
+          //子表单横排时打开某行子组件后依次给对应子表彰表格显示字段赋值
+          this.value = vueObj.value
+          reloadOptionSel(this)
+          return this.verified
+        },
+        initSelectVal: function (index, howeverClick) {
+          if (this.readonly && !howeverClick) {
+            return
+          }
+          var options = this.options
+          if (options[index].checked) {
+            this.$store.commit('setRowCurrOptionSel', {
+              id: this.widget.id,
+              configId: this.widget.config.id,
+              inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+              idxArr: [index]
+            })
+          }
+        }
+      },
+      watch: {
+        value: function () {
+          if (this.onlySetValue) {
+            return
+          }
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          reloadOptionSel(this)
+        }
+      },
+      computed: {
+        textWidth: function() {//vue方式动态改变输入框长度
+          return function (value) {
+            if (value === '' || value === 0 || value.length < 4) {
+              return '48px'
+            } else {
+              return String(value).length * 12 + 'px'
+            }
+          }
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          //无论是否必填，选中“其他选项”必须填写内容otherValue不为空
+          for (var i = 0; i < this.options.length; i++) {
+            if (this.options[i].checked && this.options[i].isOther) {
+              this.errorInfo.alertMsg = '其他选项未填写'
+              return $.trim(this.otherValue) !== ''
+            }
+          }
+          if (this.required) {
+            return this.value.length !== 0
+          }
+          return true
+        },
+        valuesShow: function () {
+          if (this.value.length <= 0) {
+            return []
+          }
+          var valArr = []
+          if (this.optionColor) {
+            for (var k = 0; k < this.value.length; k++) {
+              var data = {val: this.value[k].val, color: '', className: ''}
+              if (this.value[k].isOther) {
+                data.className = 'other_span'
+                valArr.push(data)
+                continue
+              }
+              var options = this.options
+              for (var x = 0; x < options.length; x++) {
+                if (options[x].title !== data.val) {
+                  continue
+                }
+                data.color = options[x].color
+                data.className = options[x].className
+                break
+              }
+              valArr.push(data)
+            }
+            return valArr
+          }
+          return this.value
+        },
+        optionColor: function () {
+          return this.widget.config.optionColor
+        },
+        options: function () {
+          return this.widget.config.fields[0].options
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          if (this.$store.getters.getCurrentType) {
+            return this.$store.getters.getReadonlyStatus
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === this.widget.config.inDetailGroupIndex) || !obj.hasOwnProperty('inDetailIndex')) && (!this.isPreview || !this.isInit)) {
+            var result = obj.fields[0].values
+            if (result && JSON.stringify(this.lastRelateValue) === JSON.stringify(result) && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+              this.value = []
+            }
+            if (result && JSON.stringify(this.lastRelateValue) !== JSON.stringify(result)) {
+              this.value = result
+              this.lastRelateValue = result
+              this.options = this.widget.config.fields[0].options
+              for (var i = 0; i < this.options.length; i++) {
+                this.options[i].checked = false
+              }
+              for (var i = 0; i < this.options.length; i++) {
+                var option = this.options[i]
+                option.checked = false
+                for (var j = 0; j < this.value.length; j++) {
+                  var v = this.value[j]
+                  if (option.title === v.val) {
+                    option.checked = true
+                    break
+                  }
+                }
+              }
+              var arr = []
+              for (var i = 0; i < this.value.length; i++) {
+                arr.push(this.value[i].val)
+              }
+              this.valShow = arr.join(',')
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        optionScoreShow: function () {
+          return this.widget.config.optionScoreShow
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          if (this.onlySetValue) {
+            return true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类似web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = this.$store.state.reloadValSubField
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            if (this.widget.pid > 0 && !this.$store.state.verifieds[this.widget.pid].isShow) {
+              //明细内子组件时 如果明细组件是隐藏状态时 当前子组件也要改成隐藏状态
+              showStatus = false
+            } else {
+              showStatus = true
+            }
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+  
+          if (showStatus && !this.clickedForRelateFiled && this.initComplete) {
+            this.clickedForRelateFiled = true
+            for (var i = 0; i < this.options.length; i++) {
+              var option = this.options[i]
+              if (option.checked) {
+                this.initSelectVal(i, true)
+              }
+            }
+          } else if (!showStatus) {
+            this.clickedForRelateFiled = false
+          }
+          
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            errMsg: this.errorInfo.alertMsg,
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        }
+      },
+      filters: {
+        valueShow: function (value) {
+          var valArr = []
+          for (var i = 0; i < value.length; i++) {
+            valArr.push(value[i].val)
+          }
+          return valArr.join(',')
+        }
+      },
+      created: function () {
+        this.value = this.widget.config.fields[0].values || []
+        if (this.widget.config.fields[0].hasOwnProperty('unchangeable')) {
+          this.widget.config.fields[0].editable = !this.widget.config.fields[0].unchangeable
+          delete this.widget.config.fields[0].unchangeable
+        }
+        var rev = this.$store.getters.getRelevance
+        if (rev != null && rev.hasOwnProperty(this.widget.config.id) && rev[this.widget.config.id]) {
+          this.value = [{val: rev[this.widget.config.id]}]
+        }
+
+        var arr = []
+        for (var i = 0; i < this.value.length; i++) {
+          arr.push(this.value[i].val)
+        }
+        this.valShow = arr.join(',')
+        valShowFun(this)
+      }
+    }
+  }
+})

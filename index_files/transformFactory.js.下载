@@ -1,0 +1,331 @@
+define(['Vue', 'jquery', 'util', 'fileUpload', 'imgBox', 'dateInput', 'editInput',
+        'editTextarea', 'selectBox', 'checkList', 'radioButton', 'selectMultiBox',
+        'captionText', 'numberInput', 'detail', 'contact', 'department', 'location',
+        'computeInput', 'autoNumber', 'liveVideo', 'belonger', 'signature', 'datetimeRange',
+        'leaveKit', 'overtimeKit', 'punchKit', 'gooutKit', 'multipleSelect', 'slider',
+        'areaMultiSelect', 'areaCheckbox', 'matrixRadio', 'matrixCheckbox', 'relatedAprv', 'button', 'relatedData',
+        'horizontalEditInput', 'horizontalEditTextarea', 'horizontalSelectBox', 'horizontalSelectMultiBox', 'horizontalRadioButton',
+        'horizontalCheckList', 'horizontalNumberInput', 'horizontalDateInput', 'horizontalDateTimeRange', 'horizontalComputeInput',
+        'horizontalContact', 'horizontalDepartment', 'horizontalImgBox', 'horizontalFileUpload',
+        'horizontalSlider', 'horizontalLiveVideo', 'horizontalLocation', 'horizontalMultipleSelect', 'horizontalRelatedData',
+        'horizontalSignature', 'horizontalCaptiontext', 'horizontalButton', 'richText', 'videoBox', 'horizontalVideoBox', 'publicUtils', 'imgOcr',
+        'leaveCancellationKit'],
+    function (Vue, $, util, fileUpload, imgBox, dateInput, editInput,
+              editTextarea, selectBox, checkList, radioButton, selectMultiBox,
+              captionText, numberInput, detail, contact, department, location,
+              computeInput, autoNumber, liveVideo, belonger, signature, datetimeRange,
+              leaveKit, overtimeKit, punchKit, gooutKit, multipleSelect, slider,
+              areaMultiSelect, areaCheckbox, matrixRadio, matrixCheckbox, relatedAprv, button, relatedData,
+              horizontalEditInput, horizontalEditTextarea, horizontalSelectBox, horizontalSelectMultiBox, horizontalRadioButton,
+              horizontalCheckList, horizontalNumberInput, horizontalDateInput, horizontalDateTimeRange, horizontalComputeInput,
+              horizontalContact, horizontalDepartment, horizontalImgBox, horizontalFileUpload,
+              horizontalSlider, horizontalLiveVideo, horizontalLocation, horizontalMultipleSelect, horizontalRelatedData,
+              horizontalSignature, horizontalCaptiontext, horizontalButton, richText, videoBox, horizontalVideoBox, publicUtils, imgOcr,
+              leaveCancellationKit) {
+      'use strict'
+      
+      /**
+       * 转换
+       *
+       * @param widgets
+       * @returns {Array}
+       */
+      function transform(widgets, inDetailGroupIndex, fromDetail, formType) {
+        var computedCompts = []
+        if (!widgets || widgets.length === 0) {
+          return computedCompts
+        }
+        
+        var generalId = publicUtils.generatorId() // 生成每批子组件的唯一标识id
+        
+        $.each(widgets, function (i, n) {
+          n.config['inDetailGroupIndex'] = inDetailGroupIndex
+          if (n.config.compt === 'location' && !n.config.hasOwnProperty('inDetailGroupGeneralId')) {
+            n.config['inDetailGroupGeneralId'] = inDetailGroupIndex >= 0 ? generalId : -1
+          }
+          n.config['fromDetail'] = !!fromDetail
+          switch (n.config.compt) {
+            case 'selectbox':
+              //老数据支持
+              if (n.config.fields[0].fieldType.hasOwnProperty('multiple')) {
+                if (n.config.fields[0].fieldType.multiple) {
+                  computedCompts.push(checkList(n))
+                  n.config.compt = 'checklist'
+                } else {
+                  computedCompts.push(radioButton(n))
+                  n.config.compt = 'radiobutton'
+                }
+                delete n.config.fields[0].fieldType['multiple']
+                break
+              }
+              computedCompts.push(selectBox(n))
+              break
+            case 'editinput':
+              computedCompts.push(editInput(n))
+              break
+            case 'computeinput':
+              computedCompts.push(computeInput(n))
+              break
+            case 'livevideo':
+              computedCompts.push(liveVideo(n))
+              break
+            case 'edittextarea':
+              computedCompts.push(editTextarea(n))
+              break
+            case 'checklist':
+              if (formType === 'approveForm') {
+                //老数据支持
+                if (!n.config.hasOwnProperty('comptCombined')) {
+                  computedCompts.push(selectMultiBox(n))
+                  n.config.compt = 'selectmultibox'
+                  n.config['comptCombined'] = true
+                  break
+                }
+              }
+              computedCompts.push(checkList(n))
+              break
+            case 'radiobutton':
+              if (formType === 'approveForm') {
+                //老数据支持
+                if (!n.config.hasOwnProperty('comptCombined')) {
+                  computedCompts.push(selectBox(n))
+                  n.config.compt = 'selectbox'
+                  n.config['comptCombined'] = true
+                  break
+                }
+              }
+              computedCompts.push(radioButton(n))
+              break
+            case 'selectmultibox':
+              computedCompts.push(selectMultiBox(n))
+              break
+            case 'captiontext':
+              computedCompts.push(captionText(n))
+              break
+            case 'dateinput':
+              computedCompts.push(dateInput(n))
+              break
+            case 'datetimerange':
+              computedCompts.push(datetimeRange(n))
+              break
+            case 'leavekit':
+              computedCompts.push(leaveKit(n))
+              break
+            case 'overtimekit':
+              computedCompts.push(overtimeKit(n))
+              break
+            case 'punchkit':
+              computedCompts.push(punchKit(n))
+              break
+            case 'gooutkit':
+              computedCompts.push(gooutKit(n))
+              break
+            case 'leavecancellationkit':
+              computedCompts.push(leaveCancellationKit(n))
+              break
+            case 'imagebox':
+              computedCompts.push(imgBox(n))
+              break
+            case 'fileupload':
+              computedCompts.push(fileUpload(n))
+              break
+            case 'detailcombox':
+              computedCompts.push(detail(n, transform, formType, transformForHorizontal))
+              break
+            case 'matrixradio':
+              computedCompts.push(matrixRadio(n))
+              break
+            case 'matrixcheckbox':
+              computedCompts.push(matrixCheckbox(n))
+              break
+            case 'numberinput':
+              computedCompts.push(numberInput(n))
+              break
+            case 'belonger':
+              computedCompts.push(belonger(n))
+              break
+            case 'contact':
+              computedCompts.push(contact(n))
+              break
+            case 'department':
+              computedCompts.push(department(n))
+              break
+            case 'location':
+              computedCompts.push(location(n))
+              break
+            case 'signature':
+              computedCompts.push(signature(n))
+              break
+            case 'multipleselect':
+              computedCompts.push(multipleSelect(n))
+              break
+            case 'slider':
+              computedCompts.push(slider(n))
+              break
+            case 'areamultiselect':
+              computedCompts.push(areaMultiSelect(n))
+              break
+            case 'areacheckbox':
+              computedCompts.push(areaCheckbox(n))
+              break
+            case 'autonumber':
+              if (n.config.fields[0].visible) {
+                computedCompts.push(autoNumber(n))
+              }
+              break
+            case 'relatedaprv':
+              computedCompts.push(relatedAprv(n))
+              break
+            case 'relateddata':
+              computedCompts.push(relatedData(n))
+              break
+            case 'richtext':
+              computedCompts.push(richText(n))
+              break
+            case 'button':
+              computedCompts.push(button(n))
+              break
+            case 'videobox':
+              computedCompts.push(videoBox(n))
+              break
+            case 'imageocr':
+              computedCompts.push(imgOcr(n))
+              break
+            default:
+              break
+          }
+        })
+        return computedCompts
+      }
+      
+      /**
+       * 转换 明细内横排子组件使用
+       *
+       * @param widgets
+       * @returns {Array}
+       */
+      function transformForHorizontal(widgets, formType, inDetailGroupIndex, fromDetail) {
+        var computedCompts = []
+        if (!widgets || widgets.length === 0) {
+          return computedCompts
+        }
+        var generalId = publicUtils.generatorId() // 生成每批子组件的唯一标识id
+        $.each(widgets, function (i, n) {
+          n.config['inDetailGroupIndex'] = inDetailGroupIndex
+          if (n.config.compt === 'location' && !n.config.hasOwnProperty('inDetailGroupGeneralId')) {
+            n.config['inDetailGroupGeneralId'] = inDetailGroupIndex >= 0 ? generalId : -1
+          }
+          n.config['fromDetail'] = !!fromDetail
+          switch (n.config.compt) {
+            case 'selectbox':
+              //老数据支持
+              if (n.config.fields[0].fieldType.hasOwnProperty('multiple')) {
+                if (n.config.fields[0].fieldType.multiple) {
+                  computedCompts.push(checkList(n))
+                  n.config.compt = 'checklist'
+                } else {
+                  computedCompts.push(radioButton(n))
+                  n.config.compt = 'radiobutton'
+                }
+                delete n.config.fields[0].fieldType['multiple']
+                break
+              }
+              computedCompts.push(horizontalSelectBox(n))
+              break
+            case 'editinput':
+              computedCompts.push(horizontalEditInput(n))
+              break
+            case 'edittextarea':
+              computedCompts.push(horizontalEditTextarea(n))
+              break
+            case 'detailcombox':
+              computedCompts.push(detail(n, transformForHorizontal))
+              break
+            case 'numberinput':
+              computedCompts.push(horizontalNumberInput(n))
+              break
+            case 'dateinput':
+              computedCompts.push(horizontalDateInput(n))
+              break
+            case 'datetimerange':
+              computedCompts.push(horizontalDateTimeRange(n))
+              break
+            case 'computeinput':
+              computedCompts.push(horizontalComputeInput(n))
+              break
+            case 'selectmultibox':
+              computedCompts.push(horizontalSelectMultiBox(n))
+              break
+            case 'checklist':
+              if (formType === 'approveForm') {
+                //老数据支持
+                if (!n.config.hasOwnProperty('comptCombined')) {
+                  computedCompts.push(selectMultiBox(n))
+                  n.config.compt = 'selectmultibox'
+                  n.config['comptCombined'] = true
+                  break
+                }
+              }
+              computedCompts.push(horizontalCheckList(n))
+              break
+            case 'radiobutton':
+              if (formType === 'approveForm') {
+                //老数据支持
+                if (!n.config.hasOwnProperty('comptCombined')) {
+                  computedCompts.push(selectBox(n))
+                  n.config.compt = 'selectbox'
+                  n.config['comptCombined'] = true
+                  break
+                }
+              }
+              computedCompts.push(horizontalRadioButton(n))
+              break
+            case 'contact':
+              computedCompts.push(horizontalContact(n))
+              break
+            case 'department':
+              computedCompts.push(horizontalDepartment(n))
+              break
+            case 'imagebox':
+              computedCompts.push(horizontalImgBox(n))
+              break
+            case 'fileupload':
+              computedCompts.push(horizontalFileUpload(n))
+              break
+            case 'slider':
+              computedCompts.push(horizontalSlider(n))
+              break
+            case 'multipleselect':
+              computedCompts.push(horizontalMultipleSelect(n))
+              break
+            case 'signature':
+              computedCompts.push(horizontalSignature(n))
+              break
+            case 'location':
+              computedCompts.push(horizontalLocation(n))
+              break
+            case 'livevideo':
+              computedCompts.push(horizontalLiveVideo(n))
+              break
+            case 'captiontext':
+              computedCompts.push(horizontalCaptiontext(n))
+              break
+            case 'button':
+              computedCompts.push(horizontalButton(n))
+              break
+            case 'videobox':
+              computedCompts.push(horizontalVideoBox(n))
+              break
+            case 'relateddata':
+              computedCompts.push(horizontalRelatedData(n))
+              break
+          }
+        })
+        return computedCompts
+      }
+      
+      return {
+        transform: transform,
+        transformForHorizontal: transformForHorizontal
+      }
+    })

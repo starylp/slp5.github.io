@@ -1,0 +1,393 @@
+define(['jquery', 'util'], function ($, util) {
+  'use strict'
+  return function (widget) {
+    
+    function findAddSignData(_this) {
+      if (_this.addSignButtonNotClickable) {
+        return
+      }
+      _this.timeoutId = setInterval(function () {
+        $.getJSON('front/sign/find/signature', {randomKey: _this.randomKey}).then(function (res) {
+          if (res.success) {
+            _this.codeShow = false
+            _this.currentSignShow = true
+            if (typeof res.data.userSign === 'string') {
+              res.data.userSign = JSON.parse(res.data.userSign)
+            }
+            _this.value = res.data.userSign.signature
+            _this.$setValue()
+            clearSignTimeout(_this)
+          }
+        })
+        _this.num--
+      }, 1000)
+    }
+    
+    function clearSignTimeout(_this) {
+      clearInterval(_this.timeoutId)
+      _this.timeoutId = -1
+      _this.num = 180
+      _this.addSignButtonNotClickable = false
+    }
+    
+    function findUpSignData(_this) {
+      if (_this.addSignButtonNotClickable) {
+        return
+      }
+      _this.timeoutId = setInterval(function () {
+        $.getJSON('front/sign/find/update/signature', {time: _this.time, status: _this.num}).then(function (res) {
+          if (res.success) {
+            clearSignTimeout(_this)
+            if (res.data.userSign) {
+              if (typeof res.data.userSign === 'string') {
+                res.data.userSign = JSON.parse(res.data.userSign)
+              }
+              _this.value = res.data.userSign.signature
+              _this.codeShow = false
+              _this.currentSignShow = true
+              _this.$setValue()
+              return
+            }
+            _this.timeOutDialogShow = true
+          }
+        })
+        _this.num--
+      }, 1000)
+    }
+
+    return {
+      id: widget.id,
+      template: [
+        '<div>',
+        '<div class="cell_cont" v-show="isShow && hasAuthority">',
+          '<div class="cell_signature" v-if="value">',
+            '<img :src="value" alt="" />',
+          '</div>',
+          '<div class="select_result" v-if="!value"></div>',
+        '</div>',
+        '<div style="display: none;">{{relateFieldValueStatus}}</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: '',
+          signValue: '',//myOptions组件中显示的签名
+          lastRelateValue: '',
+          codeShow: false,
+          signShow: false,
+          currentSignShow: false, // 用不到
+          timeOutDialogShow: false,
+          addSignButtonNotClickable: false,
+          num: 180,
+          timeoutId: -1,
+          code: '',
+          time: '',
+          randomKey: ''//免登录用户生成手写签名绑定标识(一次性)
+        }
+      },
+      methods: {
+        $reloadValueFun: function (vueObj) {
+          this.value = vueObj.value
+          return this.verified
+        },
+        selOptionStatus: function (status) {
+          //父级组件tplpanel组件调用
+          this.codeShow = status
+          this.signShow = status
+          clearSignTimeout(this)
+        },
+        addSign: function () {
+          let _this = this
+          $.getJSON('front/sign/find/user/signature', {openType: 1}).then(function (res) {
+            if (!res.success) {
+              return
+            }
+            if (typeof res.data.sign === 'string') {
+              res.data.sign = JSON.parse(res.data.sign)
+            }
+            if (!res.data.sign || $.isEmptyObject(res.data.sign) || res.data.sign.nextUse === 0) {
+              _this.codeShow = true
+              if (res.data.sign.signature) {
+                _this.overwriteSign()
+              } else {
+                findAddSignData(_this)
+                _this.addSignButtonNotClickable = true
+              }
+            } else {
+              _this.signValue = res.data.sign.signature
+              _this.signShow = true
+            }
+            _this.timeOutDialogShow = false
+          })
+        },
+        findAddSignData: function (_this) {
+          if (this.addSignButtonNotClickable) {
+            return
+          }
+          this.timeoutId = setInterval(function () {
+            $.getJSON('front/sign/find/signature', {randomKey: _this.randomKey}).then(function (res) {
+              if (res.success) {
+                _this.codeShow = false
+                _this.currentSignShow = true
+                if (typeof res.data.userSign === 'string') {
+                  res.data.userSign = JSON.parse(res.data.userSign)
+                }
+                _this.value = res.data.userSign.signature
+                _this.clearSignTimeout(_this)
+              }
+            })
+            _this.num--
+          }, 1000)
+        },
+        clearSignTimeout: function (_this) {
+          clearInterval(_this.timeoutId)
+          _this.timeoutId = -1
+          _this.num = 180
+          _this.addSignButtonNotClickable = false
+        },
+        deleteSign: function () {
+          if (this.readonly) {
+            return
+          }
+          if (!confirm('确定要清除签名吗？')) {
+            return
+          }
+          this.value = ''
+          this.currentSignShow = false
+        },
+        useCurSign: function () {
+          this.signShow = false
+          this.currentSignShow = true
+          
+          this.$setValue()
+        },
+        /**将下拉框中使用的值，写入到组件值或后台管理横排组件默认值组件中*/
+        $setValue: function () {
+          if (this.onlySetValue) {
+            if (this.$refs.myOptions) {
+              // 后台管理横排子表单设置默认值
+              this.$refs.myOptions.typeShow = false
+              //明细组件内子组件横排时用到 触发父级明细组件中iframe(加载当前组件默认值区域dom)弹窗显示或关闭
+              var data = {
+                values: [[{val: this.signValue}]],
+                defaultSetAreaShow: this.$refs.myOptions.typeShow
+              }
+              this.$emit('callbackvalue', data)
+            }
+          } else {
+            // 如果从myOptions组件设置使用
+            if (this.signValue) {
+              this.value = this.signValue
+              this.signValue = ''
+            }
+            if (this.$refs.myOptions) {
+              this.$refs.myOptions.typeShow = false
+            }
+          }
+        },
+        overwriteSign: function () {
+          if (this.readonly) {
+            return
+          }
+          var _this = this
+          $.getJSON('front/sign/overwrite/signature', {singType: 1}).then(function (res) {
+            if (res.success) {
+              _this.time = res.data.time
+              _this.signShow = false
+              _this.codeShow = true
+              findUpSignData(_this)
+              _this.addSignButtonNotClickable = true
+            }
+          })
+        }
+      },
+      props: {
+        onlySetValue: {
+          //在明细内弹出iframe并加载当前组件时 只显示组件值设置区域标识值 横排明细时使用
+          type: Boolean,
+          default: function () {
+            return false
+          }
+        }
+      },
+      watch: {
+        value: function () {
+          if (this.onlySetValue) {
+            return
+          }
+          
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value}]}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        },
+        num: function () {
+          if (this.num <= 0) {
+            clearSignTimeout(this)
+            this.timeOutDialogShow = true
+            this.addSignButtonNotClickable = false
+          }
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if (this.required) {
+            return this.value && this.value.length !== 0
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        fromManage: function () {
+          return this.$store.getters.getFromManageStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = (!this.editable && !this.fromManage && !this.hasRoleId)
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') &&
+              ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === this.widget.config.inDetailGroupIndex) ||
+               !obj.hasOwnProperty('inDetailIndex')) && (!this.isPreview || !this.isInit)) {
+            var result = obj.fields[0].values && obj.fields[0].values[0].val !== '' ? obj.fields[0].values[0].val : ''
+            if (!result) {
+              this.value = ''
+              this.currentSignShow = false
+            }
+            if (result && this.lastRelateValue !== result) {
+              this.value = result
+              this.lastRelateValue = result
+              this.sliderRange = obj.fields[0].sliderRange
+              if (this.value) {
+                this.useCurSign()
+              }
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+          
+          if (!this.visible && !this.fromManage && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类似web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail && this.$store.state.currOptionSel.inDetailGroupIndex !==
+                     this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value}]}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        }
+      },
+      created: function () {
+        var values = this.widget.config.fields[0].values
+        this.value = values ? (values[0] && values[0].val) || '' : ''
+        if (this.value) {
+          this.useCurSign()
+        }
+        this.$store.commit('watchValues', {
+          id: this.widget.id,
+          fvalues: [
+            {fidx: 0, values: [{val: this.value}]}
+          ],
+          verified: this.verified,
+          isShow: this.isShow,
+          hasAuthority: this.hasAuthority
+        })
+        this.randomKey = util.createUUID()
+        //增加表单类型区分表单审批
+        this.code = uniqueDomainPath + '/front/sign/qrcode?randomKey=' + this.randomKey + '&formType=' + this.$store.getters.getApproveModel
+      }
+    }
+  }
+})

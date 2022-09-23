@@ -1,0 +1,326 @@
+define(['jquery', 'util', 'popup', 'VueUtils'], function ($, util, popup, VueUtils) {
+  'use strict'
+  
+  return function (widget) {
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: $.trim(_this.value),
+        compose: 'row',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+
+    return {
+      id: widget.id,
+      template: [
+        '<div>',
+        '<div class="cell_cont" :class="{noClick: readonly, nodata: readonly && !value}" v-show="isShow && hasAuthority">',
+        '<span :class="{cell_text: value, cell_nodata: !value}">{{value}}</span>',
+        '</div>',
+        '<div style="display:none;">{{relateFieldValueStatus}}</div>',
+        '<event-trigger :widget="widget" :compose="\'row\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event="triggerValueEvent" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+        '<field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+        '<field-formula-trigger :widget="widget" @set-loading-status="" @set-formula-field-value="formulaFieldValueStatus"></field-formula-trigger>',
+        '<detail-combox-field-link-trigger :widget="widget" @set-loading-status="triggerLoadingEvent" @set-field-value="detailComboxLinkFieldValueStatus"></detail-combox-field-link-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: '',
+          fileLocal: 0,
+          loadStatus: false,
+          errInfo: {
+            isError: false,
+            errMsg: ''
+          }
+        }
+      },
+      methods: {
+        $reloadValueFun: function (vueObj) {
+          //子表单横排时打开某行子组件后依次给对应子表彰表格显示字段赋值
+          this.value = vueObj.value
+          return this.verified
+        },
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEvent: function (val) {
+          this.value = val
+          this.loadStatus = false
+        },
+        triggerGetValueEvent:function (callback) {
+          callback([{val: this.value}])
+        },
+        linkFieldValueStatus: function (result) {
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+          if (hasNullCondVal) {
+            this.value = ''
+            dataLoadInit(this)
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+          if (result && result.length > 0 && (!this.isPreview || !this.isInit)) {
+            this.value = result[0].val
+            dataLoadInit(this)
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        formulaFieldValueStatus: function (data) {
+          this.loadStatus = false
+          var refreshResult = data.result, formulaFieldType = data.type, formulaFieldCurrIndex = data.index
+          if (formulaFieldType === 0 && formulaFieldCurrIndex !== this.widget.config.inDetailGroupIndex && this.$store.state.formulaFieldCurrIndex > -1 && this.widget.config.inDetailGroupIndex > -1) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 2, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+          var key = (formulaFieldType > 0 && this.widget.pid > 0) ? this.widget.config.id + '_' + this.widget.config.inDetailGroupIndex : this.widget.config.id
+          var result = refreshResult[key]
+          if (result && result.length > 0) {
+            this.value = result[0].val
+            $(this.$el).find('.temp_multi_text').text(this.value)
+            if (formulaFieldType > 0) {
+              delete refreshResult[key]
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 2, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        detailComboxLinkFieldValueStatus: function (result) {
+          var txt = $(this.$el).find('.fsw-ul-edit').text()
+          if (result && result.length > 0 && (!this.isPreview || !this.isInit)) {
+            var newValue = result[0].val
+            if ($.trim(txt) !== '' && $.trim(txt) === newValue) {
+              return
+            }
+            this.value = newValue
+            $(this.$el).find('.fsw-ul-edit').text(this.value)
+          }
+        }
+      },
+      components: {
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue'),
+        fieldFormulaTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldFormula/fieldFormulaTrigger.vue'),
+        'detailComboxFieldLinkTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/detailcombox/detailComboxFieldLinkTrigger.vue')
+      },
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value}]}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority,
+            errMsg: this.errInfo.errMsg
+          })
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        max: function () {
+          var verifyjn = this.widget.config.fields[0].verify
+          return verifyjn.maxLength ? verifyjn.maxLength.length : null
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if(!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          if (this.required) {
+            return $.trim(this.value) !== ''
+          }
+          if (this.charLimitStatus) {
+            return false
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true;
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          if(this.$store.getters.getCurrentType){
+            return this.$store.getters.getReadonlyStatus
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === this.widget.config.inDetailGroupIndex) || !obj.hasOwnProperty('inDetailIndex')) && (!this.isPreview || !this.isInit)) {
+            this.value = obj.fields[0].values && obj.fields[0].values.length > 0 && obj.fields[0].values[0].val !== '' ? obj.fields[0].values[0].val : ''
+          }
+          if (this.isClearRelatedData && obj && obj.id === this.widget.config.id) {
+            this.value = ''
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        isClearRelatedData: function () {
+          return this.$store.getters.getIsClearRelatedData
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel;
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus;
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields;
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus;
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类似web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = this.$store.state.reloadValSubField
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            if (this.widget.pid > 0 && !this.$store.state.verifieds[this.widget.pid].isShow) {
+              //明细内子组件时 如果明细组件是隐藏状态时 当前子组件也要改成隐藏状态
+              showStatus = false
+            } else {
+              showStatus = true
+            }
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value}]}
+            ],
+            errMsg: this.errInfo.errMsg,
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        charLimitStatus: function () {
+          if (!this.value || !this.charLimit || !this.charLimit.open) {
+            return false
+          }
+          if (this.charLimit.maxSize && (!this.charLimit.minSize || parseInt(this.charLimit.minSize) === 0) && $.trim(this.value).length > parseInt(this.charLimit.maxSize)) {
+            this.errInfo.errMsg = '超过字符限制'
+            return true
+          }
+          if (this.charLimit.minSize && !this.charLimit.maxSize && $.trim(this.value).length < parseInt(this.charLimit.minSize)) {
+            this.errInfo.errMsg = '最少输入' + this.charLimit.minSize + '个字符'
+            return true
+          }
+          if (this.charLimit.minSize && this.charLimit.maxSize && $.trim(this.value).length < parseInt(this.charLimit.minSize) || $.trim(this.value).length > parseInt(this.charLimit.maxSize)) {
+            this.errInfo.errMsg = '限定字符个数' + this.charLimit.minSize + '-' + this.charLimit.maxSize
+            return true
+          }
+          return false
+        },
+        charLimit: function () {
+          var charLimit = this.widget.config.fields[0].verify.charLimit
+          if (charLimit && charLimit.open && charLimit.size) {
+            charLimit.maxSize = charLimit.size
+            delete this.widget.config.fields[0].verify.charLimit.size
+          }
+          return charLimit
+        }
+      },
+      created: function () {
+        var values = this.widget.config.fields[0].values
+        this.value = values ? (values[0] && values[0].val) || '' : ''
+        if (this.widget.config.fields[0].hasOwnProperty('unchangeable')) {
+          this.widget.config.fields[0].editable = !this.widget.config.fields[0].unchangeable
+          delete this.widget.config.fields[0].unchangeable
+        }
+        var rev = this.$store.getters.getRelevance
+        if (rev != null && rev.hasOwnProperty(this.widget.config.id) && rev[this.widget.config.id]) {
+          this.value = rev[this.widget.config.id]
+        }
+      },
+      mounted: function () {
+        var _this = this
+        //防止子组件中构造各组件实例未执行，导致默认值数据关联失效问题
+        _this.$nextTick(function () {
+          setTimeout(function () {
+            dataLoadInit(_this, _this.$store.getters.getComptDataType('init'))
+          }, 500)
+        })
+      },
+    }
+  }
+})

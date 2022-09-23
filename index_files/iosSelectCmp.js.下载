@@ -1,0 +1,633 @@
+define(['iosSelect'], function (IosSelect) {
+  'use strict';
+
+  // 获取时间一位数补0
+  function appendzero(obj) {
+    if (obj < 10) {
+      return "0" + obj;
+    } else {
+      return obj + '';
+    }
+  }
+
+  // 数据初始化
+  function formatYear(startYear, endYear) {
+    var arr = [];
+    for (var i = startYear; i <= endYear; i++) {
+      arr.push({
+        id: i + '',
+        value: i + '年'
+      });
+    }
+    return arr;
+  }
+
+  function formatMonth(startMonth) {
+    var arr = [];
+    for (var i = startMonth; i <= 12; i++) {
+      var j = appendzero(i);
+      arr.push({
+        id: j,
+        value: i + '月'
+      });
+    }
+    return arr;
+  }
+
+  function formatDate(startDay, count) {
+    var arr = [];
+    for (var i = startDay; i <= count; i++) {
+      var j = appendzero(i);
+      arr.push({
+        id: j,
+        value: i + '日'
+      });
+    }
+    return arr;
+  }
+
+  function formatHour(startHour, endHour) {
+    if (!startHour) {
+      startHour = 0;
+    }
+    if (!endHour) {
+      endHour = 23;
+    }
+
+    var hours = [];
+    for (var i = startHour; i <= endHour; i++) {
+      var j = appendzero(i);
+      hours.push({
+        id: j,
+        value: i + '时'
+      });
+    }
+    return hours;
+  }
+  
+  function formatAmpm() {
+    var ampm = [];
+    ampm.push({
+        id: '上午',
+        value: '上午'
+      });
+    ampm.push({
+      id: '下午',
+      value: '下午'
+    });
+    return ampm;
+  }
+
+  var monthData = function (year, callback) {
+    var startMonth = 1; //显示开始月份
+    callback(formatMonth(startMonth));
+  };
+
+  var monthNowData = function (year, callback) {
+    var now = new Date();
+    var startMonth = year == now.getFullYear() ? now.getMonth() + 1 : 1;
+    callback(formatMonth(startMonth));
+  };
+
+  var dateData = function (year, month, callback) {
+    month = parseInt(month);
+    var startDay = 1; //显示开始日
+    if (/^(1|3|5|7|8|10|12)$/.test(month)) {
+      callback(formatDate(startDay, 31));
+    }
+    else if (/^(4|6|9|11)$/.test(month)) {
+      callback(formatDate(startDay, 30));
+    }
+    else if (/^2$/.test(month)) {
+      if (year % 4 === 0 && year % 100 !== 0 || year % 400 === 0) {
+        callback(formatDate(startDay, 29));
+      }
+      else {
+        callback(formatDate(startDay, 28));
+      }
+    }
+    else {
+      throw new Error('month is illegal');
+    }
+  };
+
+  var dateNowData = function (year, month, callback) {
+    month = parseInt(month);
+    var now = new Date();
+    var startDay = year == now.getFullYear() && month == now.getMonth() + 1 ? now.getDate() : 1;
+    if (/^(1|3|5|7|8|10|12)$/.test(month)) {
+      callback(formatDate(startDay, 31));
+    }
+    else if (/^(4|6|9|11)$/.test(month)) {
+      callback(formatDate(startDay, 30));
+    }
+    else if (/^2$/.test(month)) {
+      if (year % 4 === 0 && year % 100 !== 0 || year % 400 === 0) {
+        callback(formatDate(startDay, 29));
+      }
+      else {
+        callback(formatDate(startDay, 28));
+      }
+    }
+    else {
+      throw new Error('month is illegal');
+    }
+  };
+
+  var minuteData = (function () {
+    var minutes = [];
+    for (var i = 0, len = 60; i < len; i++) {
+      var j = appendzero(i);
+      minutes.push({
+        id: j,
+        value: i + '分'
+      });
+    }
+    return minutes;
+  })();
+
+  /**
+   * 年-月-日 时:分选择框 月和日的id都以类似01这样两位数来表示
+   */
+  function dateTimePicker(startYear, endYear, opt) {
+    var yearData = formatYear(startYear, endYear);//顶级没有联动,可直接用数组,不需要用函数; 动态的数据联动被动的一方应是一个方法而不是数组
+    opt['relation'] = [1, 1];//年月之间有联动, 月日之间有联动
+    //月和日的id都以类似01这样两位数来表示
+    if (opt.hasOwnProperty('twoLevelId') && /^\d$/.test(opt.twoLevelId)) {
+      opt.twoLevelId = appendzero(opt.twoLevelId);
+    }
+    if (opt.hasOwnProperty('threeLevelId') && /^\d$/.test(opt.threeLevelId)) {
+      opt.threeLevelId = appendzero(opt.threeLevelId);
+    }
+    var hourData = formatHour(0, 23);
+    if(opt.isNowStart){//是否从当前月日开始
+      new IosSelect(5, [yearData, monthNowData, dateNowData, hourData, minuteData], opt);
+      return;
+    }
+    new IosSelect(5, [yearData, monthData, dateData, hourData, minuteData], opt);
+  }
+
+  /**
+   * 年-月-日 时选择框 月和日的id都以类似01这样两位数来表示
+   */
+  function dateTimeHourPicker(startYear, endYear, opt) {
+    var yearData = formatYear(startYear, endYear);//顶级没有联动,可直接用数组,不需要用函数; 动态的数据联动被动的一方应是一个方法而不是数组
+    opt['relation'] = [1, 1];//年月之间有联动, 月日之间有联动
+    //月和日的id都以类似01这样两位数来表示
+    if (opt.hasOwnProperty('twoLevelId') && /^\d$/.test(opt.twoLevelId)) {
+      opt.twoLevelId = appendzero(opt.twoLevelId);
+    }
+    if (opt.hasOwnProperty('threeLevelId') && /^\d$/.test(opt.threeLevelId)) {
+      opt.threeLevelId = appendzero(opt.threeLevelId);
+    }
+    var hourData = formatHour(0, 23);
+    if(opt.isNowStart){//是否从当前月日开始
+      new IosSelect(4, [yearData, monthNowData, dateNowData, hourData], opt);
+      return;
+    }
+    new IosSelect(4, [yearData, monthData, dateData, hourData], opt);
+  }
+
+  /**
+   * 年-月-日 上下午选择框 月和日的id都以类似01这样两位数来表示
+   */
+  function dateTimeAmPmPicker(startYear, endYear, opt) {
+    var yearData = formatYear(startYear, endYear);//顶级没有联动,可直接用数组,不需要用函数; 动态的数据联动被动的一方应是一个方法而不是数组
+    opt['relation'] = [1, 1];//年月之间有联动, 月日之间有联动
+    //月和日的id都以类似01这样两位数来表示
+    if (opt.hasOwnProperty('twoLevelId') && /^\d$/.test(opt.twoLevelId)) {
+      opt.twoLevelId = appendzero(opt.twoLevelId);
+    }
+    if (opt.hasOwnProperty('threeLevelId') && /^\d$/.test(opt.threeLevelId)) {
+      opt.threeLevelId = appendzero(opt.threeLevelId);
+    }
+    var arvoData = formatAmpm();
+    if(opt.isNowStart){//是否从当前月日开始
+      new IosSelect(4, [yearData, monthNowData, dateNowData, arvoData], opt);
+      return;
+    }
+    new IosSelect(4, [yearData, monthData, dateData, arvoData], opt);
+  }
+
+  /**
+   * 年-月-日选择框 月和日的id都以类似01这样两位数来表示
+   */
+  function datePicker(startYear, endYear, opt) {
+    var yearData = formatYear(startYear, endYear);//顶级没有联动,可直接用数组,不需要用函数; 动态的数据联动被动的一方应是一个方法而不是数组
+    opt['relation'] = [1, 1];//年月之间有联动, 月日之间有联动
+    //月和日的id都以类似01这样两位数来表示
+    if (opt.hasOwnProperty('twoLevelId') && /^\d$/.test(opt.twoLevelId)) {
+      opt.twoLevelId = appendzero(opt.twoLevelId);
+    }
+    if (opt.hasOwnProperty('threeLevelId') && /^\d$/.test(opt.threeLevelId)) {
+      opt.threeLevelId = appendzero(opt.threeLevelId);
+    }
+    if(opt.isNowStart){//是否从当前月日开始
+      new IosSelect(3, [yearData, monthNowData, dateNowData], opt);
+      return;
+    }
+    new IosSelect(3, [yearData, monthData, dateData], opt);
+  }
+
+  /**
+   * format选择框 月和日的id都以类似01这样两位数来表示
+   */
+  function datePickerByFormat(startYear, endYear, opt) {
+    var yearData = formatYear(startYear, endYear);//顶级没有联动,可直接用数组,不需要用函数; 动态的数据联动被动的一方应是一个方法而不是数组
+    opt['relation'] = [1, 1];//年月之间有联动, 月日之间有联动
+    //月和日的id都以类似01这样两位数来表示
+    if (opt.hasOwnProperty('twoLevelId') && /^\d$/.test(opt.twoLevelId)) {
+      opt.twoLevelId = appendzero(opt.twoLevelId);
+    }
+    if (opt.hasOwnProperty('threeLevelId') && /^\d$/.test(opt.threeLevelId)) {
+      opt.threeLevelId = appendzero(opt.threeLevelId);
+    }
+    var hourData = formatHour(0, 23);
+    if(opt.isNowStart){//是否从当前月日开始
+      switch (opt.format){
+        case 'yyyy':
+          new IosSelect(1, [yearData], opt);
+          break;
+        case 'yyyy-MM' :
+          new IosSelect(2, [yearData, monthNowData], opt);
+          break;
+        case 'yyyy-MM-dd' :
+          new IosSelect(3, [yearData, monthNowData, dateNowData], opt);
+          break;
+        case 'yyyy-MM-dd HH:mm' :
+          new IosSelect(5, [yearData, monthNowData, dateNowData, hourData, minuteData], opt);
+          break;
+        case 'HH:mm':
+          opt.relation = [0, 0];
+          new IosSelect(2, [hourData, minuteData], opt);
+          break;
+        case 'HH':
+          opt.relation = [0];
+          new IosSelect(1, [hourData], opt);
+          break;
+        case 'yyyy-MM-dd pm-am':
+          new IosSelect(4, [yearData, monthNowData, dateNowData, formatAmpm()], opt);
+          break;
+      }
+      return;
+    }
+    switch (opt.format){
+      case 'yyyy':
+        new IosSelect(1, [yearData], opt);
+        break;
+      case 'yyyy-MM' :
+        new IosSelect(2, [yearData, monthData], opt);
+        break;
+      case 'yyyy-MM-dd' :
+        new IosSelect(3, [yearData, monthData, dateData], opt);
+        break;
+      case 'yyyy-MM-dd HH:mm' :
+        new IosSelect(5, [yearData, monthData, dateData, hourData, minuteData], opt);
+        break;
+      case 'HH:mm':
+        opt.relation = [0, 0];
+        new IosSelect(2, [hourData, minuteData], opt);
+        break;
+      case 'HH':
+        opt.relation = [0];
+        new IosSelect(1, [hourData], opt);
+        break;
+      case 'yyyy-MM-dd pm-am':
+        new IosSelect(4, [yearData, monthData, dateData, formatAmpm()], opt);
+        break;
+    }
+  }
+
+  /**
+   * 年-月选择框 月的id以类似01这样两位数来表示
+   */
+  function yearMonthPicker(startYear, endYear, opt) {
+    var yearData = formatYear(startYear, endYear);//顶级没有联动,可直接用数组,不需要用函数; 动态的数据联动被动的一方应是一个方法而不是数组
+    opt['relation'] = [1, 0];//年月之间有联动
+    //月的id以类似01这样两位数来表示
+    if (opt.hasOwnProperty('twoLevelId') && /^\d$/.test(opt.twoLevelId)) {
+      opt.twoLevelId = appendzero(opt.twoLevelId);
+    }
+    if(opt.isNowStart){//是否从当前月开始
+      new IosSelect(2, [yearData, monthNowData], opt);
+      return;
+    }
+    new IosSelect(2, [yearData, monthData], opt);
+  }
+
+  /** 下拉选项*/
+  function itemSelPicker(itemSize, data, opt) {
+    new IosSelect(itemSize, data, opt);
+  }
+  
+  /**
+   * 时间范围选择器
+   *
+   * 符合 HH:mm 格式的时间范围
+   * @param minHmDateTime 例如：'03:04'
+   * @param maxHmDateTime 例如：'21:17'
+   * @param options
+   */
+  function dateTimeHmRangePicker(minHmDateTime, maxHmDateTime, options) {
+    if (options.format !== 'HH:mm') {
+      throw new Error('the format must be HH:mm')
+    }
+  
+    if (!$.trim(minHmDateTime) || !$.trim(maxHmDateTime)) {
+      minHmDateTime = '00:00'
+      maxHmDateTime = '23:59'
+    }
+  
+    var minDateTimeArr = $.trim(minHmDateTime).split(':')
+    var maxDateTimeArr = $.trim(maxHmDateTime).split(':')
+  
+    var minHour = parseInt(minDateTimeArr[0] == undefined ? 0 : minDateTimeArr[0])
+    var minMinute = parseInt(minDateTimeArr[1] == undefined ? 0 : minDateTimeArr[1])
+    var maxHour = parseInt(maxDateTimeArr[0] == undefined ? 23 : maxDateTimeArr[0])
+    var maxMinute = parseInt(maxDateTimeArr[1] == undefined ? 59 : maxDateTimeArr[1])
+  
+    if (minHour * 60 + minMinute >= maxHour * 60 + maxMinute) {
+      throw new Error('minHmDateTime >= maxHmDateTime, error!')
+    }
+  
+    var hourData = function (callback) {
+      callback(hourRangeArray(minHour, maxHour))
+    }
+    var minuteData = function (currentHour, callback) {
+      callback(minuteRangeArray(currentHour, minHour, minMinute, maxHour, maxMinute))
+    }
+  
+    //月和日的id都以类似01这样两位数来表示
+    if (options.hasOwnProperty('twoLevelId') && /^\d$/.test(options.twoLevelId)) {
+      options.twoLevelId = appendzero(options.twoLevelId);
+    }
+    if (options.hasOwnProperty('threeLevelId') && /^\d$/.test(options.threeLevelId)) {
+      options.threeLevelId = appendzero(options.threeLevelId);
+    }
+    new IosSelect(2, [hourData, minuteData], options)
+  }
+  
+  // 获取小时数组，用于HH:mm格式的时间选择框
+  var hourRangeArray = function (minHour, maxHour) {
+    var arr = []
+    for (var i = minHour; i <= maxHour; i++) {
+      arr.push({id: appendzero(i), value: i + '时'})
+    }
+    return arr
+  }
+  
+  // 获取分钟数组，用于HH:mm格式的时间选择框
+  var minuteRangeArray = function (currentHour, minHour, minMinute, maxHour, maxMinute) {
+    var _currentHour = parseInt(currentHour)
+    var _minMinute = 0
+    var _maxMinute = 59
+    
+    if (_currentHour === minHour) {
+      _minMinute = minMinute
+    }
+    if (_currentHour === maxHour) {
+      _maxMinute = maxMinute
+    }
+    
+    var arr = []
+    for (var i = _minMinute; i <= _maxMinute; i++) {
+      arr.push({id: appendzero(i), value: i + '分'})
+    }
+    return arr
+  }
+  
+  /**
+   * 时间范围选择器
+   *
+   * 支持符合 不限制，yyyy，yyyy-MM，yyyy-MM-dd，yyyy-MM-dd HH:mm 格式的时间范围
+   * @param minDateTime 例如 "2020-01-01 13:23"，格式为 yyyy-MM-dd HH:mm
+   * @param maxDateTime 例如 "2021-04-12 15:14"，格式为 yyyy-MM-dd HH:mm
+   * @param options
+   */
+  function dateTimeRangePicker(minDateTime, maxDateTime, options) {
+    if (!minDateTime || !maxDateTime) { //不限制，默认年份 最小值为（本年 - 400），最大值为（本年 + 400)
+      dateTimeArrRangePicker([], [], options)
+      return
+    }
+    
+    var minDate = new Date(minDateTime.replace(/-/g, '/'))
+    var maxDate = new Date(maxDateTime.replace(/-/g, '/'))
+    if (minDate.getTime() > maxDate.getTime()) {
+      throw new Error('minDateTime > maxDateTime, error!')
+    }
+    
+    var minDateTimeArr = $.trim(minDateTime.replace(/-/g, ' ').replace(':', ' ')).split(' ')
+    var maxDateTimeArr = $.trim(maxDateTime.replace(/-/g, ' ').replace(':', ' ')).split(' ')
+    if (minDateTimeArr.length !== maxDateTimeArr.length) {
+      throw new Error('minDateTime array length and maxDateTime array length is different')
+    }
+    dateTimeArrRangePicker(minDateTimeArr, maxDateTimeArr, options)
+  }
+  
+  function dateTimeArrRangePicker(minDateTimeArr, maxDateTimeArr, options) {
+    // 最小时间范围
+    var minYear = parseInt(minDateTimeArr[0] == undefined ? new Date().getFullYear() - 400 : minDateTimeArr[0])
+    var minMonth = parseInt(minDateTimeArr[1] == undefined ? 1 : minDateTimeArr[1])
+    var minDay = parseInt(minDateTimeArr[2] == undefined ? 1 : minDateTimeArr[2])
+    var minHour = parseInt(minDateTimeArr[3] == undefined ? 0 : minDateTimeArr[3])
+    var minMinute = parseInt(minDateTimeArr[4] == undefined ? 0 : minDateTimeArr[4])
+    // 最大时间范围
+    var maxYear = parseInt(maxDateTimeArr[0] == undefined ? new Date().getFullYear() + 400 : maxDateTimeArr[0])
+    var maxMonth = parseInt(maxDateTimeArr[1] == undefined ? 12 : maxDateTimeArr[1])
+    var maxDay = parseInt(maxDateTimeArr[2] == undefined ? daysInMonth(maxYear, maxMonth) : maxDateTimeArr[2])
+    var maxHour = parseInt(maxDateTimeArr[3] == undefined ? 23 : maxDateTimeArr[3])
+    var maxMinute = parseInt(maxDateTimeArr[4] == undefined ? 59 : maxDateTimeArr[4])
+    // 时间数据
+    var yearData = function (callback) {
+      callback(yearRangeArr(minYear, maxYear))
+    }
+    var monthData = function (currentYear, callback) {
+      callback(monthRangeArr(currentYear,
+                             minYear, minMonth,
+                             maxYear, maxMonth))
+    }
+    var dayData = function (currentYear, currentMonth, callback) {
+      callback(dayRangeArr(currentYear, currentMonth,
+                           minYear, minMonth, minDay,
+                           maxYear, maxMonth, maxDay))
+    }
+    var hourData = function (currentYear, currentMonth, currentDay, callback) {
+      callback(hourRangeArr(currentYear, currentMonth, currentDay,
+                            minYear, minMonth, minDay, minHour,
+                            maxYear, maxMonth, maxDay, maxHour))
+    }
+    var minuteData = function (currentYear, currentMonth, currentDay, currentHour, callback) {
+      callback(minuteRangeArr(currentYear, currentMonth, currentDay, currentHour,
+                              minYear, minMonth, minDay, minHour, minMinute,
+                              maxYear, maxMonth, maxDay, maxHour, maxMinute))
+    }
+    
+    var data = [yearData, monthData, dayData, hourData, minuteData]
+    // 根据选项格式确认选项层级
+    var level = 5
+    switch (options.format.replace(/Y/g, 'y').replace(/D/g, 'd')) {
+      case 'yyyy':
+        level = 1
+        break
+      case 'yyyy-MM':
+        level = 2
+        break
+      case 'yyyy-MM-dd':
+        level = 3
+        break
+      case 'yyyy-MM-dd HH:mm':
+        level = 5
+        break
+      default:
+        break
+    }
+    // 月和日的id都以类似01这样两位数来表示
+    if (options.hasOwnProperty('twoLevelId') && /^\d$/.test(options.twoLevelId)) {
+      options.twoLevelId = appendzero(options.twoLevelId);
+    }
+    if (options.hasOwnProperty('threeLevelId') && /^\d$/.test(options.threeLevelId)) {
+      options.threeLevelId = appendzero(options.threeLevelId);
+    }
+    // 根据时间范围创建时间选择器
+    new IosSelect(level, data.slice(0, level), options)
+  }
+  
+  // 年范围数组
+  var yearRangeArr = function (minYear, maxYear) {
+    var arr = []
+    for (var i = minYear; i <= maxYear; i++) {
+      arr.push({id: i + '', value: i + '年'})
+    }
+    return arr
+  }
+  
+  // 月范围数组
+  var monthRangeArr = function (currentYear,
+                                minYear, minMonth,
+                                maxYear, maxMonth) {
+    var arr = []
+    var _currentYear = parseInt(currentYear)
+    var _minMonth = 1
+    var _maxMonth = 12
+  
+    if (_currentYear === minYear) {
+      _minMonth = minMonth
+    }
+    if (_currentYear === maxYear) {
+      _maxMonth = maxMonth
+    }
+  
+    for (var i = _minMonth; i <= _maxMonth; i++) {
+      arr.push({id: appendzero(i), value: i + '月'})
+    }
+    return arr
+  }
+  
+  // 日范围数组
+  var dayRangeArr = function (currentYear, currentMonth,
+                              minYear, minMonth, minDay,
+                              maxYear, maxMonth, maxDay) {
+    var arr = []
+    var _currentYear = parseInt(currentYear)
+    var _currentMonth = parseInt(currentMonth)
+    var _minDay = 1
+    var _maxDay = 31
+  
+    _maxDay = daysInMonth(_currentYear, _currentMonth)
+    
+    if (_currentYear === minYear && _currentMonth === minMonth) {
+      _minDay = minDay
+    }
+    if (_currentYear === maxYear && _currentMonth === maxMonth) {
+      _maxDay = maxDay
+    }
+  
+    for (var i = _minDay; i <= _maxDay; i++) {
+      arr.push({id: appendzero(i), value: i + '日'})
+    }
+    return arr
+  }
+  
+  // 小时范围数组
+  var hourRangeArr = function (currentYear, currentMonth, currentDay,
+                               minYear, minMonth, minDay, minHour,
+                               maxYear, maxMonth, maxDay, maxHour) {
+    var arr = []
+    var _currentYear = parseInt(currentYear)
+    var _currentMonth = parseInt(currentMonth)
+    var _currentDay = parseInt(currentDay)
+    var _minHour = 0
+    var _maxHour = 23
+  
+    if (_currentYear === minYear && _currentMonth === minMonth && _currentDay === minDay) {
+      _minHour = minHour
+    }
+    if (_currentYear === maxYear && _currentMonth === maxMonth && _currentDay === maxDay) {
+      _maxHour = maxHour
+    }
+  
+    for (var i = _minHour; i <= _maxHour; i++) {
+      arr.push({id: appendzero(i), value: i + '时'})
+    }
+    return arr
+  }
+  
+  // 分钟范围数组
+  var minuteRangeArr = function (currentYear, currentMonth, currentDay, currentHour,
+                                 minYear, minMonth, minDay, minHour, minMinute,
+                                 maxYear, maxMonth, maxDay, maxHour, maxMinute) {
+    var arr = []
+    var _currentYear = parseInt(currentYear)
+    var _currentMonth = parseInt(currentMonth)
+    var _currentDay = parseInt(currentDay)
+    var _currentHour = parseInt(currentHour)
+    var _minMinute = 0
+    var _maxMinute = 59
+  
+    if (_currentYear === minYear && _currentMonth === minMonth && _currentDay === minDay && _currentHour === minHour) {
+      _minMinute = minMinute
+    }
+    if (_currentYear === maxYear && _currentMonth === maxMonth && _currentDay === maxDay && _currentHour === maxHour) {
+      _maxMinute = maxMinute
+    }
+  
+    for (var i = _minMinute; i <= _maxMinute; i++) {
+      arr.push({id: appendzero(i), value: i + '分'})
+    }
+    return arr
+  }
+  
+  function daysInMonth(currentYear, currentMonth) {
+    var _currentYear = parseInt(currentYear)
+    var _currentMonth = parseInt(currentMonth)
+    var days = 31
+    
+    if (/^(1|3|5|7|8|10|12)$/.test(_currentMonth + '')) {
+      days = 31
+    } else if (/^(4|6|9|11)$/.test(_currentMonth + '')) {
+      days = 30
+    } else if (/^2$/.test(_currentMonth + '')) {
+      if (_currentYear % 4 === 0 && _currentYear % 100 !== 0 || _currentYear % 400 === 0) {
+        days = 29
+      } else {
+        days = 28
+      }
+    } else {
+      throw new Error('month is illegal')
+    }
+    
+    return days
+  }
+  
+  return {
+    itemSelPicker: itemSelPicker,
+    dateTimePicker: dateTimePicker,
+    dateTimeAmPmPicker: dateTimeAmPmPicker,
+    dateTimeHourPicker: dateTimeHourPicker,
+    datePickerByFormat: datePickerByFormat,
+    yearMonthPicker: yearMonthPicker,
+    datePicker: datePicker,
+    dateTimeRangePicker: dateTimeRangePicker,
+    dateTimeHmRangePicker: dateTimeHmRangePicker
+  };
+});

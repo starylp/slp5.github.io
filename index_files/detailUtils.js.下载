@@ -1,0 +1,398 @@
+define(['jquery', 'popup', 'cookies', 'util', 'fieldNoRepeatTriggerUtils'], function ($, popup, Cookies, util, fieldNoRepeatTriggerUtils) {
+  
+  /**
+   * 子表单记录添加校验个数
+   */
+  function verifyItemCountFun(_this) {
+    _this.itemCountVerify.errorMsg = ''
+    if (!_this.addDetailEnable) {
+      return true
+    }
+    if (!_this.min && !_this.max) {
+      return true
+    }
+    var itemLen = _this.computedCompts.length
+    if (_this.min && _this.max) {
+      if (_this.min === _this.max && itemLen !== _this.min) {
+        _this.itemCountVerify.errorMsg = '添加' + _this.min
+        return false
+      }
+      if (itemLen < _this.min || itemLen > _this.max) {
+        _this.itemCountVerify.errorMsg = '可添加' + _this.min + '-' + _this.max
+        return false
+      }
+      return true
+    }
+    if (_this.min && itemLen < _this.min) {
+      _this.itemCountVerify.errorMsg = '最少添加' + _this.min
+      return false
+    }
+    if (_this.max && itemLen > _this.max) {
+      _this.itemCountVerify.errorMsg = '最多添加' + _this.max
+      return false
+    }
+    return true
+  }
+  
+  /**
+   * 增加子组件列表操作
+   */
+  function addOperate(_this, regignCompts, index, addIndex, init, formType, transform, transformForHorizontal) {
+    verifyItemCountFun(_this)
+    _this.$store.commit('addDetailWidgets', {id: _this.widget.id, resignCompts: regignCompts, addIndex: addIndex})
+    _this.$store.commit('setInitStatus', false)
+    var detailWidgets = _this.$store.state.widgets[_this.widget.id].children
+    var children = detailWidgets[index]
+    if (_this.horizontalShow) {
+      //横向展示子组件
+      children = transformForHorizontal(children, formType, index, true)
+      _this.$nextTick(function () {
+        var sl = $('#fui_subform' + _this.widget.id + ' .scroll_area').scrollLeft()
+        var trJq = $('#fui_subform' + _this.widget.id + ' .subform-content .subform-row:last')
+        trJq.find('.row_head').css('transform', 'translateX(' + sl + 'px)')
+      })
+      //移动端横向展示子组件添加需要默认打开填写页
+      if (!init) {
+        doOpenDetailComptsForMobile(_this, detailWidgets.length - 1, transform)
+      }
+    } else {
+      children = transform(children, index, true, formType)
+    }
+    if ($.trim(addIndex) !== '') {
+      //复制子组件列表操作
+      _this.computedCompts.splice(index, 0, children)
+    } else {
+      //直接添加子组件列表
+      _this.computedCompts.push(children)
+    }
+    //控制移动端展开收起状态
+    if (_this.groupComptsShow) {
+      _this.groupComptsShow.push({show: true})
+    }
+  }
+  
+  /**
+   * 子表单新增记录公共逻辑(pc,移动端)
+   * init 控制移动端横排新增记录需要默认打开填写页
+   */
+  function doAddGroupOfDetail(_this, init, formType, transform, transformForHorizontal) {
+    var regignCompts = JSON.parse(JSON.stringify(_this.resignCompts))
+    var detailWidgets = _this.$store.state.widgets[_this.widget.id].children
+    //执行添加子表单记录结构
+    addOperate(_this, regignCompts, detailWidgets.length, '', init, formType, transform, transformForHorizontal)
+    //pc端执行的方法
+    if (!!_this.$doCloseMe && typeof _this.$doCloseMe === 'function') {
+      _this.$doCloseMe()
+    }
+    if (_this.horizontalShow) {
+      var height = 0, detailDomObj = $('#scroll_area' + _this.widget.id)
+      for (var i = 0; i < detailDomObj.find('.subform-row').length; i++) {
+        height += parseFloat(detailDomObj.find('.subform-row').eq(i).height())
+      }
+      detailDomObj.animate({scrollTop: height}, 500)
+    }
+  }
+  
+  /**
+   * 移动端复制子表单记录
+   * init 控制移动端横排复制记录需要默认打开被复制的记录填写页
+   */
+  function doCopySubComptsMobile(_this, resignDataIndex, addIndex, init, formType, transform, transformForHorizontal) {
+    doCopySubComptsCommon(_this, resignDataIndex, addIndex, init, formType, transform, transformForHorizontal)
+    if (_this.horizontalShow) {
+      //移动端横排复默认打开被复制的记录填写页
+      setTimeout(function () {
+        doOpenDetailComptsForMobile(_this, _this.horizontalSubCompts.currSubGroupIndex, transform)
+      }, 1000)
+    } else {
+      //移动端竖版跳转至复制记录并添加闪烁效果
+      locationFlicker(_this, addIndex)
+    }
+  }
+  
+  /**
+   * 子表单复制子表单记录公共逻辑(pc,移动端)
+   * init 控制移动端横排复制记录需要默认打开被复制的记录填写页
+   */
+  function doCopySubComptsCommon(_this, resignDataIndex, addIndex, init, formType, transform, transformForHorizontal) {
+    var currentDetailOfChildrens = _this.$store.state.widgets[_this.widget.id].children
+    var groupEle = JSON.parse(JSON.stringify(currentDetailOfChildrens[resignDataIndex]))
+    if (!groupEle) {
+      return
+    }
+    var regignCompts = JSON.parse(JSON.stringify(groupEle)), arr = []
+    for (var i = 0; i < regignCompts.length; i++) {
+      arr.push(JSON.parse(JSON.stringify(regignCompts[i].config)))
+    }
+    addIndex = addIndex + 1
+    //移动端记录复制的索引位置(横排主动打开填写页用到)
+    if (_this.horizontalSubCompts && _this.horizontalShow) {
+      _this.horizontalSubCompts.currSubGroupIndex = addIndex
+    }
+    addOperate(_this, arr, addIndex, addIndex, init, formType, transform, transformForHorizontal)
+    _this.detailCopy.copyShow = false
+    _this.detailCopy.flickerIndex = calculateFlickerIndex(_this, addIndex)
+    updateInDetailGroupIndex(_this)
+  }
+  
+  /**
+   * 修改子表单内子组件inDetailGroupIndex值
+   */
+  function updateInDetailGroupIndex(_this) {
+    var detailWidgets = _this.$store.state.widgets[_this.widget.id].children
+    for (var i = 0; i < detailWidgets.length; i++) {
+      var groupDetailWidget = detailWidgets[i]
+      for (var j = 0; j < groupDetailWidget.length; j++) {
+        var subWidget = groupDetailWidget[j]
+        if (subWidget && subWidget.config) {
+          subWidget.config.inDetailGroupIndex = i
+        }
+      }
+    }
+  }
+  
+  /**
+   * 生成新复制的子组件列表闪烁效果行索引
+   */
+  function calculateFlickerIndex(_this, addIndex) {
+    var currentDetailOfChildrensLen = _this.$store.state.widgets[_this.widget.id].children.length
+    if ($.trim(addIndex) === '' || addIndex === -1) {
+      return -1
+    }
+    if (addIndex === currentDetailOfChildrensLen - 1) {
+      return currentDetailOfChildrensLen - 1
+    }
+    return addIndex
+  }
+
+  /**
+   * 填写页或编辑页子表单子组件列表滚动到相应位置
+   */
+  function detailSubComptsScroll(_this, index) {
+    // 新增子表单时，滚动至新加记录处
+    var addDomObj = $('.form_index .form_modules'), editDomObj = $('.admin_edit_cont'), scrollObj = $('.subform_target_' + _this.widget.id + '_' + index)
+    addDomObj.animate({
+      scrollTop: addDomObj.scrollTop() + scrollObj.offset().top - 100
+    }, 500)
+    // 编辑页子表单新增子组件，滚动值新添加记录处
+    editDomObj.animate({
+      scrollTop: editDomObj.scrollTop() + scrollObj.offset().top - 100
+    }, 500)
+  }
+
+  /**
+   * 动态定位并跳转闪烁索引位置子表单记录
+   */
+  function locationFlicker(_this, addIndex) {
+    if (!_this.horizontalShow) {
+      setTimeout(function () {
+        detailSubComptsScroll(_this, addIndex)
+        // 新增子表单颜色提示
+        _this.$nextTick(function () {
+          _this.lastChildComptClassShow = true
+        })
+      }, 500)
+    }
+    //移动端延时关闭闪烁效果
+    setTimeout(function () {
+      _this.detailCopy.flickerIndex = -1
+    }, 2000)
+  }
+
+  /**
+   * 移动端删除子表单记录
+   */
+  function doRemoveMxForMobile(_this, index, title) {
+    if (_this.readonly || _this.computedCompts.length <= 1) {
+      return
+    }
+    _this.$store.commit('setInitStatus', false)
+    _this.$store.commit('clearRelateFieldValue')
+    verifyItemCountFun(_this)
+    popup.confirm({
+      content: '确定要删除' + title + (index + 1) + '？',
+      btn2: function () {
+        _this.$store.commit('removeDetailWidgets', {id: _this.widget.id, index: index, vm: _this})
+        _this.computedCompts.splice(index, 1)
+        _this.groupComptsShow.splice(index, 1)
+        // 删除后更新字段重复值校验数据
+        updateNoRepeatDataFun(_this, index, 'delete');
+      }
+    })
+    _this.$store.commit('checkSendable')
+  }
+  
+  /**
+   * 子表单操作时（删除、复制）更新对应数据信息
+   * @param _this
+   * @param inDetailGroupIndex
+   * @param type 具体什么操作
+   */
+  function updateNoRepeatDataFun(_this, inDetailGroupIndex, type) {
+    // 提取出子表单组件id
+    var configIds = {}, children = $.extend(true, [], _this.widget.config.compts[0]);
+    for (var i = 0; i < children.length; i ++) {
+      var compt = children[i];
+      configIds[compt.id] = compt.compt;
+    }
+    _this.$store.commit('updateForOperateSub', {compts: configIds, inDetailGroupIndex: inDetailGroupIndex, type: type});
+  }
+  
+  /**
+   * 直接删除子表单不提示
+   */
+  function doRemoveMxByLink(_this, index) {
+    if (_this.readonly || _this.computedCompts.length <= 1) {
+      return
+    }
+    _this.$store.commit('clearRelateFieldValue')
+    verifyItemCountFun(_this)
+    _this.$store.commit('removeDetailWidgets', {id: _this.widget.id, index: index, vm: _this})
+    _this.computedCompts.splice(index, 1)
+  }
+
+  /**
+   * pc端现在子表单记录
+   * init 控制移动端横排新增记录需要默认打开填写页
+   */
+  function doAddGroupOfDetailPc(_this, init, formType, transform, transformForHorizontal) {
+    doAddGroupOfDetail(_this, init, formType, transform, transformForHorizontal)
+    //pc端新增记录加上闪烁效果
+    _this.detailCopy.flickerIndex = _this.computedCompts.length - 1
+    setTimeout(function () {
+      _this.detailCopy.flickerIndex = -1
+    }, 2000)
+  }
+
+  /**
+   * 复制子表单
+   */
+  function doCopySubComptsForMobile(_this, formType, resignDataIndex, addIndex, transform, transformForHorizontal) {
+    if (_this.horizontalSubCompts.show && _this.detailCopy.copyShow) {
+      // 存在必填项未填写，直接返回，不进行复制
+      if (!doSaveSubComptsOfValueFun(_this)) {
+       return
+      }
+    }
+    if (_this.horizontalShow) {
+      _this.$nextTick(function () {
+        doCopySubComptsMobile(_this, resignDataIndex, addIndex, true, formType, transform, transformForHorizontal)
+      })
+    } else {
+      doCopySubComptsMobile(_this, resignDataIndex, addIndex, true, formType, transform, transformForHorizontal)
+    }
+  }
+
+  /**
+   * 刷新横排子表单时当前选中的子表单内某行子组件列表的值显示
+   */
+  function doSaveSubComptsOfValueFun(_this) {
+    //刷新横排子表单时当前选中的子表单内某行子组件列表的值显示
+    var refsArray = _this.$refs['subComptsForTable' + _this.horizontalSubCompts.currSubGroupIndex]
+    var dataSourceComptsRefs = _this.$refs.currentSubCompsRef
+    if (refsArray && dataSourceComptsRefs) {
+      for (var i = 0; i < dataSourceComptsRefs.length; i++) {
+        var sourceCompt = dataSourceComptsRefs[i], resignComptId = 0
+        for (var j = 0; j < refsArray.length; j++) {
+          if (sourceCompt.widget.config.id === refsArray[j].widget.config.id) {
+            resignComptId = refsArray[j].widget.id
+            break
+          }
+        }
+        for (var j = 0; j < refsArray.length; j++) {
+          if (sourceCompt.widget.config.id === refsArray[j].widget.config.id) {
+            if (sourceCompt.widget.config.compt === 'captiontext') {
+              continue
+            }
+            if (sourceCompt.widget.config.compt === 'relateddata') {
+              continue
+            }
+            var status = refsArray[j].$reloadValueFun(sourceCompt)
+            if (!status) {
+              var verified = _this.$store.state.verifieds[resignComptId]
+              if (verified && !verified.verified && verified.isShow) {
+                popup.alert(verified.errMsg || '有必填项未填')
+                return false
+              }
+            }
+            break
+          }
+        }
+      }
+    }
+    // 刷新子表单中组件重复验证状态
+    fieldNoRepeatTriggerUtils.triggerFieldStatus();
+    _this.$store.commit('checkSendable')
+    _this.$subGroupAreaToggle()
+    return true
+  }
+
+  /**
+   * pc端复制子表单记录
+   * init 控制移动端横排复制记录需要默认打开被复制的记录填写页
+   */
+  function doCopySubComptsPc(_this, resignDataIndex, addIndex, init, formType, transform, transformForHorizontal) {
+    doCopySubComptsCommon(_this, resignDataIndex, addIndex, init, formType, transform, transformForHorizontal)
+    //pc端复制记录闪烁效果延时关闭
+    setTimeout(function () {
+      _this.detailCopy.flickerIndex = -1
+    }, 2000)
+  }
+
+  /**
+   * 移动端新增子表单记录
+   * init 控制移动端横排新增记录需要默认打开填写页
+   */
+  function doAddGroupOfDetailMobile(_this, init, formType, transform, transformForHorizontal) {
+    doAddGroupOfDetail(_this, init, formType, transform, transformForHorizontal)
+    //移动端竖排添加子表单记录后需要添加闪烁效果
+    if (!_this.horizontalShow) {
+      _this.detailCopy.flickerIndex = _this.computedCompts.length - 1
+      //定位并跳转至闪烁位index
+      locationFlicker(_this, _this.detailCopy.flickerIndex)
+    }
+  }
+
+  /*
+ * 横排子表单时弹出并加载当前选中的子表单内某行子组件列表
+ * index 打开填写页索引
+ */
+  function doOpenDetailComptsForMobile(_this, index, transform) {
+    var thisWidget = _this.$store.state.widgets[_this.widget.id].children
+    if (thisWidget && thisWidget.length > index) {
+      _this.horizontalSubCompts.computedSubCompts = transform(thisWidget[index], index, true)
+    }
+    _this.$subGroupAreaToggle()
+    _this.horizontalSubCompts.currSubGroupIndex = index
+    isDeleteDetailForMobile(_this, index)
+  }
+
+  /**是否可删除已有记录*/
+  function isDeleteDetailForMobile(_this, index) {
+    _this.$nextTick(function () {
+      var status = false
+      //旧数据没有做配置，或 可以删除已有记录
+      if (_this.computedCompts.length > 1) {
+        if (!_this.widget.config.deleteDetail || _this.widget.config.deleteDetail.open || !_this.widget.config.defaultComptsInfo) {
+          status = true
+        } else {
+          status = index >= (_this.widget.config.defaultComptsInfo.rowNum || 0)
+        }
+      }
+      _this.deleteSubGroupItem = status
+    })
+  }
+
+  return {
+    doRemoveMxForMobile: doRemoveMxForMobile,
+    doAddGroupOfDetailPc: doAddGroupOfDetailPc,
+    doCopySubComptsForMobile: doCopySubComptsForMobile,
+    doSaveSubComptsOfValueFun: doSaveSubComptsOfValueFun,
+    doAddGroupOfDetailMobile: doAddGroupOfDetailMobile,
+    doCopySubComptsPc: doCopySubComptsPc,
+    detailSubComptsScroll: detailSubComptsScroll,
+    doOpenDetailComptsForMobile: doOpenDetailComptsForMobile,
+    doRemoveMxByLink: doRemoveMxByLink,
+    verifyItemCountFun: verifyItemCountFun
+  }
+})

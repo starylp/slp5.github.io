@@ -1,0 +1,148 @@
+define(['jquery'], function ($) {
+
+  'use strict';
+
+  var defaultOpt = {
+    v: '1.4.12',//高德地图api版本号
+    jsAPIKey: 'c8b4db33b7714692ad93e07c7da3a2ba',//JavaScript API key
+    jsWebAPIKey: 'c314ccb1bc3d0800ff195bb8b52957a8',//此处的key，为Web服务API的key，与JavaScript API的key不是同一个
+    lng: 116.331398,//百度默认坐标
+    lat: 39.897445,//百度默认坐标
+    isConvertLngLat: false,//是否转换baidu坐标
+    resizeEnable: true,//是否监控地图容器尺寸变化
+    zoom: 15,//初始化地图时显示的缩放级别
+    zoomLevel: 16,//定位后地图缩放级别
+    geocoder: {
+      radius: 1000,//逆地理编码时，以给定坐标为中心点，单位：米
+      extensions: "all"//逆地理编码时，返回信息的详略 取值为：all，返回地址信息及附近poi、道路、道路交叉口等信息
+    },
+    isDisLogo: false,//是否地图区域左下角显示公司logo
+    isDisCopyright: false,//是否地图区域左下角显示copyright
+    element: null,//地图显示所在dom元
+    locateStart: function () {//开始定位
+    },
+    locateSuccess: function (data) {//定位成功
+      // console && console.log(data);
+    },
+    locateError: function (data) {//定位失败
+      // console && console.log(data);
+    }
+  };
+
+  var def = $.Deferred();//定义异步延时机制
+  var promise = def.promise();
+  window._mapInit = function () {
+    def.resolve();//异步延时完成
+  };
+
+  require(['https://webapi.amap.com/maps?v=' + defaultOpt.v + '&key=' + defaultOpt.jsAPIKey + '&plugin=AMap.Geocoder&callback=_mapInit']);
+
+  var MapLocate = function (options) {
+    var me = this;
+    promise.done(function () {
+      me.opts = $.extend(true, {}, defaultOpt, options);
+      mapLocateInit(me, options);
+    });
+  };
+
+  /**
+   * 初始化地图对象并根据给定的lng,lat值进行定位
+   */
+  function mapLocateInit(me) {
+    if (me.opts.element == null) {
+      me.opts.locateError({
+        resultMsg: '未找到初使化地图的dom元素'
+      });
+      return;
+    }
+    me.opts.locateStart();
+    //显示地图
+    me.map = new AMap.Map(me.opts.element, {
+      resizeEnable: me.opts.resizeEnable,
+      zoom: me.opts.zoom,
+      dragEnable: false //禁止拖动
+    });
+    AMap.plugin('AMap.Geolocation', function() {
+      var geolocation = new AMap.Geolocation({
+        enableHighAccuracy: true,//是否使用高精度定位，默认:true
+        timeout: 10000,          //超过10秒后停止定位，默认：5s
+        buttonPosition:'RB',    //定位按钮的停靠位置
+        buttonOffset: new AMap.Pixel(10, 20),//定位按钮与设置的停靠位置的偏移量，默认：Pixel(10, 20)
+        zoomToAccuracy: true   //定位成功后是否自动调整地图视野到定位点
+
+      });
+      me.map.addControl(geolocation);
+      if (me.opts.center) {
+        me.geoLocate(me.opts.center.lng, me.opts.center.lat)
+        return
+      }
+      geolocation.getCurrentPosition(function (status, result) {
+        if (status === 'complete') {
+          onComplete(me, result)
+        } else {
+          onError(me, result)
+        }
+      });
+    });
+    me.map.on('complete', function () {
+      if (!me.opts.isDisLogo) {
+        $('.amap-logo').remove();
+      }
+      if (!me.opts.isDisCopyright) {
+        $('.amap-copyright').remove();
+      }
+    })
+  }
+
+  //解析定位结果
+  function onComplete(me, data) {
+    me.opts.locateSuccess({
+      result: data
+    });
+  }
+
+  //解析定位错误信息
+  function onError(me, data) {
+    var msg = data.message;
+    if (msg.indexOf('permission denied') !== -1) {
+      msg = '请开启定位权限后重试';
+    }
+    me.opts.locateError({
+      resultMsg: msg
+    });
+  }
+  
+  MapLocate.prototype.geoLocate = function (lng, lat) {
+    var me = this
+    regeocoder(me, lng, lat)
+  }
+  
+  /**
+   * 地理编码与逆地理编码服务，用于地址描述与坐标间的相互转换
+   */
+  function regeocoder(me, lng, lat) {
+    //地图缩放至指定级别并以指定点为地图显示中心点
+    me.map.setZoomAndCenter(me.opts.zoomLevel, [lng, lat]);
+    
+    var geocoder = new AMap.Geocoder({
+      radius: me.opts.geocoder.radius,
+      extensions: me.opts.geocoder.extensions
+    });
+    geocoder.getAddress([lng, lat], function (status, result) {
+      if (status === 'complete' && result.info === 'OK') {
+        me.map.clearMap()
+        //在新中心点添加定位标记
+        var marker = new AMap.Marker({
+          position: [lng, lat]
+        })
+        me.map.add(marker)
+      } else {
+        me.opts.locateError({
+          resultMsg: '获取定位地址描述失败'
+        });
+      }
+    });
+  }
+
+  return MapLocate;
+});

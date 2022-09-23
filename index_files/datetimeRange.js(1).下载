@@ -1,0 +1,495 @@
+define(['util', 'moment', 'jquery', 'publicUtils', 'VueUtils'], function (util, moment, $, publicUtils, VueUtils) {
+  'use strict'
+  return function (widget) {
+    
+    var dayFormat = 'YYYY-MM-DD', dateTimeFormat = 'YYYY-MM-DD HH:mm:ss'
+    
+    function getMomentDate(value, format) {
+      if (format === 'HH:mm') {
+        if (value && value.indexOf('-') !== -1) {
+          //上一次缓存的值存在年月日值
+          value = '00:00'
+        }
+        return moment(value, 'HH:mm')
+      }
+      if (value && value.indexOf('-') === -1) {
+        //上一次缓存的值不存在年月日值
+        return moment()
+      }
+      return moment(value)
+    }
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: $.trim(_this.value),
+        compose: 'row',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+    
+    return {
+      id: widget.id,
+      template: [
+        '<div>',
+        '<div class="cell_cont" v-show="isShow && hasAuthority">',
+        '<span :class="{cell_text: svalue, cell_nodata: !svalue}" v-show="svalue&&evalue">{{svalue}}-{{evalue}}</span>',
+        '<span class="cell_nodata" v-show="!svalue||!evalue"></span>',
+        '</div>',
+        '<event-trigger :widget="widget" :compose="\'row\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event-type="triggerValueEventByType" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          svalue: '',
+          evalue: '',
+          rinput: '',
+          rvalue: '',
+          manualSetValue: false,
+          isErrors: false,
+          isErrore: false,
+          errMsg: '',
+          errInfo: {
+            startErrMsg: '',
+            endErrMsg: ''
+          }
+        }
+      },
+      components: {
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue')
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEventByType: function (data) {
+          if (data && data.hasOwnProperty('val') && data.hasOwnProperty('type')) {
+            switch (data.type) {
+              case '0':
+                this.svalue = publicUtils.convertTimestampToFormatStr(data.val, this.format)
+                break
+              case '1':
+                this.evalue = publicUtils.convertTimestampToFormatStr(data.val, this.format)
+                break
+              default:
+                this.svalue = ''
+                this.evalue = ''
+            }
+          }
+          this.loadStatus = false
+        },
+        triggerGetValueEvent:function (callback) {
+          callback([{svalue: this.svalue, evalue: this.evalue}])
+        },
+        $reloadValueFun: function (vueObj) {
+          //子表单横排时打开某行子组件后依次给对应子表彰表格显示字段赋值
+          this.svalue = vueObj.svalue
+          this.evalue = vueObj.evalue
+          this.rvalue = vueObj.rvalue
+          return this.verified
+        },
+        $verifyDatetimeRange: function (svalue, evalue) {
+          if (!svalue || !evalue || !this.calculate) {
+            return
+          }
+          var choiceSDate = this.sformat === dayFormat ? getMomentDate(svalue + ' 00:00:00', dateTimeFormat) : getMomentDate(svalue, this.sformat)
+          var choiceEDate = this.eformat === dayFormat ? getMomentDate(evalue + ' 23:59:59', dateTimeFormat) : getMomentDate(evalue, this.eformat)
+          if (choiceEDate.valueOf() < choiceSDate.valueOf()) {
+            //popup.alert("开始时间必须小于结束时间");
+            this.rvalue = ''
+            this.rinput = ''
+            return
+          }
+          var rangeObj = this.$calculateTime(choiceSDate, choiceEDate)
+          var unit = this.widget.config.fields[2].fieldType.unit
+          var result
+          if (unit === 'day') {
+            result = rangeObj.rDay + Math.round(rangeObj.rHour / 24 * 100) / 100 + Math.round(rangeObj.rMinute / 60 / 24 * 100) / 100
+          } else {
+            result = rangeObj.rDay * 24 + rangeObj.rHour + rangeObj.rMinute / 60
+          }
+          this.rinput = parseFloat(result.toFixed(2))
+          this.rvalue = this.rinput
+        },
+        $calculateTime: function (startDate, endDate) {
+          return util.lengthOfTime(startDate, endDate)
+        },
+        isStartMust: function () {
+          if ($.trim(this.svalue) === '' && this.required) {
+            this.errInfo.startErrMsg = '此项为必填项'
+            this.isErrors = true
+          }
+        },
+        isEndMust: function () {
+          if ($.trim(this.evalue) === '' && this.required) {
+            this.errInfo.endErrMsg = '此项为必填项'
+            this.isErrore = true
+          }
+        }
+      },
+      watch: {
+        svalue: function (val) {
+          var errMsg = ''
+          if (!this.verified) {
+            if (this.svalue && this.evalue) {
+              var choiceSDate = getMomentDate(this.svalue, this.sformat)
+              var choiceEDate = getMomentDate(this.evalue, this.eformat)
+              var rangeVerify = this.isInclude ? choiceEDate.valueOf() >= choiceSDate.valueOf() : choiceEDate.valueOf() > choiceSDate.valueOf()
+              if (!rangeVerify) {
+                if (!this.isInclude && choiceEDate.valueOf() === choiceSDate.valueOf()) {
+                  errMsg = '开始时间不能等于结束时间'
+                } else {
+                  errMsg = this.widget.config.verify.dateRange.errMsg
+                }
+                this.isErrors = true
+                this.isErrore = true
+              } else {
+                this.isErrors = false
+                this.isErrore = false
+              }
+            }
+          } else {
+            this.isErrors = false
+            this.isErrore = false
+          }
+          this.$verifyDatetimeRange(val, this.evalue)
+          this.errMsg = errMsg
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.svalue}]},
+              {fidx: 1, values: [{val: this.evalue}]},
+              {fidx: 2, values: [{val: this.rvalue}]}
+            ],
+            errMsg: errMsg,
+            verified: this.verified,
+            isShow: this.isShow,
+            configId: this.widget.config.id,
+            hasAuthority: this.hasAuthority
+          })
+          this.$store.commit('calculateScore', {
+            id: this.widget.id,
+            pid: this.widget.pid,
+            configId: this.widget.config.id,
+            value: this.rvalue,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            fromDetail: !!this.widget.config.fromDetail
+          })
+          this.$store.commit('setCalculableStatus')
+          dataLoadInit(this)
+        },
+        evalue: function (val) {
+          var errMsg = ''
+          if (!this.verified) {
+            if (this.svalue && this.evalue) {
+              var choiceSDate = getMomentDate(this.svalue, this.sformat)
+              var choiceEDate = getMomentDate(this.evalue, this.eformat)
+              var rangeVerify = this.isInclude ? choiceEDate.valueOf() >= choiceSDate.valueOf() : choiceEDate.valueOf() > choiceSDate.valueOf()
+              if (!rangeVerify) {
+                if (!this.isInclude && choiceEDate.valueOf() === choiceSDate.valueOf()) {
+                  errMsg = '开始时间不能等于结束时间'
+                } else {
+                  errMsg = this.widget.config.verify.dateRange.errMsg
+                }
+                this.isErrors = true
+                this.isErrore = true
+              } else {
+                this.isErrors = false
+                this.isErrore = false
+              }
+            }
+          } else {
+            this.isErrors = false
+            this.isErrore = false
+          }
+          
+          this.$verifyDatetimeRange(this.svalue, val)
+          this.errMsg = errMsg
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.svalue}]},
+              {fidx: 1, values: [{val: this.evalue}]},
+              {fidx: 2, values: [{val: this.rvalue}]}
+            ],
+            errMsg: errMsg,
+            verified: this.verified,
+            isShow: this.isShow,
+            configId: this.widget.config.id,
+            hasAuthority: this.hasAuthority
+          })
+          this.$store.commit('calculateScore', {
+            id: this.widget.id,
+            pid: this.widget.pid,
+            configId: this.widget.config.id,
+            value: this.rvalue,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            fromDetail: !!this.widget.config.fromDetail
+          })
+          this.$store.commit('setCalculableStatus')
+          dataLoadInit(this)
+        }
+      },
+      computed: {
+        required: function () {
+          return this.widget.config.verify.required
+        },
+        fromManage: function () {
+          return this.$store.getters.getFromManageStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = (!this.editable && !this.fromManage && !this.hasRoleId)
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if (this.required || ($.trim(this.svalue) !== '' && $.trim(this.evalue) !== '')) {
+            var timeRangeVerify = true
+            var choiceSDate = getMomentDate(this.svalue, this.sformat)
+            var choiceEDate = getMomentDate(this.evalue, this.eformat)
+            if (this.calculate) {
+              timeRangeVerify = $.trim(this.rvalue) !== ''
+            }
+            var rangeVerify = this.isInclude ? choiceEDate.valueOf() >= choiceSDate.valueOf() : choiceEDate.valueOf() > choiceSDate.valueOf()
+            return $.trim(this.svalue) !== '' && $.trim(this.evalue) !== '' && timeRangeVerify && rangeVerify
+          }
+          return true
+        },
+        format: function () {
+          return this.widget.config.fields[0].fieldType.format
+        },
+        rangeType: function () {
+          if (!this.widget.config.verify.hasOwnProperty('validateRange')) {
+            return 0
+          }
+          return this.widget.config.verify.validateRange.rangeType
+        },
+        dynamicRangeStartValue: function () {
+          if (!this.widget.config.verify.hasOwnProperty('validateRange')) {
+            return ''
+          }
+          return this.widget.config.verify.validateRange.dynamicRangeStartValue
+        },
+        dynamicRangeEndValue: function () {
+          if (!this.widget.config.verify.hasOwnProperty('validateRange')) {
+            return ''
+          }
+          return this.widget.config.verify.validateRange.dynamicRangeEndValue
+        },
+        dynamicRangeStartType: function () {
+          if (!this.widget.config.verify.hasOwnProperty('validateRange')) {
+            return 0
+          }
+          return this.widget.config.verify.validateRange.dynamicRangeStartType
+        },
+        dynamicRangeEndType: function () {
+          if (!this.widget.config.verify.hasOwnProperty('validateRange')) {
+            return 0
+          }
+          return this.widget.config.verify.validateRange.dynamicRangeEndType
+        },
+        beginDate: function () {
+          if (!this.widget.config.verify.hasOwnProperty('validateRange')) {
+            return ''
+          }
+          return this.widget.config.verify.validateRange.beginDate
+        },
+        endDate: function () {
+          if (!this.widget.config.verify.hasOwnProperty('validateRange')) {
+            return ''
+          }
+          return this.widget.config.verify.validateRange.endDate
+        },
+        stitle: function () {
+          return this.widget.config.fields[0].label
+        },
+        sformat: function () {
+          return util.reSetDateFormat(this.widget.config.fields[0].fieldType.format)
+        },
+        etitle: function () {
+          return this.widget.config.fields[1].label
+        },
+        eformat: function () {
+          return util.reSetDateFormat(this.widget.config.fields[1].fieldType.format)
+        },
+        rtitle: function () {
+          var extra = ''
+          switch (this.widget.config.fields[2].fieldType.unit) {
+            case 'day':
+              extra = '(天)'
+              break
+            case 'hour':
+              extra = '(小时)'
+          }
+          return this.widget.config.fields[2].label + extra
+        },
+        calculate: function () {
+          return this.widget.config.fields[2].fieldType.calculate
+        },
+        isInclude: function () {
+          return this.widget.config.verify.dateRange.isInclude
+        },
+        sdateType: function () {
+          var f = this.widget.config.fields[0].fieldType.format
+          switch (f) {
+            case 'HH:mm':
+              return 'time'
+            case 'yyyy-MM-dd HH:mm':
+              return 'datetime'
+            default:
+              return 'date'
+          }
+        },
+        edateType: function () {
+          var f = this.widget.config.fields[1].fieldType.format
+          switch (f) {
+            case 'HH:mm':
+              return 'time'
+            case 'yyyy-MM-dd HH:mm':
+              return 'datetime'
+            default:
+              return 'date'
+          }
+        },
+        stip: {
+          get: function () {
+            if (this.svalue) {
+              return this.svalue
+            }
+            if (!(this.widget.config.fields[0].tip instanceof Object)) {
+              return this.widget.config.fields[0].tip
+            }
+            return this.widget.config.fields[0].tip.text
+          },
+          set: function (val) {
+          }
+        },
+        etip: {
+          get: function () {
+            if (this.evalue) {
+              return this.evalue
+            }
+            if (!(this.widget.config.fields[1].tip instanceof Object)) {
+              return this.widget.config.fields[1].tip
+            }
+            return this.widget.config.fields[1].tip.text
+          },
+          set: function (val) {
+          }
+        },
+        visible: function () {
+          if (!this.widget.config.hasOwnProperty('visible')) {
+            this.widget.config.visible = true
+          }
+          return this.widget.config.visible
+        },
+        editable: function () {
+          if (!this.widget.config.hasOwnProperty('editable')) {
+            this.widget.config.editable = true
+          }
+          return this.widget.config.editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+          
+          if (!this.visible && !this.fromManage && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类似web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail && this.$store.state.currOptionSel.inDetailGroupIndex !==
+                     this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          var svalue = this.svalue, evalue = this.evalue, rvalue = this.rvalue
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: svalue}]},
+              {fidx: 1, values: [{val: evalue}]},
+              {fidx: 2, values: [{val: rvalue}]}
+            ],
+            errMsg: this.errMsg,
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        }
+      },
+      created: function () {
+        var svalues = this.widget.config.fields[0].values
+        this.svalue = svalues ? (svalues[0] && svalues[0].val) || '' : ''
+        var evalues = this.widget.config.fields[1].values
+        this.evalue = evalues ? (evalues[0] && evalues[0].val) || '' : ''
+        this.$verifyDatetimeRange(this.svalue, this.evalue)
+        this.$store.commit('watchValues', {
+          id: this.widget.id,
+          fvalues: [
+            {fidx: 0, values: [{val: this.svalue}]},
+            {fidx: 1, values: [{val: this.evalue}]},
+            {fidx: 2, values: [{val: this.rvalue}]}
+          ],
+          verified: this.verified,
+          isShow: this.isShow,
+          hasAuthority: this.hasAuthority
+        })
+      },
+      mounted: function () {}
+    }
+  }
+})

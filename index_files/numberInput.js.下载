@@ -1,0 +1,503 @@
+define(['jquery', 'tipImgs', 'VueUtils', 'publicUtils'], function ($, tipImgs, VueUtils, publicUtils) {
+  'use strict'
+  return function (widget) {
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: publicUtils.percentConvertToNumValue(_this, _this.value),
+        values: publicUtils.percentConvertToNumValue(_this, _this.value),
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+    
+    /**
+     *触发第三方设置Url
+     */
+    function doInsertUrlField(_this) {
+      var insertUrlFields = _this.$store.getters.getInsertFiledIdById(_this.widget.config.id)
+      if (insertUrlFields && insertUrlFields.length > 0) {
+        var valArr = []
+        for (var i = 0; i < _this.value.length; i++) {
+          valArr.push(publicUtils.percentConvertToNumValue(_this, _this.value[i].val))
+        }
+        //存在当前字段被做为第三方Url条件字段
+        _this.$store.commit('operateInsertFiledData', {
+          id: _this.widget.id,
+          compt: _this.widget.config.compt,
+          configId: _this.widget.config.id,
+          value: valArr.join(',')
+        })
+      }
+    }
+
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{noClick:readonly, widget_error: errorTip || (errorInfo.show&&errorInfo.errMsg)}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+           '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_forbid_edit" :class="{form_forbid_nodata: !value}" v-if="readonly">',
+              '<p class="form_forbid_word">{{valShow}}{{percentage ? "%" : ""}}</p>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<div class="sub_loading" v-show="loadStatus"><span class="loading_icon"></span></div>',
+              '<!--普通数字输入-->',
+              '<input class="temp_text_input field" :class="{error: errorInfo.show&&errorInfo.errMsg}" :placeholder="placeHolder" :value="micrometerValue"' +
+              ' :readonly="readonly" @input="doFormatValueFun" @blur="showErrorMsgFun" @change="changeValue" v-if="!percentage"/>',
+              '<!--百分比数字输入-->',
+              '<label class="percent_input_wrapper" :class="{\'percent_focus\': inputFocusStatus}" v-if="percentage">',
+                '<div class="percent_input">',
+                  '<div class="input_wrapper">',
+                      '<div class="invisible_placeholder" v-text="value"></div>',
+                      '<input class="percent_text field" :class="{error: errorInfo.show&&errorInfo.errMsg}" v-model="value"' +
+                      ' :readonly="readonly" @focus="doFocusMe" @blur="showErrorMsgFun" @change="changeValue"/>',
+                  '</div>',
+                '</div>',
+                '<div class="percent_suffix" v-show="percentage">%</div>',
+              '</label>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-if="errorInfo.show&&errorInfo.errMsg">',
+              '<p class="must_word">{{errorInfo.errMsg}}</p>',
+            '</div>',
+            '<div class="widget_right_tip" v-if="micrometerValue || chineseValue">',
+              '<p class="tip_word" v-if="capital">{{chineseValue}}</p>',
+            '</div>',
+            '<div style="display: none;">{{relateFieldValueStatus}}{{buttonFieldValue}}{{ocrFieldValue}}</div>',
+          '</div>',
+        '<event-trigger :widget="widget" :compose="\'col\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event="triggerValueEvent" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+        '<field-link-trigger :widget="widget" @set-loading-status="triggerLoadingEvent" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+        '<field-formula-trigger :widget="widget" @set-loading-status="triggerLoadingEvent" @set-formula-field-value="formulaFieldValueStatus"></field-formula-trigger>',
+        '<detail-combox-field-link-trigger :widget="widget" @set-loading-status="triggerLoadingEvent" @set-field-value="detailComboxLinkFieldValueStatus"></detail-combox-field-link-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: '',
+          formulaTriggerLinkStatus: false,//常用公式触发数据联动 防止进入页面时死循环
+          micrometerValue: '',
+          chineseValue: '',
+          errorInfo: {
+            alertMsg: '',
+            errMsg: '',
+            show: false
+          },
+          loadStatus: false,
+          inputFocusStatus: false, //百分比显示时单行输入获得焦点的状态
+          watchValue: ''//用于外部参数赋值时触发数据联动（目前为：第三方传入及按钮组件）
+        }
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEvent: function (val) {
+          this.value = val
+          this.loadStatus = false
+        },
+        triggerGetValueEvent:function (callback) {
+          callback([{val: this.value}])
+        },
+        showErrorMsgFun: function () {
+          this.formulaTriggerLinkStatus = false
+          publicUtils.doShowErrorMsgFun(this, false, false)
+          dataLoadInit(this)
+        },
+        changeValue: function () {
+          this.$store.commit('setInitStatus', false)
+          doInsertUrlField(this)
+        },
+        doFocusMe: function () {
+          //百分比显示时 input获得焦点后修改其边框样式控制状态值
+          this.inputFocusStatus = true
+        },
+        //去掉输入框中显示的千分符，赋值给value
+        doFormatValueFun: function (e) {
+          this.value = e.target.value.replace(/,/g, '')
+        },
+        linkFieldValueStatus: function (result) {
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+  
+          if (hasNullCondVal && !this.isInit) {
+            this.value = ''
+            publicUtils.doShowErrorMsgFun(this, false, false)
+            dataLoadInit(this)
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          if (result && result.length > 0 && !this.$store.getters.getReadonlyStatus && (!this.isPreview || !this.isInit)) {
+            this.value = result[0].val !== '' ? publicUtils.convertToPercent(this, result[0].val) : ''
+            // 联动数据支持
+            if (this.micrometer) {
+              publicUtils.numberFormat(this, result[0].val)
+            }
+            publicUtils.doShowErrorMsgFun(this, false, false)
+            dataLoadInit(this)
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        detailComboxLinkFieldValueStatus: function (result) {
+          this.loadStatus = false
+          if (result && result.length > 0 && (!this.isPreview || !this.isInit)) {
+            this.value = result[0].val
+            publicUtils.doShowErrorMsgFun(this, false, false)
+            dataLoadInit(this)
+          }
+        },
+        formulaFieldValueStatus: function (data) {
+          this.loadStatus = false
+          var refreshResult = data.result, formulaFieldType = data.type, formulaFieldCurrIndex = data.index
+          if (formulaFieldType === 0 && formulaFieldCurrIndex !== this.widget.config.inDetailGroupIndex && this.$store.state.formulaFieldCurrIndex > -1 && this.widget.config.inDetailGroupIndex > -1) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 2, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+          var key = (formulaFieldType > 0 && this.widget.pid > 0) ? this.widget.config.id + '_' + this.widget.config.inDetailGroupIndex : this.widget.config.id
+          var result = refreshResult[key]
+          if (result && result.length > 0 && (!this.isPreview || !this.isInit)) {
+            var rval = parseFloat(result[0].val)
+            this.value = (!rval && rval !== 0) ? '' : rval
+            if (!this.formulaTriggerLinkStatus) {
+              publicUtils.doShowErrorMsgFun(this, false, false)
+              dataLoadInit(this)
+            }
+            this.formulaTriggerLinkStatus = true
+            // 联动数据支持
+            if (this.micrometer) {
+              publicUtils.numberFormat(this, this.value)
+            }
+            if (formulaFieldType > 0) {
+              delete refreshResult[key]
+            }
+            publicUtils.doShowErrorMsgFun(this, false, false)
+            dataLoadInit(this)
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 2, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        }
+      },
+      components: {
+        'tip-imgs': tipImgs,
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+        'detailComboxFieldLinkTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/detailcombox/detailComboxFieldLinkTrigger.vue'),
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue'),
+        fieldFormulaTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldFormula/fieldFormulaTrigger.vue')
+      },
+      watch: {
+        value: function () {
+          if (!this.verified) {
+            this.errorInfo.alertMsg = '格式错误！'
+          }
+          if (this.required && this.value === '') {
+            this.errorInfo.alertMsg = '有必填项未填'
+          }
+          // 千分符，中文格式化
+          publicUtils.numberFormat(this, this.value)
+          if (!this.micrometer) {
+            //未开启千分符
+            this.micrometerValue = this.value
+          }
+          //百分比数值处理为真值
+          var value = publicUtils.percentConvertToNumValue(this, this.value)
+
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: value}]}
+            ],
+            errMsg: this.errorInfo.errMsg,
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          this.$store.commit('calculateScore', {
+            id: this.widget.id,
+            pid: this.widget.pid,
+            configId: this.widget.config.id,
+            value: value,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            fromDetail: !!this.widget.config.fromDetail
+          })
+          this.$store.commit('setCalculableStatus')
+        },
+        watchValue: function () {
+          publicUtils.doShowErrorMsgFun(this, false, false)
+          dataLoadInit(this)
+        }
+      },
+      computed: {
+        valShow: function () {
+          return this.value === ''? '暂无数据':this.value
+        },
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        min: function () {
+          return this.widget.config.fields[0].verify.minValue.range
+        },
+        max: function () {
+          return this.widget.config.fields[0].verify.maxValue.range
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        isInteger: function () {
+          return this.widget.config.fields[0].verify.realNumber.isInteger
+        },
+        precision: function () {
+          return this.widget.config.fields[0].verify.realNumber.precision
+        },
+        precisionType: function () {// 小数位数限定类型 0 固定 1 不超过
+          return this.widget.config.fields[0].verify.realNumber.precisionType || 0;
+        },
+        precisionLen: function () {
+          return this.widget.config.fields[0].verify.realNumber.precisionLen
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var verified = true
+          if (publicUtils.getVerifyInfo(this, this.value) !== '') {
+            verified = false
+          }
+          if (this.required && this.value === '') {
+            verified = false
+          }
+          return verified
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            this.errorInfo.show = true
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          if (this.$store.getters.getCurrentType) {
+            return this.$store.getters.getReadonlyStatus
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === publicUtils.getCurrentDetailIndex(this)) || !obj.hasOwnProperty('inDetailIndex')) && !this.$store.getters.getReadonlyStatus && (!this.isPreview || !this.isInit)) {
+            var val = obj.fields[0].values && obj.fields[0].values.length > 0 && obj.fields[0].values[0].val !== '' ? parseFloat(obj.fields[0].values[0].val) : ''
+            var oldValue = this.value
+            this.value = obj.fields[0].values && obj.fields[0].values.length > 0 && obj.fields[0].values[0].val !== '' ? publicUtils.convertToPercent(this, obj.fields[0].values[0].val) : ''
+            if (this.isClearRelatedData) {
+              this.value = ''
+            }
+            // 联动数据支持
+            if (this.micrometer) {
+              publicUtils.numberFormat(this, val)
+            }
+            if (oldValue !== this.value) {
+              publicUtils.doShowErrorMsgFun(this, false, false)
+              dataLoadInit(this)
+            }
+            delete resultFields[this.widget.config.id]
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        isClearRelatedData: function () {
+          return this.$store.getters.getIsClearRelatedData
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = this.$store.state.reloadValSubField
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            if (this.widget.pid > 0 && !this.$store.state.verifieds[this.widget.pid].isShow) {
+              //明细内子组件时 如果明细组件是隐藏状态时 当前子组件也要改成隐藏状态
+              showStatus = false
+            } else {
+              showStatus = true
+            }
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: $.trim(publicUtils.percentConvertToNumValue(this, this.value))}]}
+            ],
+            errMsg: this.errorInfo.alertMsg,
+            verified: this.verified,
+            configId: this.widget.config.id,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        placeHolder: function () {
+          return this.widget.config.fields[0].placeholderMsg
+        },
+        capital: function () {
+          return this.widget.config.fields[0].capital
+        },
+        micrometer: function () {
+          return this.widget.config.fields[0].micrometer
+        },
+        percentage: function () {
+          return this.widget.config.fields[0].percentage
+        },
+        buttonFieldValue: function () {
+          var fieldValue = this.$store.getters.getButtonFieldValue(this.widget.config.alias)
+          if (fieldValue) {
+            this.watchValue = fieldValue
+            this.value = fieldValue.val[0] || ''
+          }
+          return fieldValue
+        },
+        ocrFieldValue: function () {
+          var fieldValue = this.$store.getters.getOcrFieldValue(this.widget.config.inDetailGroupIndex + '_' + this.widget.config.alias)
+          if (fieldValue) {
+            this.watchValue = fieldValue
+            this.value = fieldValue.val[0] || ''
+          }
+          return fieldValue
+        }
+      },
+      mounted: function () {
+        var _this = this
+        //防止子组件中构造各组件实例未执行，导致默认值数据关联失效问题
+        _this.$nextTick(function () {
+          setTimeout(function () {
+            if (_this.value || _this.value === 0) {
+              publicUtils.doShowErrorMsgFun(_this, false, false)
+            }
+            dataLoadInit(_this, _this.$store.getters.getComptDataType('init'))
+          }, 500)
+        })
+      },
+      created: function () {
+        if (this.$parent.horizontalShow) {
+          // 兼容打开横向子表单时数值显示
+          publicUtils.numValueAndPercentConvertForOne(this.widget.config, 'toPercent')
+        }
+        var values = this.widget.config.fields[0].values
+        values = values && values[0] && values[0].val
+        if (values === undefined) {
+          values = ''
+        }
+        this.value = values
+        if (this.widget.config.fields[0].hasOwnProperty('unchangeable')) {
+          this.widget.config.fields[0].editable = !this.widget.config.fields[0].unchangeable
+          delete this.widget.config.fields[0].unchangeable
+        }
+        var rev = this.$store.getters.getRelevance
+        if (rev != null && rev.hasOwnProperty(this.widget.config.id) && rev[this.widget.config.id]) {
+          this.value = rev[this.widget.config.id]
+        }
+        // 千分符，中文格式化
+        publicUtils.numberFormat(this, this.value)
+      }
+    }
+  }
+})

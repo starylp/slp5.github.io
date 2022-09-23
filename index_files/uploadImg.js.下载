@@ -1,0 +1,159 @@
+define(['jquery', 'Vue', 'appUtils', 'publicUpload'], function ($, Vue, AppUtils, publicUpload) {
+  'use strict';
+
+  return {
+    template: [
+      '<ul class="gimgs" :style="gimgsStyle"><li class="gimglis"><p class="gaddImg">',
+      '<span class="camera" @click="upload" v-if="!wx"></span>',
+      '<span class="camera" v-else><input type="file" name="file" class="file" id="file" @change.stop="uploadFile($event)"/></span>',
+      '</p></li><li class="gimglis goverflow">',
+      '<div class="preview-list" v-for="img in value" @click.stop="preview(img)">',
+      '<a href="javascript:void(0);" class="preview"  >',
+      '<img :src="panUrl + \'/thumbnail/100,100,50/\'+img.objectId" />',
+      '<span class="colose" @click.stop="remove(img)"></span> </a></div> </li>',
+      '</ul>'
+    ].join(''),
+    props: {
+      'value': {
+        type: Array,
+        default: function () {
+          return [];
+        }
+      },
+      'wx': {
+        type: Boolean,
+        default: function () {
+          return false;
+        }
+      },
+      'uploadMode': {
+        type: Number,
+        default: function () {
+          return 0;
+        }
+      },
+      'readonly': {
+        type: Boolean,
+        default: function () {
+          return false;
+        }
+      }
+    },
+    computed: {
+      gimgsStyle: function () {
+        return this.value.length > 0 ? 'min-height:2.2rem;height:auto' : ''
+      }
+    },
+    methods: {
+      preview: function (img) {
+        var imgIndex = this.value.indexOf(img);
+        var imgSrcs = [];
+
+        for (var i = 0, file; file = this.value[i++];) {
+          if (file.fileUrl) {
+            if (file.fileUrl.substr(0, 4) !== 'http') {
+              file.fileUrl = location.origin + file.fileUrl;
+            }
+          } else {
+            file.fileUrl = panUrl + '/thumbnail/origin/' + file.objectId
+          }
+          imgSrcs.push({
+            imageUrl: file.fileUrl
+          });
+        }
+        AppUtils.clientPreviewImages(imgSrcs, imgIndex);
+      },
+      upload: function () {
+        if(this.readonly){
+          return
+        }
+        var me = this;
+        var isAndroidPhone = window.navigator.userAgent.match(/(android_phone_)/);
+        var ua = navigator.userAgent;
+        ua = ua.substring(ua.indexOf("ChaoXingStudy_") + 14);
+        ua = ua.substring(ua.indexOf("_") + 1);
+        ua = ua.substring(0, ua.indexOf("_"));
+        if (isAndroidPhone || ua > '3.2.6.3') {// android和3263之后的iOS上传图片改用先上传到云盘方式协议
+          var cameraType = 3;
+          if (me.uploadMode === 1) { //只能拍照上传
+            cameraType = 7;
+          } else if (me.uploadMode === 2) { //只能从相册选择
+            cameraType = 6;
+          }
+          AppUtils.clientChooseImage({camare: cameraType}).then(function (object) {
+            if (object && object.files) {
+              var files = eval("(" + object.files + ")");
+              files.forEach(function (file) {
+                var fileUrl = panUrl + '/thumbnail/origin/' + file.objectid;
+                var valData = {"objectId": file.objectid, "fileUrl": fileUrl, "name": file.name, "suffix": file.type, "size": file.size};
+                me.value.splice(me.value.length, 0, valData);
+              })
+            }
+          });
+        } else {
+          var singleImage = false;
+          AppUtils.chooseImage("", singleImage).then(function (object) {
+            if (object && object.files) {
+              for (var i = 0; i < object.files.length; i++) {
+                $.ajax({
+                  url: "/data/filedata/img/upload",
+                  type: "POST",
+                  data: {"fileData": object.files[i].data, "fileType": object.files[i].type, "fileName": object.files[i].name},
+                  dataType: 'json',
+                  success: function (data) {
+                    if (data.success) {
+                      me.value.splice(me.value.length, 0, data.data.result);
+                    } else {
+                      alert('上传失败:' + data.msg);
+                    }
+                  },
+                  error: function () {
+                    console && console.log(arguments);
+                    alert('上传失败');
+                  }
+                });
+              }
+            }
+          });
+        }
+      },
+      uploadFile: function (e) {
+        if(this.readonly){
+          return
+        }
+        if (this.wx) {
+          var f = e.target.files[0].name.split('.');
+          var imgTypeReg = "^(jpg|jpeg|gif|xbm|pcd|tif|tiff|svg|pnz|ief|dib|jpe|png|bmp|ico)$";
+          var imgReg = new RegExp(imgTypeReg, 'i');
+          if (f.length > 0 && !imgReg.test(f[f.length - 1])) {
+            alert('请上传图片')
+            e.target.value = ''
+            return
+          }
+          var _this = this;
+          var formData = new FormData();
+          formData.append("file", e.target.files[0]);
+          publicUpload.commonUpload(_this, formData).then(function (response) {
+            if (response.success && response.data) {
+              _this.value.splice(_this.value.length, 0, response.data)
+              e.target.value = ''
+            } else {
+              alert(response.msg || '上传失败')
+            }
+          })
+        }
+      },
+      remove: function (img) {
+        if(this.readonly){
+          return
+        }
+        var valueIndex = this.value.indexOf(img);
+        this.value.splice(valueIndex, 1);
+      }
+    },
+    components: {},
+    created:function () {
+    
+    }
+  };
+});

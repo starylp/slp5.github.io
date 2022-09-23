@@ -1,0 +1,519 @@
+define(['jquery', 'VueUtils', 'util'], function ($, VueUtils, util) {
+  'use strict'
+  return function (widget) {
+
+    function getJSON(url, data) {
+      return $.getJSON(url, data)
+    }
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      var departmentIdArr = []
+      for (var i = 0; i < _this.value.length; i++) {
+        departmentIdArr.push(_this.value[i].departmentId)
+      }
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: departmentIdArr.join(','),
+        values: _this.value,
+        compose: 'row',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+
+    function checkedFatherLevelStatus (organizeTreeList, tempArr) {
+      //取消当前删除部门的上级部门选中状态（此上级部门下已没有选中的下级部门）
+      var find = false;
+      for (var i = 0; i < organizeTreeList.length; i++) {
+        var ele = organizeTreeList[i];
+        for (var j = 0; j < tempArr.length; j++) {
+          if(ele.id === tempArr[j]){
+            find = true;
+            ele.checked = false;
+            ele.disabled = false;
+            break;
+          }
+        }
+        checkedFatherLevelStatus(ele.children, tempArr)
+      }
+    }
+
+    function cancelDelSelOrgCheckStatus (organizeTreeList, org) {
+      //取消当前删除部门的选中状态
+      for (var i = 0; i < organizeTreeList.length; i++) {
+        var ele = organizeTreeList[i];
+        if (ele.id === org.departmentId) {
+          ele.checked = false;
+          ele.disabled = false;
+          break;
+        }
+        cancelDelSelOrgCheckStatus(ele.children, org);
+      }
+    }
+    
+    function findIndexOfById(list, item) {
+      for(var i = 0; i < list.length; i++) {
+        if (item.id === list[i].id){
+          return i
+        }
+      }
+      return -1
+    }
+  
+    function updateCheckedStatus(_this) {
+      
+      // 逐级遍历关系树，同步checked和selected
+      function updateCheckedStatusDeepIn(children) {
+        if (children) {
+          for (var i = 0; i < children.length; i++) {
+            var item = children[i]
+            item.checked = _this.value.some(function (value) {
+              return value.departmentId === item.id
+            })
+            if (!item.checked) { //没有选中的，可以继续遍历子部门
+              if (item.children && item.children.length > 0) {
+                updateCheckedStatusDeepIn(item.children)
+              }
+            } else {
+              var index = findIndexOfById(_this.selectedOrgList, item)
+              if (index >=0) {
+                _this.selectedOrgList[index] = item//若选中了，需要更换下item，这里是要解决通过value初始化的item属性不完整的问题，不完整的话，会影响到删除
+              } else {
+                item.checked = false//也是用于通过value初始化的item.若是属性完整的item，checked状态会在删除的时候就调整了
+              }
+            }
+          }
+        }
+      }
+      
+      if (_this.initSelectOrgList) {
+        _this.initSelectOrgList = !_this.initSelectOrgList
+        if (_this.value.length > 0 && _this.selectedOrgList.length === 0) {
+          for(var i = 0; i < _this.value.length; i++) {
+            var item = {id: _this.value[i].departmentId, departmentName:_this.value[i].departmentName}
+            _this.selectedOrgList.push(item)
+          }
+        }
+      }
+  
+      if (_this.organizeTreeList[0]) {
+        var children = _this.organizeTreeList[0].children
+        updateCheckedStatusDeepIn(children)
+      }
+      _this.$forceUpdate()
+    }
+
+    function allOrgListFun(_this, depts, currDept, dept, pathName) {
+      //区分通讯录与组织架构
+      var isParent, pid = dept.pid
+      if (dept.serviceId == -1) {
+        isParent = dept.pid < 0
+      } else {
+        isParent = dept.pid == dept.rootdept
+      }
+      if (isParent) {
+        currDept['pathName'] = pathName;
+        currDept['departmentName'] = currDept.name;
+        currDept['checked'] = false;
+        currDept['fatherIds'] = [];
+        currDept['children'] = [];
+        _this.allOrgList.push(currDept);
+      } else {
+        for (var i = 0; i < depts.length; i++) {
+          var o = depts[i];
+          if (o.id === pid) {
+            pathName = o.name + '/' + pathName;
+            allOrgListFun(_this, depts, currDept, o, pathName);
+            break;
+          }
+        }
+      }
+    }
+
+    function loadAllOrgList(_this) {
+      getJSON('data/apps/forms/fore/all/departments', {deptId: _this.$store.state.currentUserDeptId}).then(function (response) {
+        if (!response.success) {
+          alert('搜索部门列表失败');
+          return;
+        }
+        _this.allOrgList.splice(0, _this.allOrgList.length);
+        var depts = response.data.departments;
+        if (!depts || depts.length <= 0) {
+          return;
+        }
+        //递归生成pathName
+        for (var i = 0; i < depts.length; i++) {
+          var dept = depts[i];
+          allOrgListFun(_this, depts, dept, dept, dept.name);
+        }
+        //排序
+        _this.allOrgList.sort(function (a, b) {
+          if (a.pathName < b.pathName) {
+            return -1;
+          } else if (a.pathName > b.pathName) {
+            return 1;
+          }
+          return 0;
+        });
+      })
+    }
+
+    return {
+      id: widget.id,
+      template: [
+        '<div>',
+        '<div class="cell_cont" v-show="isShow && hasAuthority">',
+          '<span class="cell_text" v-if="value">',
+            '<span v-for="(dept, index) in value">{{dept.departmentName}} </span>',
+          '</span>',
+          '<span class="cell_nodata" v-else></span>',
+        '</div>',
+        '<div style="display: none">{{relateFieldValueStatus}}{{formContactDeptFieldData}}</div>',
+        '<field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+        '<detail-combox-field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="detailComboxLinkFieldValueStatus"></detail-combox-field-link-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          manualSetVal: false, // 手动设置
+          lastLinkValue: [],
+          lastRelateValue: [],
+          errInfo: {
+            isError: false,
+            errMsg: ''
+          },
+          fromInner: false
+        }
+      },
+      components: {
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue'),
+        'detailComboxFieldLinkTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/detailcombox/detailComboxFieldLinkTrigger.vue')
+      },
+      methods: {
+        $reloadValueFun: function (vueObj) {
+          this.value = vueObj.value
+          return this.verified
+        },
+        chooseOrg: function () {
+          if (this.readonly) {
+            return;
+          }
+          this.$refs.myOptions.typeShow = true
+          this.$refs.myOptions.searchMode = false
+          this.fromInner = true
+          this.$refs.myOptions.orgDialog.searchName = ''
+          for (var i = 0; i < this.$refs.myOptions.searchOrgList.length; i++) {
+            this.$refs.myOptions.searchOrgList[i].checked = false;
+          }
+          this.$refs.myOptions.$invokeByFathComponent()
+          var msgOffsetTop = $(window.parent.document).find("#frame_content").height() / 2
+          if (msgOffsetTop === 0 || isNaN(msgOffsetTop)) {
+            msgOffsetTop = $(window.document).height() / 2
+          }
+          $('#departmentPop' + this.widget.id).css('top', msgOffsetTop);
+        },
+        delSelDeptment: function (index) {
+          if (this.readonly) {
+            return;
+          }
+          cancelDelSelOrgCheckStatus(this.$refs.myOptions.organizeTreeList['0'].children, this.value[index]);
+          var findIndex = -1, selectedOrgList = this.$refs.myOptions.selectedOrgList
+          for (var i = 0; i < selectedOrgList.length; i++) {
+            if (selectedOrgList[i].id === this.value[index].departmentId) {
+              findIndex = i;
+              break;
+            }
+          }
+          if (findIndex >= 0) {
+            selectedOrgList.splice(findIndex, 1);
+          }
+          this.value.splice(index, 1);
+          this.manualSetVal = true
+        },
+        reSetValue: function (result) {
+          //明细组件内子组件横排时用到 将父级明细组件中获取到的当前组件的拷贝中设置的值赋值给当前组件值
+          this.manualSetVal = true
+          if (result.values) {
+            for (var i = 0; i < result.values.length; i++) {
+              this.value = result.values[i]
+            }
+          }
+
+          if (!result.defaultSetAreaShow) {
+            dataLoadInit(this)
+          }
+          this.valueResetedEvent = true
+          //后台打开默认值弹窗继续往上传递结果
+          this.$emit('callbackvalue', result)
+        },
+        linkFieldValueStatus: function (result) {
+          if (this.isPreview && this.isInit) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+
+          if (hasNullCondVal) {
+            this.value = []
+            dataLoadInit(this)
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          if (result && JSON.stringify(this.lastLinkValue) === JSON.stringify(result) && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+            this.value = []
+          }
+          if (result && JSON.stringify(this.lastLinkValue) !== JSON.stringify(result)) {
+            this.value = result
+            this.lastLinkValue = result
+            if (this.value.length > 0) {
+              dataLoadInit(this)
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        detailComboxLinkFieldValueStatus: function (result) {
+          if (this.isPreview && this.isInit) {
+            return
+          }
+          if (result && JSON.stringify(this.lastLinkValue) === JSON.stringify(result) && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+            this.value = []
+          }
+          if (result && JSON.stringify(this.lastLinkValue) !== JSON.stringify(result)) {
+            this.value = result
+            this.lastLinkValue = result
+            if (this.value.length > 0) {
+              dataLoadInit(this)
+            }
+          }
+        }
+      },
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          });
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label;
+        },
+        name: function () {
+          return this.widget.config.fields[0].name;
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required;
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          if (this.required) {
+            return this.value.length !== 0
+          }
+          return true
+        },
+        errorTip: function () {
+          if (!this.$store.state.verifieds[this.widget.id]) {
+            return ''
+          }
+          return this.$store.state.verifieds[this.widget.id].errorTip
+        },
+        fromManage: function () {
+          return this.$store.getters.getFromManageStatus
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          if (this.$store.getters.getCurrentType) {
+            return this.$store.getters.getReadonlyStatus
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = (!this.editable && !this.fromManage && !this.hasRoleId)
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var relateStatus = this.$store.getters.getRelateFieldValueStatus
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (this.isPreview && this.isInit) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return relateStatus
+          }
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === this.widget.config.inDetailGroupIndex) || !obj.hasOwnProperty('inDetailIndex'))) {
+            var result = obj.fields[0].values
+            if (result && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+              this.value = []
+            }
+            if (result && JSON.stringify(this.lastRelateValue) !== JSON.stringify(result)) {
+              if (result[0].departmentId) {
+                this.value = result
+                this.lastRelateValue = result
+              }
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return relateStatus
+        },
+        multiple: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode && !this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)) {
+            return true
+          }
+          return this.widget.config.fields[0].fieldType.multiple
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.fromManage && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类似web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = this.$store.state.reloadValSubField
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            if (this.widget.pid > 0 && !this.$store.state.verifieds[this.widget.pid].isShow) {
+              //明细内子组件时 如果明细组件是隐藏状态时 当前子组件也要改成隐藏状态
+              showStatus = false
+            } else {
+              showStatus = true
+            }
+          } else if (!!this.widget.config.fromDetail && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow;
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id];
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus;
+        },
+        formContactDeptFieldData: function () {
+          var _this = this
+          var formContactDeptFieldArr = _this.$store.getters.getFormContactDeptFieldData(_this.widget.config.fields[0].contactId)
+          if (_this.manualSetVal) {
+            _this.manualSetVal = false
+            return formContactDeptFieldArr
+          }
+          
+          if (_this.isPreview && _this.isInit) {
+            return formContactDeptFieldArr
+          }
+          
+          if (formContactDeptFieldArr.length === 0) {
+            return formContactDeptFieldArr
+          }
+          
+          var formContactDeptFieldObj = null
+          var filterArr = formContactDeptFieldArr.filter(function (item) {
+            return item.departmentId === _this.widget.config.id
+          })
+          
+          if (filterArr && filterArr.length > 0) {
+            formContactDeptFieldObj = filterArr[0]
+            if (formContactDeptFieldObj) {
+              if (_this.widget.config.fields[0].fieldType.multiple) {
+                _this.value = formContactDeptFieldObj.departmentValues
+              } else {
+                _this.value = []
+                if (formContactDeptFieldObj.departmentValues && formContactDeptFieldObj.departmentValues.length > 0) {
+                  _this.value.push(formContactDeptFieldObj.departmentValues[0])
+                }
+              }
+              _this.selectedOrgList = $.extend(true, [], _this.value)
+            }
+          }
+          return formContactDeptFieldObj
+        }
+      },
+      created: function () {
+        this.value = this.widget.config.fields[0].values || [];
+        if (this.widget.config.fields[0].hasOwnProperty('unchangeable')) {
+          this.widget.config.fields[0].editable = !this.widget.config.fields[0].unchangeable
+          delete this.widget.config.fields[0].unchangeable
+        }
+      }
+    };
+  }
+});

@@ -1,0 +1,333 @@
+define(['jquery', 'util'], function ($, util) {
+  'use strict'
+  return function (widget) {
+    
+    function updateSlider(_this) {
+      _this.value = _this.value.toString().replace(/[^\d+$]/g, '')
+      if (_this.value.length > 0 && _this.value.indexOf('0') === 0) {
+        _this.value = '0'
+      }
+      
+      var bar = $('#bar' + _this.widget.id)
+      var btn = $('#btn' + _this.widget.id)
+      var line = $('#slider_line' + _this.widget.id)
+      var maxPos = bar[0].offsetWidth - btn[0].offsetWidth
+      if (_this.value === '') {
+        _this.sliderVal = ''
+        _this.errorInfo.verifyMsg = ''
+        btn.css({'left': '0px'})
+        line.css({'width': 0})
+        return
+      }
+      var val = parseInt(_this.value)
+      var minVal = parseInt(_this.sliderRange.minValue)
+      var maxVal = parseInt(_this.sliderRange.maxValue)
+      
+      if (val < minVal) {
+        _this.sliderVal = '<' + _this.sliderRange.minValue
+        _this.errorInfo.verifyMsg = '分值要介于' + minVal + '和' + maxVal + '之间'
+        btn.css({'left': '0px'})
+        line.css({'width': 0})
+      } else if (val > maxVal) {
+        _this.sliderVal = '>' + _this.sliderRange.maxValue
+        _this.errorInfo.verifyMsg = '分值要介于' + minVal + '和' + maxVal + '之间'
+        btn.css({'left': maxPos + 'px'})
+        line.css({'width': maxPos})
+      } else {
+        _this.sliderVal = _this.value
+        _this.errorInfo.verifyMsg = ''
+        var scale = Math.min(1, Math.max(0, (val - minVal) / (maxVal - minVal)))
+        var currPos = Math.round(maxPos * scale)
+        btn.css({'left': currPos + 'px'})
+        line.css({'width': currPos})
+      }
+    }
+    return {
+      id: widget.id,
+      template: [
+        '<div>',
+        '<div class="cell_cont" v-show="isShow && hasAuthority">',
+          '<span class="cell_text" v-if="value">{{value}}</span>',
+          '<span class="cell_nodata" v-else></span>',
+        '</div>',
+        '<div style="display: none;">{{relateFieldValueStatus}}</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: '',
+          lastRelateValue: '',
+          sliderVal: '',
+          sliderRange: null,
+          errorInfo: {
+            verifyMsg: ''
+          }
+        }
+      },
+      props: {
+        approveReadonly: Boolean,
+        onlySetValue: {
+          //在明细内弹出iframe并加载当前组件时 只显示组件值设置区域标识值 横排明细时使用
+          type: Boolean,
+          default: function () {
+            return false
+          }
+        }
+      },
+      methods: {
+        $reloadValueFun: function (vueObj) {
+          this.value = vueObj.value
+          return this.verified
+        },
+        checkInput: function (val) {
+          if (this.readonly) {
+            return
+          }
+          this.value = val
+          updateSlider(this)
+        
+          // 判断是否是后台管理加载,回调数据
+          this.setDetailDefaultValue()
+        },
+        doSlide: function (event) {
+          if (this.readonly) {
+            return
+          }
+          var _this = this
+          var startX = event.clientX
+          var startOffset = event.target.offsetLeft
+          var maxPos = $('#bar' + _this.widget.id)[0].offsetWidth - event.target.offsetWidth
+          document.onmousemove = function (ev) {
+            var currX = (ev || window.event).clientX
+            var currPos = Math.min(maxPos, Math.max(-2, startOffset + currX - startX))
+            $('#btn' + _this.widget.id).css({'left': currPos + 'px'})
+            $('#slider_line' + _this.widget.id).css({'width': currPos})
+            var minVal = parseInt(_this.sliderRange.minValue)
+            var maxVal = parseInt(_this.sliderRange.maxValue)
+            _this.value = minVal + Math.round(Math.max(0, currPos / maxPos) * (maxVal - minVal))
+            _this.sliderVal = _this.value
+            window.getSelection ? window.getSelection().removeAllRanges() : document.getSelection().empty()
+          }
+          document.onmouseup = function (ev) {
+            document.onmousemove = null
+          }
+        },
+        /** 点击滑块鼠标弹起后,判断是否是后台管理横排组件默认值调用,将值回传给后台 */
+        endSlide: function () {
+          this.setDetailDefaultValue()
+        },
+        /**
+         * 明细组件内子组件横排时用到 触发父级明细组件中iframe(加载当前组件默认值区域dom)弹窗显示或关闭
+         */
+        setDetailDefaultValue: function () {
+          if (this.onlySetValue) {
+            //明细组件内子组件横排时用到 触发父级明细组件中iframe(加载当前组件默认值区域dom)弹窗显示或关闭
+            var data = {
+              values: [[{val: this.value}]],
+              defaultSetAreaShow: true
+            }
+            this.$emit('callbackvalue', data)
+          }
+        }
+      },
+      watch: {
+        value: function () {
+          if (this.onlySetValue) {
+            return
+          }
+        
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value}]}
+            ],
+            errMsg: this.errorInfo.verifyMsg,
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          this.$store.commit('calculateScore', {
+            id: this.widget.id,
+            pid: this.widget.pid,
+            configId: this.widget.config.id,
+            value: this.value,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            fromDetail: !!this.widget.config.fromDetail
+          })
+          this.$store.commit('setCalculableStatus')
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if (this.required) {
+            if (this.value === '') {
+              return false
+            }
+          }
+          if (this.value !== '') {
+            var val = parseInt(this.value)
+            var minVal = parseInt(this.sliderRange.minValue)
+            var maxVal = parseInt(this.sliderRange.maxValue)
+            return val >= minVal && val <= maxVal
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        fromManage: function () {
+          return this.$store.getters.getFromManageStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = (!this.editable && !this.fromManage && !this.hasRoleId)
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus || this.approveReadonly
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') &&
+              ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === this.widget.config.inDetailGroupIndex) ||
+               !obj.hasOwnProperty('inDetailIndex')) && (!this.isPreview || !this.isInit)) {
+            this.sliderRange = obj.fields[0].sliderRange
+            var result = ''
+            if (obj.fields[0].values && obj.fields[0].values[0].val) {
+              result = parseFloat(obj.fields[0].values[0].val)
+            }
+            if (!result && this.lastRelateValue !== result) {
+              this.value = '0'
+              updateSlider(this)
+              this.lastRelateValue = result
+            }
+            if (result && this.lastRelateValue !== result) {
+              this.value = result
+              this.lastRelateValue = result
+              updateSlider(this)
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+          
+          if (!this.visible && !this.fromManage && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类似web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail && this.$store.state.currOptionSel.inDetailGroupIndex !==
+                     this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+  
+          if (!this.onlySetValue) {
+            this.$store.commit('isShowWatchValues', {
+              id: this.widget.id,
+              errMsg: this.errorInfo.verifyMsg,
+              fvalues: [
+                {fidx: 0, values: [{val: $.trim(this.value)}]}
+              ],
+              verified: this.verified,
+              isShow: showStatus,
+              hasAuthority: this.hasAuthority
+            })
+          }
+          return showStatus
+        },
+        rangeTextShow: function () {
+          return this.sliderRange.textVisible && (this.sliderRange.minText || this.sliderRange.maxText)
+        }
+      },
+      created: function () {
+        var values = this.widget.config.fields[0].values
+        this.value = values ? (values[0] && values[0].val + '') || '' : ''
+        this.sliderRange = this.widget.config.fields[0].sliderRange
+        
+        this.$store.commit('watchValues', {
+          id: this.widget.id,
+          errMsg: this.errorInfo.verifyMsg,
+          fvalues: [
+            {fidx: 0, values: [{val: this.value}]}
+          ],
+          verified: this.verified,
+          isShow: this.isShow,
+          hasAuthority: this.hasAuthority
+        })
+      },
+      mounted: function () {
+        // updateSlider(this)
+      }
+    }
+  }
+})

@@ -1,0 +1,385 @@
+define(['jquery', 'cookies', 'util'], function ($, Cookies, util) {
+
+  /**
+   * 判断数据选择被填充组件值或子表单内组件是否为空
+   */
+  function isNotEmptyValForRelatedData(config) {
+    if (!config) {
+      return false
+    }
+    switch (config.compt) {
+      case 'editinput':
+      case 'edittextarea':
+      case 'numberinput':
+      case 'dateinput':
+      case 'areamultiselect':
+      case 'radiobutton':
+      case 'checklist':
+      case 'selectbox':
+      case 'selectmultibox':
+      case 'multipleselect':
+      case 'signature':
+      case 'computeinput':
+      case 'richtext':
+        return config.fields[0].values &&
+            config.fields[0].values[0] &&
+            config.fields[0].values[0].val &&
+            config.fields[0].values[0].val !== ''
+      case 'datetimerange':
+        for (var i = 0; i < config.fields.length; i++) {
+          if (config.fields[i].values &&
+              config.fields[i].values[0] &&
+              config.fields[i].values[0].val &&
+              config.fields[i].values[0].val !== '') {
+            return true
+          }
+        }
+        return false
+      case 'contact':
+      case 'department':
+      case 'livevideo':
+      case 'location':
+      case 'relatedaprv':
+      case 'imagebox':
+      case 'videobox':
+      case 'fileupload':
+      case 'areacheckbox':
+        return config.fields[0].values && config.fields[0].values.length > 0
+      case 'slider':
+        return config.fields[0].values &&
+            config.fields[0].values[0] &&
+            config.fields[0].values[0].val &&
+            config.fields[0].values[0].val !== '0'
+      default:
+        return false
+    }
+  }
+  
+  function getRelatedDataCacheKey(_this) {
+    //isEdit属性在各个组件内
+    if (_this.isEdit) {
+      return 'related_data_edit_' + formId + '_' + Cookies.get('oa_uid')
+    }
+    return 'related_data_echo_' + formId + '_' + Cookies.get('oa_uid')
+  }
+  
+  /**
+   * 添加选择数据组件弹框回显本地缓存
+   */
+  function addRelatedDataCache(_this, widgetId, data) {
+    var key = getRelatedDataCacheKey(_this)
+    var cacheData = getRelatedDataCache(_this, null, true)
+    if (JSON.stringify(cacheData) === '[]') {
+      cacheData = {}
+    }
+    cacheData[widgetId] = data
+    util.addFormDataCache(key, cacheData)
+  }
+  
+  /**
+   * 删除选择数据组件弹框回显本地缓存 delAll true/false 删除全部/删除单个
+   */
+  function delRelatedDataCache(_this, widgetId, delAll) {
+    var key = getRelatedDataCacheKey(_this)
+    if (delAll) {
+      util.delFormDataCache(key)
+      return
+    }
+    var cacheData = getRelatedDataCache(_this, null, true)
+    if (cacheData.hasOwnProperty(widgetId)) {
+      delete cacheData[widgetId]
+      if (JSON.stringify(cacheData) === '{}') {
+        delRelatedDataCache(_this, null, true)
+        return
+      }
+      util.addFormDataCache(key, cacheData)
+    }
+  }
+  
+  /**
+   * 获取选择数据组件弹框回显本地缓存 getAll true/false 获取全部/获取单个
+   */
+  function getRelatedDataCache(_this, widgetId, getAll) {
+    if (getAll) {
+      var key = getRelatedDataCacheKey(_this)
+      return util.getFormDataCache(key)
+    }
+    var cacheData = getRelatedDataCache(_this, null, true)
+    if (cacheData.hasOwnProperty(widgetId)) {
+      return cacheData[widgetId]
+    }
+    return {}
+  }
+  
+  /**
+   * 子表单内选择数据组件 添加本地缓存
+   */
+  function childRelatedDataCache(_this, detailCompts) {
+    var index = getCurrentDetailIndex(_this)
+    for (var i = 0; i < detailCompts.length; i++) {
+      var detailObj = detailCompts[i]
+      for (var j = 0; j < detailObj.length; j++) {
+        var compt = detailObj[j].config
+        if (compt.compt === 'relateddata') {
+          //父组件id + 当前组件在明细中的索引 + 当前组件id
+          var singleKey = _this.$parent.widget.config.id + '_' + (index++) + '_' + compt.id,
+              totalKey = _this.$parent.widget.config.id + '_' + compt.id
+          var totalRelatedData = getRelatedDataCache(_this, totalKey, false)
+          if (totalRelatedData) {
+            if (_this.selectDataIndex[i]) {
+              totalRelatedData[singleKey] = _this.selectDataIndex[i]
+              addRelatedDataCache(_this, totalKey, totalRelatedData)
+            }
+          } else {
+            var obj = {}
+            obj[singleKey] = _this.selectDataIndex[i]
+            addRelatedDataCache(_this, totalKey, obj)
+          }
+        }
+      }
+    }
+  }
+  
+  /**
+   * 选择数据组件缓存清除
+   */
+  function relatedDataCacheClear(_this) {
+    if (_this.widget.pid > 0) {
+      var singleKey = _this.$parent.widget.config.id + '_' + getCurrentDetailIndex(_this) + '_' + _this.widget.config.id,
+          totalKey = _this.$parent.widget.config.id + '_' + _this.widget.config.id
+      var totalCache = getRelatedDataCache(_this, totalKey, false)
+      for (var key in totalCache) {
+        if (key === singleKey) {
+          delete totalCache[key]
+          addRelatedDataCache(_this, totalKey, totalCache)
+        }
+      }
+      if (JSON.stringify(totalCache) === '{}') {
+        delRelatedDataCache(_this, totalKey, false)
+      }
+    } else {
+      delRelatedDataCache(_this, _this.widget.config.id, false)
+    }
+    _this.$store.commit('setIsClearRelatedData', true)
+    _this.$store.commit('setRelateFieldValueStatus')
+  }
+  
+  /**
+   * 选择数据组件添加回显控制属性
+   */
+  function relatedDataEcho(_this, obj, compt, j) {
+    obj.disable = false
+    //子表单内
+    if (_this.widget.pid > 0) {
+      var singkeKey = _this.$parent.widget.config.id + '_' + getCurrentDetailIndex(_this) + '_' + _this.widget.config.id,
+          totalKey = _this.$parent.widget.config.id + '_' + _this.widget.config.id,
+          totalCache = getRelatedDataCache(_this, totalKey, false)
+      if (_this.multiSelect) {
+        for (var key in totalCache) {
+          if (totalCache[key] === compt.id) {
+            obj.disable = true
+          }
+        }
+      } else {
+        var flag = false
+        for (var key in totalCache) {
+          if (key === singkeKey && totalCache[key] === compt.id) {
+            obj.checked = true
+            _this.currDataIndex = j
+            continue
+          }
+          if (totalCache[key] === compt.id) {
+            flag = true
+          }
+        }
+        if (flag) {
+          obj.disable = true
+        }
+      }
+    } else {
+      var oldFormUserId = parseInt(getRelatedDataCache(_this, _this.widget.config.id, false).formUserId)
+      if (oldFormUserId === compt.id) {
+        obj.checked = true
+        _this.currDataIndex = j
+      }
+    }
+  }
+  
+  /**
+   * 子表单内 通过子表单删除按钮删掉一组明细后 修改后续明细中选择数据缓存的key(key与组明细下标相关联)
+   */
+  function childRelatedDataCacheChange(_this, compt, state, payload, subs) {
+    var parentConfigId = state.widgets[payload.id].config.id,
+        totalKey = parentConfigId + '_' + compt.id,
+        singleKey = parentConfigId + '_' + payload.index + '_' + compt.id,
+        totalCache = getRelatedDataCache(_this, totalKey, false)
+    //删除当前明细组内选择数据的缓存数据
+    if (totalCache && totalCache.hasOwnProperty(singleKey)) {
+      delete totalCache[singleKey]
+      addRelatedDataCache(_this, totalKey, totalCache)
+    }
+    for (var i = 0; i < subs.length; i++) {
+      //如果明细内组下标大于当前删除组的下标 则修改后续的组下标
+      if (i > payload.index) {
+        var compts = subs[i]
+        for (var j = 0; j < compts.length; j++) {
+          var subData = compts[j].config
+          if (subData.compt === 'relateddata') {
+            totalKey = parentConfigId + '_' + subData.id
+            totalCache = getRelatedDataCache(_this, totalKey, false)
+            var oldSingleKey = parentConfigId + '_' + i + '_' + subData.id,
+                newSingleKey = parentConfigId + '_' + (i - 1) + '_' + subData.id,
+                singleVal = totalCache[oldSingleKey]
+            if (totalCache && totalCache.hasOwnProperty(oldSingleKey)) {
+              //删除旧key
+              delete totalCache[oldSingleKey]
+              //添加新key
+              totalCache[newSingleKey] = singleVal
+              addRelatedDataCache(_this, totalKey, totalCache)
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  /**
+   * 数据选择回显属性持久化到db
+   */
+  function relatedDataTransform(_this, formData, isDetail, detailcomboxId, detailcomboxIdx) {
+    for (var i = 0; i < formData.length; i++) {
+      var comptData = formData[i]
+      if (comptData.compt === 'relateddata') {
+        //子表单外
+        if (!isDetail) {
+          var singleData = getRelatedDataCache(_this, comptData.id, false)
+          if (!$.isEmptyObject(singleData)) {
+            comptData['relateForm']['editEcho'] = {formUserId: singleData.formUserId, cpage: singleData.cpage, pageSize: singleData.pageSize}
+            continue
+          }
+          if (comptData.relateForm.hasOwnProperty('editEcho')) {
+            delete comptData.relateForm['editEcho']
+          }
+          continue
+        }
+        //子表单内
+        var singleKey = detailcomboxId + '_' + detailcomboxIdx + '_' + comptData.id,
+            totalKey = detailcomboxId + '_' + comptData.id,
+            totalCache = getRelatedDataCache(_this, totalKey, false)
+        if (totalCache && totalCache[singleKey]) {
+          comptData['relateForm']['editEcho'] = {formUserId: totalCache[singleKey]}
+          continue
+        }
+        if (comptData.relateForm.hasOwnProperty('editEcho')) {
+          delete comptData.relateForm['editEcho']
+        }
+      }
+      if (comptData.compt === 'detailcombox') {
+        var subComptDataArr = comptData.compts
+        //判断子表单中组件是否全部没有值，若存在值则继续，若不存在则remove
+        if (subComptDataArr.length > 0) {
+          for (var j = 0; j < subComptDataArr.length; j++) {
+            //校验当前下标批次组件是否存在有效数据
+            if (detailComBoxIsExistVal(subComptDataArr[j])) {
+              relatedDataTransform(_this, subComptDataArr[j], true, comptData.id, j)
+            } else {//移除当前下标组件结构，不进行入库操作
+              subComptDataArr.splice(j, 1)
+              j--
+            }
+            
+          }
+        }
+      }
+    }
+    return formData
+  }
+  
+  /**
+   * 当前compts结构中val是否存在值
+   */
+  function detailComBoxIsExistVal(comptDatas) {
+    for (var i = 0; i < comptDatas.length; i++) {
+      if (isNotEmptyValForRelatedData(comptDatas[i])) {
+        return true
+      }
+    }
+    return false
+  }
+  
+  /**
+   * 编辑页面数据选择组件弹框回显本地缓存初始化
+   */
+  function initRelatedDataForEdit(_this, formData, isDetail, detailcomboxId, detailcomboxIdx, totalData) {
+    for (var i = 0; i < formData.length; i++) {
+      var comptData = formData[i]
+      if (comptData.compt === 'relateddata' && formData[i].relateForm.hasOwnProperty('editEcho')) {
+        //子表单外
+        if (!isDetail) {
+          addRelatedDataCache(_this, comptData.id, comptData.relateForm.editEcho)
+          continue
+        }
+        //子表单内
+        var singleKey = detailcomboxId + '_' + detailcomboxIdx + '_' + comptData.id,
+            totalKey = detailcomboxId + '_' + comptData.id
+        if (totalData.hasOwnProperty(totalKey)) {
+          var existData = totalData[totalKey]
+          existData[singleKey] = comptData.relateForm.editEcho.formUserId
+          delete totalData[totalKey]
+          totalData[totalKey] = existData
+        } else {
+          var obj = {}
+          obj[singleKey] = comptData.relateForm.editEcho.formUserId
+          totalData[totalKey] = obj
+        }
+      }
+      if (comptData.compt === 'detailcombox') {
+        var totalDataAll = {}
+        var subComptDataArr = comptData.compts
+        for (var j = 0; j < subComptDataArr.length; j++) {
+          initRelatedDataForEdit(_this, subComptDataArr[j], true, comptData.id, j, totalDataAll)
+        }
+        if (JSON.stringify(totalDataAll) !== '{}') {
+          for (var key in totalDataAll) {
+            if (JSON.stringify(totalDataAll[key]) !== '{}') {
+              addRelatedDataCache(_this, key, totalDataAll[key])
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  /**
+   * 实时获取各组件所在的子表单下标（针对有删除子表单的情况）
+   */
+  function getCurrentDetailIndex(_this) {
+    if (_this.widget.pid > 0) {
+      var detailWidgets = _this.$store.state.widgets[_this.widget.pid].children
+      for (var i = 0; i < detailWidgets.length; i++) {
+        var children = detailWidgets[i]
+        for (var j = 0; j < children.length; j++) {
+          var childrenObj = children[j]
+          //定位当前选择数据组件 在子表单的位置，记录子表单该条记录,用来对其他组件赋值
+          if (childrenObj.id === _this.widget.id) {
+            return i
+          }
+        }
+      }
+    }
+    return 0
+  }
+
+  return {
+    isNotEmptyValForRelatedData: isNotEmptyValForRelatedData,
+    addRelatedDataCache: addRelatedDataCache,
+    delRelatedDataCache: delRelatedDataCache,
+    getRelatedDataCache: getRelatedDataCache,
+    relatedDataEcho: relatedDataEcho,
+    childRelatedDataCache: childRelatedDataCache,
+    relatedDataCacheClear: relatedDataCacheClear,
+    childRelatedDataCacheChange: childRelatedDataCacheChange,
+    relatedDataTransform: relatedDataTransform,
+    initRelatedDataForEdit: initRelatedDataForEdit,
+    getCurrentDetailIndex: getCurrentDetailIndex
+  }
+})

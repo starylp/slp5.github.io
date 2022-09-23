@@ -1,0 +1,608 @@
+define(['jquery', 'tipImgs', 'VueUtils', 'publicUtils', 'Area'], function ($, tipImgs, VueUtils, publicUtils) {
+  'use strict'
+  return function (widget) {
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: _this.value,
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+    
+    function loadValueOptions(_this) {
+      //填充区域json数据
+      var multiOptions = []
+      switch (_this.widget.config.level) {
+        case 1:
+          multiOptions = oneLevelArea
+          break
+        case 2:
+          multiOptions = twoLevelArea
+          break;
+        case 3:
+        case 4:
+          multiOptions = threeLevelArea
+          break
+        default:
+          break
+      }
+      _this.levelOptions.splice(0)
+      while(_this.value.length < _this.level) {
+        _this.value.push({val: ''})
+      }
+      if (_this.value.length === 0) {
+        _this.levelOptions.push(multiOptions)
+        // _this.value.push({val: ''})
+      } else if (_this.value[0].val === '') {
+        _this.levelOptions.push(multiOptions)
+        // _this.value.splice(1) //后台设置最少为两级，前台要求第一级没有默认值只显示一级，将多余val删除
+      } else {
+        _this.$getLevelOptions(multiOptions, 0, _this.value[0].val)
+      }
+    }
+
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{noClick:readonly, widget_error: errorTip}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+            '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_multple_forbid" v-if="readonly">',
+              '<div class="form_forbid_edit form_forbid_nodata" v-show="levelOptions.length == 0">',
+                '<p class="form_forbid_word">暂无数据</p>',
+              '</div>',
+              '<div class="form_forbid_edit form_forbid_nodata" v-show="levelOptions.length > 0">',
+               '<p class="form_forbid_word">{{valStr()}}</p>',
+              '</div>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<div class="form_multpel_widget"  v-for="(options, levelIdx) in levelOptions">',
+                '<div class="sub_loading" style="display:none;"><span class="loading_icon"></span></div>',
+                '<div class="temp_drop_down" :class="{nodata: value[levelIdx].val == \'\'}" @click.stop="toggleOptionShow(levelIdx)">' +
+                '<em class="drop_down icon-dropdown"></em>{{value[levelIdx].val==""?"请选择":value[levelIdx].val}}</div>',
+              '</div>',
+              '<!--详细地址-->',
+              '<div v-if="level == 4" class="temp_multi_text" contenteditable="true" @input="changeValueFun($event)" @blur="detailChange()" placeholder="请输入详细地址"></div>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorTip">',
+              '<p class="must_word">此项为必填项</p>',
+            '</div>',
+            '<div style="display: none;">{{relateFieldValueStatus}}</div>',
+          '</div>',
+
+          '<!--遮罩-->',
+          '<div class="super_mask" v-show="optionFrame.show" @click.stop="closeOption"></div>',
+          '<!--下拉框弹窗-->',
+          '<div class="droplist_pop" v-show="optionFrame.show" :id="\'selectBoxOption\'+widget.id">',
+            '<div class="drop_pop_top">',
+              '<div class="drop_pop_title">',
+                '<span class="drop_pop_clear" @click="$clearSelect">清空</span>',
+                '<span class="drop_pop_sure" style="display: none">确定</span>',
+              '</div>',
+              '<div class="dp_search">',
+                '<div class="dp_search_box">',
+                  '<input type="text" placeholder="搜索" class="dp_search_input" readonly>',
+                  '<span class="dp_search_icon icon-search"></span>',
+                '</div>',
+              '</div>',
+            '</div>',
+            '<div class="drop_search" style="display:none;">',
+              '<div class="dp_active_search">',
+                '<input type="text" ref="inputVal" class="active_search_input" v-model="search.sw" placeholder="搜索" ' +
+                '@focus.stop="startSearch" @blur.stop="cancelSearch" @keyup.stop="doSearch"/>',
+                '<span class="active_search_icon icon-search"></span>',
+              '</div>',
+              '<span class="active_search_cal" @click.stop="clearSearch">取消</span>',
+            '</div>',
+            '<div :id="\'selectbox\'+widget.id" class="drop_data" v-show="!search.model">',
+              '<ul class="drop_data_list">',
+                '<li class="drop_per" v-for="(option, index) in levelOptions[activeLevelIdx]" @click.stop="chooseOption(option)">',
+                  '<span class="gradio icon-radio" :class="{\'icon-radiocheck\': option.title == value[activeLevelIdx].val}"></span>',
+                  '<div class="drop_per_right">',
+                    '<p class="drop_per_word">{{option.title}}</p>',
+                  '</div>',
+                '</li>',
+              '</ul>',
+            '</div>',
+            '<div :id="\'selectBoxForSearch\'+widget.id" class="drop_data" v-show="search.model">',
+            '<!--搜索无结果-->',
+            '<p class="drop_nodata" v-show="searchOptions.length == 0">搜索无结果</p>',
+              '<ul class="drop_data_list">',
+                '<li class="drop_per" v-for="(option, index) in searchOptions" @click.stop="chooseOption(option)">',
+                  '<span class="gradio icon-radio" :class="{\'icon-radiocheck\': option.title == value[activeLevelIdx].val}"></span>',
+                  '<div class="drop_per_right">',
+                    '<p class="drop_per_word">{{option.title}}</p>',
+                  '</div>',
+                '</li>',
+              '</ul>',
+            '</div>',
+            '<div class="drop_sure_btn" style="display:none;">确定</div>',
+          '</div>',
+          '<event-trigger :widget="widget" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event="triggerValueEvent"></event-trigger>',
+          '<field-link-trigger :widget="widget" @set-loading-status="triggerLoadingEvent" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+          '<detail-combox-field-link-trigger :widget="widget" @set-loading-status="triggerLoadingEvent" @set-field-value="detailComboxLinkFieldValueStatus"></detail-combox-field-link-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          activeLevelIdx: 0,
+          levelOptions: [],
+          searchOptions: [],
+          optionFrame: {
+            selAll: false,
+            show: false
+          },
+          search: {
+            model: false,
+            sw: ''
+          }
+        }
+      },
+      components: {
+        'tip-imgs': tipImgs,
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue')
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEvent: function (val) {
+          if (this.value[3]) {
+            this.value[3].val = val
+            $(this.$el).find('.temp_multi_text').text(val)
+          }
+          this.loadStatus = false
+        },
+        optionFrameToggle: function () {
+          this.optionFrame.show = !this.optionFrame.show
+          this.search.sw = ''
+          this.search.model = false
+        },
+        startSearch: function () {
+          if (!this.search.model) {
+            this.$refs.inputVal.blur()
+          }
+          this.search.model = true
+          this.searchOptions = []
+          this.doSearch()
+        },
+        closeOption: function () {
+          this.optionFrame.show = false
+          this.search.sw = ''
+          this.search.model = false
+        },
+        clearSearch: function () {
+          this.search.sw = ''
+          this.search.model = false
+          var search_dom = $('#selectBoxOption' + widget.id)
+          search_dom.find('.drop_pop_top').show()
+          search_dom.find('.drop_search').hide()
+          search_dom.removeClass('drop_full')
+        },
+        cancelSearch: function () {
+          if ($.trim(this.search.sw) === '') {
+            this.search.model = false
+          }
+        },
+        doSearch: function () {
+          this.searchOptions = []
+          var options = this.levelOptions[this.activeLevelIdx]
+          for (var i = 0; i < options.length; i++) {
+            if (options[i].title.indexOf(this.search.sw) > -1) {
+              this.searchOptions.push(options[i])
+            }
+          }
+        },
+        toggleOptionShow: function (levelIdx) {
+          if (this.readonly) {
+            return
+          }
+          this.activeLevelIdx = levelIdx
+          this.optionFrameToggle()
+          this.clearSearch()
+        },
+        chooseOption: function (option) {
+          if (this.readonly) {
+            return
+          }
+          this.$store.commit('setInitStatus', false)
+          if (option.title === this.value[this.activeLevelIdx].val) { //取消选中
+            this.levelOptions.splice(this.activeLevelIdx + 1)
+            this.value[this.activeLevelIdx].val = ''
+            this.value.splice(this.activeLevelIdx + 1)
+            $(this.$el).find('.temp_multi_text').text('')
+            this.optionFrameToggle()
+          } else { //选中
+            this.value[this.activeLevelIdx].val = option.title
+            if (this.activeLevelIdx < this.levelOptions.length) { // 当前选中地址当前所有层级之下
+              //刷新子选项
+              this.$updateLevelOptions(option.children, this.activeLevelIdx + 1)
+              if (this.activeLevelIdx + 1 < this.levelOptions.length) { // 存在下一级则进行跳转值下一级
+                if (this.search.model) {
+                  this.clearSearch()
+                }
+                this.activeLevelIdx = this.activeLevelIdx + 1;
+              } else {
+                this.optionFrameToggle()
+              }
+            }
+          }
+          dataLoadInit(this)
+        },
+        $updateLevelOptions: function (options, levelIdx) {
+          if (options.length === 0) {
+            this.levelOptions.splice(levelIdx)
+            // this.value.splice(levelIdx)
+            this.value = $.extend(true, [], this.value)
+            return
+          }
+          var selIdx = this.getSelIdx(options)
+
+          if (selIdx <= -1) {
+            var existOptions = this.levelOptions[levelIdx]
+            if (existOptions) {
+              this.levelOptions[levelIdx] = options
+              //删除子级数据
+              this.levelOptions.splice(levelIdx + 1)
+            } else {
+              this.levelOptions.push(options)
+            }
+            var existValue = this.value[levelIdx]
+            if (existValue) {
+              this.value[levelIdx].val = ''
+              // this.value.splice(levelIdx + 1)
+              this.value = $.extend(true, [], this.value)
+            } else {
+              this.value.push({val: ''})
+            }
+          } else {
+            var option = options[selIdx]
+            var existOpts = this.levelOptions[levelIdx]
+            if (existOpts) {
+              this.levelOptions[levelIdx] = options
+            } else {
+              this.levelOptions.push(options)
+            }
+            var existVal = this.value[levelIdx]
+            if (existVal) {
+              this.value[levelIdx].val = option.title
+            } else {
+              this.value.push({val: option.title})
+            }
+            this.$updateLevelOptions(option.children, levelIdx + 1)
+          }
+        },
+        $getLevelOptions: function (options, currIdx, val) {
+          if (currIdx > this.value.length - 1) {
+            return
+          }
+          this.levelOptions.push(options)
+          for (var i = 0; i < options.length; i++) {
+            var option = options[i]
+            if (option.title === val) {
+              var idx = ++currIdx
+              if (idx <= this.value.length - 1 && option.children.length > 0) {
+                this.$getLevelOptions(option.children, idx, this.value[idx].val)
+              }
+            }
+          }
+        },
+        getSelIdx: function (options) {
+          var selIdx = -1
+          for (var i = 0; i < options.length; i++) {
+            if (options[i].checked) {
+              selIdx = i
+              break
+            }
+          }
+          return selIdx
+        },
+        changeValueFun: function (e) {
+          this.value.splice(3)
+          this.value.push({val: e.target.innerText})
+        },
+        detailChange: function () {
+          dataLoadInit(this)
+        },
+        linkFieldValueStatus: function (result) {
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+
+          if (hasNullCondVal) {
+            this.levelOptions.splice(this.activeLevelIdx + 1)
+            this.value[this.activeLevelIdx].val = ''
+            this.value.splice(this.activeLevelIdx + 1)
+            $(this.$el).find('.temp_multi_text').text('')
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          if (result && result.length > 0 && (!this.isPreview || !this.isInit)) {
+            this.value = result
+            if (this.value.length > this.level) {
+              this.value.splice(this.level)
+            }
+            loadValueOptions(this)
+            if (this.level === 4) {
+              $(this.$el).find('.temp_multi_text').text(this.value.length > 3 ? this.value[3].val : '')
+            }
+            dataLoadInit(this)
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        $clearSelect: function () {
+          this.levelOptions.splice(this.activeLevelIdx + 1)
+          this.value[this.activeLevelIdx].val = ''
+          this.value.splice(this.activeLevelIdx + 1)
+        },
+        valStr: function () {
+          var values = this.value
+          if (!values) {
+            return ''
+          }
+          var arr = []
+          for (var i = 0, valObj; valObj = values[i++];) {
+            if (valObj.val) {
+              arr.push(valObj.val)
+            }
+          }
+          return arr.join('/')
+        },
+        detailComboxLinkFieldValueStatus: function (result) {
+          if (result && result.length > 0 && (!this.isPreview || !this.isInit)) {
+            this.value = result
+            if (this.value.length > this.level) {
+              this.value.splice(this.level)
+            }
+            loadValueOptions(this)
+            if (this.level === 4) {
+              $(this.$el).find('.fsw-ul-edit').text(this.value.length > 3 ? this.value[3].val : '')
+            }
+            dataLoadInit(this)
+          }
+        }
+      },
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        level: function () {
+          return this.widget.config.level
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          if (this.required) {
+            var result = false
+            switch (this.widget.config.level) {
+              case 1:
+                result = this.value[0] && this.value[0].val !== ''
+                break
+              case 2:
+                result = this.value[0] && this.value[0].val !== '' && this.value[1] && this.value[1].val !== ''
+                break
+              case 3:
+                result = this.value[0] && this.value[0].val !== '' && this.value[1] && this.value[1].val !== ''
+                    && this.value[2] && this.value[2].val !== ''
+                break
+              case 4:
+                result = this.value[0] && this.value[0].val !== '' && this.value[1] && this.value[1].val !== ''
+                    && this.value[2] && this.value[2].val !== '' && this.value[3] && this.value[3].val !== ''
+                break
+              default:
+                break
+            }
+            return result
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === publicUtils.getCurrentDetailIndex(this)) || !obj.hasOwnProperty('inDetailIndex'))) {
+            this.value = obj.fields[0].values
+            if (this.value.length > this.level) {
+              this.value.splice(this.level)
+            }
+            loadValueOptions(this)
+            if (this.level === 4) {
+              $(this.$el).find('.temp_multi_text').text(this.value.length > 3 ? this.value[3].val : '')
+            }
+            if (this.isClearRelatedData) {
+              this.value = [{'val': ''}, {'val': ''}, {'val': ''}, {'val': ''}]
+              this.chooseOption(-1, 0)
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        isClearRelatedData: function () {
+          return this.$store.getters.getIsClearRelatedData
+        },
+        tipTextData: function () {
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          return this.widget.config.fields[0].tip.imgs
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          if (!showStatus) {
+            //每次隐藏(被设置选项关联且未触发显示时)时,有默认值则默认选择默认值,没有默认值则置空
+            if (this.widget.config.fields[0].hasDefaultValue) {
+              var defaultValueArr = JSON.parse(this.widget.config.fields[0].defaultValueStr)
+              if (this.level < defaultValueArr.length) {
+                defaultValueArr.splice(this.level)
+              }
+              this.value = defaultValueArr
+            } else {
+              this.value = [{val: ''}]
+            }
+            loadValueOptions(this)
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        }
+      },
+      mounted: function () {
+        //下拉框弹窗交互
+        var search_dom = $('#selectBoxOption' + widget.id)
+        search_dom.find('.dp_search_input').on('click',function(){
+          search_dom.find('.drop_pop_top').hide()
+          search_dom.find('.drop_search').show()
+          search_dom.addClass('drop_full')
+          search_dom.find('.active_search_input').focus()
+        })
+        if (this.widget.config.level === 4 && this.value[3] && this.value[3].val !== '') {
+          $(this.$el).find('.temp_multi_text').text(this.value[3].val)
+        }
+        if (this.$store.getters.getReadonlyStatus) {
+          return
+        }
+        var _this = this
+        //防止子组件中构造各组件实例未执行，导致默认值数据关联失效问题
+        _this.$nextTick(function () {
+          setTimeout(function () {
+            dataLoadInit(_this, _this.$store.getters.getComptDataType('init'))
+          }, 500)
+        })
+      },
+      created: function () {
+        this.value = this.widget.config.fields[0].values || []
+        if (this.level < this.value.length) {
+          this.value.splice(this.level)
+        }
+        loadValueOptions(this)
+      }
+    }
+  }
+})

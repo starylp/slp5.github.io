@@ -1,0 +1,49 @@
+define(['jquery', 'big'], function ($, Big) {
+  
+  /**
+   * 是否为数字
+   * @param number 输入值
+   * @return {boolean}
+   */
+  function isNumber(number) {
+    return ((typeof number === 'number') && !isNaN(number) && isFinite(number)) || /^[-]?[\.\d]+$/.test(number)
+  }
+  
+  /**
+   * 四舍五入，采用big.js，避免精度缺失
+   * @param val 输入值
+   * @param len 保留的小数位长度
+   * @return {number}
+   */
+  function round(val, len) {
+    val = parseFloat(val)
+    len = parseInt(len)
+    return Number(new Big(val).round(len).toString())
+  }
+  
+  /**
+   * 补充小数位
+   * @param val 输入值
+   * @param len 规定的小数位长度
+   * @return {string}
+   */
+  function addDecimalPlace(val, len) {
+    val = val + ''// 将值转换成字符串
+    len = parseInt(len)
+    var decimalIndex = val.indexOf('.')
+    if (decimalIndex < 0 && len !== 0) {
+      decimalIndex = val.length
+      val += '.'
+    }
+    while (val.length <= decimalIndex + len) {
+      val += '0'
+    }
+    return val
+  }
+  
+  return {
+    isNumber: isNumber,
+    round: round,
+    addDecimalPlace: addDecimalPlace
+  }
+})

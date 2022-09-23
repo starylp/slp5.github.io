@@ -1,0 +1,242 @@
+define(['jquery', 'tipImgs', 'publicUtils'], function ($, tipImgs, publicUtils) {
+  'use strict';
+  return function (widget) {
+
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: $.trim(publicUtils.percentConvertToNumValue(_this, _this.value)),
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{widget_error: errorTip}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+            '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+          '<!--禁止编辑-->',
+          '<div class="form_forbid_edit">',
+            '<!--普通数字输入-->',
+            '<p class="form_forbid_word"v-if="!percentage"  :class="{percent_word: percentage}">{{value ? value :\'自动计算数值\'}}</p>',
+            '<!--百分比数字输入-->',
+            '<label class="percent_input_wrapper" v-if="percentage">',
+              '<div class="percent_input">',
+                '<div class="input_wrapper">',
+                  '<div class="invisible_placeholder" v-text="value ? value :\'自动计算数值\'"></div>',
+                  '<input class="percent_text" :value="value ? value :\'自动计算数值\'" readonly="readonly" />',
+                '</div>',
+              '</div>',
+              '<div class="percent_suffix" v-show="percentage && value">%</div>',
+            '</label>',
+          '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorTip">',
+             '<p class="must_word">此项为必填项</p>',
+            '</div>',
+            '<div class="widget_right_tip" v-show="micrometer || capital">',
+              '<p class="tip_word" v-show="micrometer">{{micrometerValue}}</p>',
+              '<p class="tip_word" v-show="capital">{{chineseValue}}</p>',
+            '</div>',
+            '<div style="display: none;">{{refreshResult}}{{calculableStatus}}</div>',
+          '</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: '',
+          micrometerValue: '',
+          chineseValue: '',
+          chineseName: '',
+          calculable: true
+        };
+      },
+      methods: {},
+      components: {'tip-imgs': tipImgs},
+      watch: {
+        value: function () {
+          // 千分符，中文格式化
+          publicUtils.numberFormat(this, this.value)
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: publicUtils.percentConvertToNumValue(this, this.value), chineseName: this.chineseName}]}
+            ],
+            errMsg: '',
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          });
+          dataLoadInit(this);
+        }
+      },
+      computed: {
+        refreshResult: function () {
+          var computResultObj = this.$store.state.computResultObj
+          var result = computResultObj[this.widget.id];
+          if (result) {
+            if (this.isShow) {
+              if (parseInt(this.precisionLen) >= 0) {
+                var formatResult = this.percentage ? result.value * 100 : result.value
+                this.value = publicUtils.dealPrecisionLen(formatResult, this.precisionLen, -1)
+              } else {
+                this.value = publicUtils.convertToPercent(this, result.value)
+              }
+              this.chineseName = result.chineseName
+            }
+            if (this.calculable) {
+              this.calculable = false
+              this.$store.commit('calculateScore', {
+                id: this.widget.id,
+                pid: this.widget.pid,
+                configId: this.widget.config.id,
+                value: publicUtils.percentConvertToNumValue(this, this.value),
+                inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+                fromDetail: !!this.widget.config.fromDetail
+              })
+            }
+          }
+          return this.$store.state.refreshResult
+        },
+        calculableStatus: function () {
+          this.calculable = true
+          return this.$store.state.calculableStatus
+        },
+        title: function () {
+          return this.widget.config.fields[0].label;
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required;
+        },
+        precisionLen: function () {
+          return this.widget.config.fields[0].precisionLen
+        },
+        verified: function () {
+          var verified = true;
+          if (this.required && $.trim(this.value) === '') {
+            verified = false;
+          }
+          return verified
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs;
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = false
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false;
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false;
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true;
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow;
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id];
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value, chineseName: this.chineseName}]}
+            ],
+            errMsg: '',
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus;
+        },
+        capital: function () {
+          return this.widget.config.fields[0].capital
+        },
+        micrometer: function () {
+          return this.widget.config.fields[0].micrometer
+        },
+        percentage: function () {
+          return this.widget.config.fields[0].percentage
+        }
+      },
+      created: function () {
+        var values = this.widget.config.fields[0].values;
+        var val = values ? (values[0] && values[0].val) || '' : '';
+        if (val !== '') {
+          val = parseFloat(val)
+          if (parseInt(this.precisionLen) >= 0) {
+            this.value = publicUtils.dealPrecisionLen(val, this.precisionLen, -1)
+          } else {
+            this.value = publicUtils.convertToPercent(this, val)
+          }
+        }
+      }
+    };
+  }
+});

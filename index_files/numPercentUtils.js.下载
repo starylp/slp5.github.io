@@ -1,0 +1,75 @@
+define(['jquery'], function ($) {
+
+  /**
+   * 针对设置了百分比显示的数字组件、计算公式组件的值进行百分比值回显处理（处理formData）
+   */
+  function numValueAndPercentConvert(compts, type) {
+    if (!compts) {
+      return
+    }
+    for (var i = 0; i < compts.length; i++) {
+      numValueAndPercentConvertForOne(compts[i], type)
+    }
+  }
+
+  /**
+   * 针对设置了百分比显示的数字组件、计算公式组件的值进行百分比值回显处理（处理单条compt）
+   */
+  function numValueAndPercentConvertForOne(compt, type) {
+    if (compt.compt === 'detailcombox') {
+      // 支持子表单
+      for (var row = 0; row < compt.compts.length; row++) {
+        var compts = compt.compts[row];
+        for (var i = 0; i < compts.length; i++) {
+          numValueAndPercentConvertForOne(compts[i], type);
+        }
+      }
+      return;
+    }
+    if (compt.compt === 'numberinput' || compt.compt === 'computeinput') {
+      if (compt.fields[0].percentage && compt.fields[0].values && compt.fields[0].values.length > 0 && compt.fields[0].values[0].val) {
+        var aDouble = parseFloat(compt.fields[0].values[0].val)
+        var precisionLen;
+        if (compt.compt === 'numberinput') {
+          precisionLen = parseInt(compt.fields[0].verify.realNumber.precisionLen)
+        } else {
+          precisionLen = parseInt(compt.fields[0].precisionLen)
+        }
+        switch (type) {
+          case 'toPercent':
+            compt.fields[0].values[0].val = (aDouble * 100).toFixed(precisionLen || 2)
+            break
+          case 'toNumValue':
+            compt.fields[0].values[0].val = (aDouble / 100).toFixed(precisionLen + 2)
+            break
+          default:
+            break
+        }
+      }
+    }
+  }
+
+  /**
+   * 字段组件中各种计算前，将百分比数值转化为真值  如：33.3% 转为 0.333
+   */
+  function percentConvertToNumValue(_this, value) {
+    var precisionLen = _this.precisionLen ? _this.precisionLen : 2
+    return _this.percentage ? (value / 100).toFixed(parseInt(precisionLen) + 2) : value //保留一次小数防止类似33.345/100，得到0.33344999999999997
+  }
+
+  /**
+   * 字段组件中将真值转化为百分比值  如：0.333 转为 33.3%
+   * precisionLen没有设置，默认保留两位小数
+   */
+  function convertToPercent(_this, value) {
+    var precisionLen = (_this.precisionLen || _this.precisionLen === 0) ? this.precisionLen : 2
+    return _this.percentage ? (parseFloat(value) * 100).toFixed(precisionLen) : parseFloat(value)
+  }
+
+  return {
+    convertToPercent: convertToPercent,
+    percentConvertToNumValue: percentConvertToNumValue,
+    numValueAndPercentConvert: numValueAndPercentConvert,
+    numValueAndPercentConvertForOne: numValueAndPercentConvertForOne
+  }
+})

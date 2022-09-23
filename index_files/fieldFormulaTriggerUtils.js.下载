@@ -1,0 +1,948 @@
+define(['Vue', 'jquery', 'formulaUtil', 'publicUtils', 'formDataLoadValidateUtil'], function (Vue, $, formulaUtil, publicUtils, formDataLoadValidateUtil) {
+  'use strict'
+  
+  var formulaConfig = {
+    formConditionFormulaFieldObj: {},//所有有常用公式绑定关系的条件字段对象conditionId:[formulaInfo]
+    formulaFieldIdAndVueObjs: {},//公式编辑联动相关组件id-vue实例对象 {configId: {inDetailGroupIndex: {id: 1, vueObj: vueObj}}}
+    formulaFieldValue: {},//常用公式自动加载的值对象configId:{formValue}
+    formulaFieldCurrIndex: -1,//常用公式操作子表单内子组件索引
+    formulaFieldType: 0, // 常用公式0，公式编辑1
+    formulaFiledAuto: [], //公式用，记录自动执行的公式（不依赖其他字段的）
+    formFid: 0, //表单或审批的fid
+    isInit: true// 是否为初始化状态
+  }
+  var currCompts = []
+  
+  /**获取联动组件vue对象*/
+  function getFormulaValueFieldObj(payload) {
+    var objs = formulaConfig.formulaFieldIdAndVueObjs
+    if (objs.hasOwnProperty(payload.configId)) {
+      return objs[payload.configId]
+    }
+    return null
+  }
+  
+  /**
+   触发修改组件值,且触发相应组件是否在加载数据中
+   */
+  function triggerFieldValuesAndLoading(payload, result, isLoading, context, formFormulaFieldObj) {
+    var comptVueObj = getFormulaValueFieldObj(payload)
+    // 常用公式添加数据未加载完，禁止提交校验
+    setCommonSubmitVerify(payload, context, formFormulaFieldObj)
+    if (!comptVueObj) {
+      // 网速慢或者其他因素导致页面未正常加载，导致中止公式编辑或常用公式时，移除提交校验信息
+      delete context.state.currFormValueFieldVerify.formula[payload.configId]
+      return
+    }
+    // 常用公式添加数据未加载完，禁止提交校验
+    setCommonSubmitVerify(payload, context)
+    // 数据值设置优先级设定，前端事件赋值优先级大于默认值（数据联动、公式编辑、自定义默认值， ...）
+    if (formDataLoadValidateUtil.priorityJudgment(payload, context)) {
+      // 如果是已有进入前端事件赋值的组件，删除常用公式、公式编辑未加载完标识
+      delete context.state.currFormValueFieldVerify.formula[payload.configId]
+      return
+    }
+    if (payload.inDetailGroupIndex !== -1) {
+      //触发字段为子表单内的字段
+      if (comptVueObj.hasOwnProperty(payload.inDetailGroupIndex)) {
+        comptVueObj[payload.inDetailGroupIndex].vueObj.setLoadingStatus(isLoading)
+        comptVueObj[payload.inDetailGroupIndex].vueObj.setFormulaFieldValue(result, formulaConfig.formulaFieldType, formulaConfig.formulaFieldCurrIndex)
+      }
+      // 子表单触发主表单
+      if (comptVueObj.hasOwnProperty(-1)) {
+        comptVueObj[-1].vueObj.setLoadingStatus(isLoading)
+        comptVueObj[-1].vueObj.setFormulaFieldValue(result, formulaConfig.formulaFieldType, formulaConfig.formulaFieldCurrIndex)
+      }
+    } else {
+      //触发字段为子表单外的字段
+      for (var indexKey in comptVueObj) {
+        comptVueObj[indexKey].vueObj.setLoadingStatus(isLoading)
+        comptVueObj[indexKey].vueObj.setFormulaFieldValue(result, formulaConfig.formulaFieldType, formulaConfig.formulaFieldCurrIndex)
+      }
+    }
+  }
+  
+  /**
+   * 提取表单结构里所有自动识别默认值的条件字段
+   */
+  function acquireFormFieldFormula(compts) {
+    function doAcquireFormFormulaField(compts) {
+      for (var i = 0; i < compts.length; i++) {
+        var ele = compts[i]
+        if (ele.config.compt === 'detailcombox') {
+          if (ele.config.compts.length > 0) {
+            doAcquireFormFormulaField(ele.children[0])
+          }
+          continue
+        }
+        if (ele.config.formula && ele.config.formula.status) {
+          var formulaObj = formulaConfig.formConditionFormulaFieldObj
+          if (!formulaObj[ele.config.formula.calculateFieldId]) {
+            formulaObj[ele.config.formula.calculateFieldId] = []
+          }
+          var formulaInfo = ele.config.formula
+          formulaInfo['formulaFieldValueId'] = ele.config.id
+          formulaInfo['compt'] = ele.config.compt
+          formulaObj[ele.config.formula.calculateFieldId].push(formulaInfo)
+        }
+        //编辑的公式
+        if (ele.config.formulaEdit && ele.config.formulaEdit.formula) {
+          var formulaObj = formulaConfig.formConditionFormulaFieldObj
+          var comptIds = []
+          var lines = ele.config.formulaEdit.formula.split('\n')
+          for (var l = 0; l < lines.length; l++) {
+            if (lines[l].length === 0) {
+              continue
+            }
+            var fileds = lines[l].split(new RegExp('(\\$[0-9a-zA-Z._#@]+)', 'g'))
+            for (var j = 0; j < fileds.length; j++) {
+              var filed = fileds[j]
+              if (/\$(.*?)#/.test(filed)) {
+                var comptInfos = filed.replace('$', '').split('#')
+                var comptData = comptInfos[0].split('_')
+                var comptId = comptData[1]
+                if (comptData[0] === 'detailcombox') {
+                  comptId = comptData[2]
+                }
+                if (!formulaObj[comptId]) {
+                  formulaObj[comptId] = []
+                }
+                //记录关联其他字段的公式
+                if (comptIds.indexOf(comptId) === -1) {
+                  var formulaEditInfo = {}
+                  formulaEditInfo['formulaFieldValueId'] = ele.config.id
+                  formulaEditInfo['formulaFieldValue'] = ele.config.formulaEdit.formula
+                  formulaEditInfo['formulaEdit'] = true
+                  formulaEditInfo['formulaComptIds'] = comptIds
+                  formulaEditInfo['comptIndex'] = i
+                  formulaEditInfo['pid'] = ele.pid
+                  formulaObj[comptId].push(formulaEditInfo)
+                  comptIds.push(comptId)
+                }
+              }
+            }
+          }
+          //记录没有关联其他字段的公式
+          if (comptIds.length === 0) {
+            if (!formulaObj[ele.config.id]) {
+              formulaObj[ele.config.id] = []
+            }
+            var formulaEditInfo = {}
+            formulaEditInfo['formulaFieldValueId'] = ele.config.id
+            formulaEditInfo['formulaFieldValue'] = ele.config.formulaEdit.formula
+            formulaEditInfo['formulaEdit'] = true
+            formulaEditInfo['comptIndex'] = i
+            formulaEditInfo['formulaComptIds'] = []
+            formulaEditInfo['pid'] = ele.pid
+            formulaObj[ele.config.id].push(formulaEditInfo)
+            if (formulaConfig.formulaFiledAuto.indexOf(ele.config.id) === -1) {
+              formulaConfig.formulaFiledAuto.push(ele.config.id)
+            }
+          }
+        }
+      }
+    }
+    
+    doAcquireFormFormulaField(compts)
+  }
+  
+  
+  function autoFillFormulaFieldValue(_this, formulaConfig, formFormulaFields, payload, index, context) {
+    var formFormulaFieldObj = formFormulaFields[index], result = [], idCardValue = payload.value
+    var formulaList = [
+      {title: '身份证号提取出生日期', type: 'getBirthday'},
+      {title: '身份证号提取性别', type: 'getSex'},
+      {title: '提取用户手机号', type: 'getMobile'},
+      {title: '提取用户uid', type: 'getUid'},
+      {title: '提取用户学工号', type: 'getSNO'},
+      {title: '身份证号提取年龄', type: 'getAge'}
+    ]
+    var regexp = /(^\d{15}$)|(^\d{18}$)|(^\d{17}(\d|X|x)$)/
+    var formulaObj = formulaList[formFormulaFieldObj.selIndex]
+    if (formulaObj) {//常用公式
+      formulaConfig.formulaFieldType = 0
+      switch (formulaObj.type) {
+        case 'getBirthday':
+          if (idCardValue.length === 18 && regexp.test(idCardValue)) {
+            result = [{val: idCardValue.substring(6, 10) + '-' + idCardValue.substring(10, 12) + '-' + idCardValue.substring(12, 14)}]
+          } else {
+            result = [{val: ''}]
+          }
+          formulaConfig.formulaFieldValue[formFormulaFieldObj.formulaFieldValueId] = result
+          triggerFieldValuesAndLoading({
+            configId: formFormulaFieldObj.formulaFieldValueId,
+            inDetailGroupIndex: payload.inDetailGroupIndex,
+            dataType: payload.dataType
+          }, formulaConfig.formulaFieldValue, true, context, formFormulaFieldObj)
+          break
+        case 'getSex':
+          if (idCardValue.length === 18 && regexp.test(idCardValue)) {
+            result = parseInt(idCardValue.substr(16, 1)) % 2 === 1 ? [{val: '男'}] : [{val: '女'}]
+          } else {
+            result = [{val: ''}]
+          }
+          formulaConfig.formulaFieldValue[formFormulaFieldObj.formulaFieldValueId] = result
+          triggerFieldValuesAndLoading({
+            configId: formFormulaFieldObj.formulaFieldValueId,
+            inDetailGroupIndex: payload.inDetailGroupIndex,
+            dataType: payload.dataType
+          }, formulaConfig.formulaFieldValue, true, context, formFormulaFieldObj)
+          break
+        case 'getAge': {
+          if (idCardValue.length !== 18) {
+            formulaConfig.formulaFieldValue[formFormulaFieldObj.formulaFieldValueId] = [{val: ''}]
+            triggerFieldValuesAndLoading({
+              configId: formFormulaFieldObj.formulaFieldValueId,
+              inDetailGroupIndex: payload.inDetailGroupIndex,
+              dataType: payload.dataType
+            }, formulaConfig.formulaFieldValue, true, context, formFormulaFieldObj)
+            break
+          }
+          let dateStr = idCardValue.substr(6, 8),
+              date = new Date(parseInt(dateStr.substr(0, 4)), parseInt(dateStr.substr(4, 2)) - 1, parseInt(dateStr.substr(6))),
+              now = new Date(),
+              age = now.getFullYear() - date.getFullYear(),
+              diffMonth = now.getMonth() - date.getMonth()
+          
+          if (diffMonth < 0) {
+            age -= 1
+          } else if (diffMonth === 0 && (now.getDate() - date.getDate()) < 0) {
+            age -= 1
+          }
+          formulaConfig.formulaFieldValue[formFormulaFieldObj.formulaFieldValueId] = [{val: String(age)}]
+          triggerFieldValuesAndLoading({
+            configId: formFormulaFieldObj.formulaFieldValueId,
+            inDetailGroupIndex: payload.inDetailGroupIndex,
+            dataType: payload.dataType
+          }, formulaConfig.formulaFieldValue, true, context, formFormulaFieldObj)
+          break
+        }
+        case 'getMobile':
+          if (payload.value && payload.value.length > 0) {
+            doRequest('data/common/user/special/info', {uid: payload.value[0].puid, t: 1, fid: formulaConfig.formFid}).then(function (res) {
+              var queryResult = [{val: ''}]
+              if (res.data && res.data.mobile) {
+                queryResult = [{val: res.data.mobile}]
+              }
+              formulaConfig.formulaFieldValue[formFormulaFieldObj.formulaFieldValueId] = queryResult
+              triggerFieldValuesAndLoading({
+                configId: formFormulaFieldObj.formulaFieldValueId,
+                inDetailGroupIndex: payload.inDetailGroupIndex,
+                dataType: payload.dataType
+              }, formulaConfig.formulaFieldValue, true, context, formFormulaFieldObj)
+              formFormulaFieldObj = formFormulaFields[++index]
+              if (formFormulaFieldObj) {
+                autoFillFormulaFieldValue(_this, formulaConfig, formFormulaFields, payload, index, context)
+              }
+            }).fail(function () {
+              // 失败后取消该条件下所有的校验公式编辑信息
+              for (var verifyIndex = 0; verifyIndex < formFormulaFields.length; verifyIndex++) {
+                setCommonSubmitVerify({
+                  configId: formFormulaFields[verifyIndex].formulaFieldValueId,
+                  inDetailGroupIndex: payload.inDetailGroupIndex
+                }, context, formFormulaFields[verifyIndex])
+              }
+            })
+          } else {
+            formulaConfig.formulaFieldValue[formFormulaFieldObj.formulaFieldValueId] = [{val: ''}]
+            triggerFieldValuesAndLoading({
+              configId: formFormulaFieldObj.formulaFieldValueId,
+              inDetailGroupIndex: payload.inDetailGroupIndex,
+              dataType: payload.dataType
+            }, formulaConfig.formulaFieldValue, true, context, formFormulaFieldObj)
+            formulaConfig.formulaFieldValueStatus = !formulaConfig.formulaFieldValueStatus
+            formFormulaFieldObj = formFormulaFields[++index]
+            if (formFormulaFieldObj) {
+              autoFillFormulaFieldValue(_this, formulaConfig, formFormulaFields, payload, index, context)
+            }
+          }
+          break
+        case 'getUid':
+          var nativeResult = [{val: ''}]
+          if (payload.value && payload.value.length > 0) {
+            nativeResult = [{val: payload.value && payload.value.length > 0 ? payload.value[0].puid : ''}]
+          }
+          formulaConfig.formulaFieldValue[formFormulaFieldObj.formulaFieldValueId] = nativeResult
+          triggerFieldValuesAndLoading({
+            configId: formFormulaFieldObj.formulaFieldValueId,
+            inDetailGroupIndex: payload.inDetailGroupIndex,
+            dataType: payload.dataType
+          }, formulaConfig.formulaFieldValue, true, context, formFormulaFieldObj)
+          break
+        case 'getSNO':
+          if (payload.value && payload.value.length > 0) {
+            doRequest('data/common/user/special/info', {uid: payload.value[0].puid, t: 0, fid: formulaConfig.formFid}).then(function (res) {
+              var queryResult = [{val: ''}]
+              if (res.data && res.data.sno) {
+                queryResult = [{val: res.data.sno}]
+              }
+              formulaConfig.formulaFieldValue[formFormulaFieldObj.formulaFieldValueId] = queryResult
+              formulaConfig.formulaFieldValueStatus = !formulaConfig.formulaFieldValueStatus
+              triggerFieldValuesAndLoading({
+                configId: formFormulaFieldObj.formulaFieldValueId,
+                inDetailGroupIndex: payload.inDetailGroupIndex,
+                dataType: payload.dataType
+              }, formulaConfig.formulaFieldValue, true, context, formFormulaFieldObj)
+              // 常用公式添加数据未加载完，禁止提交校验
+              setCommonSubmitVerify({
+                configId: formFormulaFieldObj.formulaFieldValueId,
+                inDetailGroupIndex: payload.inDetailGroupIndex
+              }, context, formFormulaFieldObj)
+              formFormulaFieldObj = formFormulaFields[++index]
+              if (formFormulaFieldObj) {
+                autoFillFormulaFieldValue(_this, formulaConfig, formFormulaFields, payload, index, context)
+              }
+            }).fail(function () {
+              // 失败后取消该条件下所有的校验公式编辑信息
+              for (var verifyIndex = 0; verifyIndex < formFormulaFields.length; verifyIndex++) {
+                setCommonSubmitVerify({
+                  configId: formFormulaFields[verifyIndex].formulaFieldValueId,
+                  inDetailGroupIndex: payload.inDetailGroupIndex
+                }, context, formFormulaFields[verifyIndex])
+              }
+            })
+          } else {
+            formulaConfig.formulaFieldValue[formFormulaFieldObj.formulaFieldValueId] = [{val: ''}]
+            triggerFieldValuesAndLoading({
+              configId: formFormulaFieldObj.formulaFieldValueId,
+              inDetailGroupIndex: payload.inDetailGroupIndex,
+              dataType: payload.dataType
+            }, formulaConfig.formulaFieldValue, true, context, formFormulaFieldObj)
+            formulaConfig.formulaFieldValueStatus = !formulaConfig.formulaFieldValueStatus
+            formFormulaFieldObj = formFormulaFields[++index]
+            if (formFormulaFieldObj) {
+              autoFillFormulaFieldValue(_this, formulaConfig, formFormulaFields, payload, index, context)
+            }
+          }
+          break
+        default:
+          break
+      }
+      if (!/^getMobile|getSNO$/.test(formulaObj.type)) {
+        formulaConfig.formulaFieldValueStatus = !formulaConfig.formulaFieldValueStatus
+        // 常用公式添加数据未加载完，禁止提交校验
+        setCommonSubmitVerify({
+          configId: formFormulaFieldObj.formulaFieldValueId,
+          inDetailGroupIndex: payload.inDetailGroupIndex
+        }, context, formFormulaFieldObj)
+        formFormulaFieldObj = formFormulaFields[++index]
+        if (formFormulaFieldObj) {
+          autoFillFormulaFieldValue(_this, formulaConfig, formFormulaFields, payload, index, context)
+        }
+      }
+    } else if (formFormulaFieldObj.formulaEdit) {//公式编辑
+      if (payload.inDetailGroupIndex === undefined) {
+        // 常用公式添加数据未加载完，禁止提交校验
+        setCommonSubmitVerify({
+          configId: formFormulaFieldObj.formulaFieldValueId,
+          inDetailGroupIndex: payload.inDetailGroupIndex
+        }, context, formFormulaFieldObj)
+        return
+      }
+      formulaConfig.formulaFieldType = 1
+      var compts = currCompts
+      var vals = [], hasComp = false
+      if (formFormulaFieldObj.formulaComptIds.length === 0) { // 没有关联其他组件的公式
+        var formulaFiledAutoIndex = formulaConfig.formulaFiledAuto.indexOf(payload.configId)
+        if (formulaFiledAutoIndex === -1) {
+          if (payload.dataType === 3) {
+            formFormulaFieldObj = formFormulaFields[++index]
+            if (formFormulaFieldObj) {
+              autoFillFormulaFieldValue(_this, formulaConfig, formFormulaFields, payload, index, context)
+            }
+          }
+          // 当没有其他组件的公式时，取消所有的公式编辑的校验信息
+          context.state.currFormValueFieldVerify.formula = {}
+          return
+        }
+        formulaConfig.formulaFiledAuto.splice(formulaFiledAutoIndex, 1)
+        hasComp = true
+      }
+      for (var i = 0; i < formFormulaFieldObj.formulaComptIds.length; i++) {
+        for (var j = 0; j < compts.length; j++) {
+          var curComptInfo = null, curValue = '', isSub = false
+          if (compts[j].config.compt === 'detailcombox') {
+            for (var k = 0; k < compts[j].children[0].length; k++) {
+              if (compts[j].children[0][k].config.id === Number(formFormulaFieldObj.formulaComptIds[i])) {
+                isSub = true
+                curComptInfo = compts[j].children[0][k]
+                var jarr = compts[j].children
+                if (payload.isDelete) {
+                  jarr = jarr.filter(function (item, index, arr) {
+                    return !(item[k].config.id === payload.configId && item[k].config.inDetailGroupIndex === payload.inDetailGroupIndex)
+                  })
+                }
+                curValue = jarr.map(function (children) {
+                  var comptVal = '', curVal = payload.values
+                  switch (curComptInfo.config.compt) {
+                    case 'contact':
+                      if (children[k].config.id === payload.configId && children[k].config.inDetailGroupIndex === payload.inDetailGroupIndex) {
+                        comptVal = payload.value.map(function (item) {
+                          return item.uname
+                        })
+                        children[k].config.fields[0].values = payload.value
+                      } else {
+                        if (children[k].config.fields[0].values.length > 0) {
+                          comptVal = children[k].config.fields[0].values.map(function (item) {
+                            return item.uname
+                          })
+                        } else {
+                          comptVal = []
+                        }
+                      }
+                      break
+                    case 'department':
+                      if (children[k].config.id === payload.configId && children[k].config.inDetailGroupIndex === payload.inDetailGroupIndex) {
+                        comptVal = payload.value.map(function (item) {
+                          return item.departmentName
+                        })
+                        children[k].config.fields[0].values = payload.value
+                      } else {
+                        if (children[k].config.fields[0].values.length > 0) {
+                          comptVal = children[k].config.fields[0].values.map(function (item) {
+                            return item.departmentName
+                          })
+                        } else {
+                          comptVal = []
+                        }
+                      }
+                      break
+                    case 'checklist':
+                    case 'selectmultibox':
+                      if (children[k].config.id === payload.configId && children[k].config.inDetailGroupIndex === payload.inDetailGroupIndex) {
+                        comptVal = payload.values.map(function (item) {
+                          if (item.isOther && payload.otherValue) {
+                            return payload.otherValue
+                          }
+                          return item.val
+                        })
+                        children[k].config.fields[0].values = curVal
+                      } else {
+                        if (children[k].config.fields[0].values.length > 0) {
+                          comptVal = children[k].config.fields[0].values.map(function (item) {
+                            return item.val
+                          })
+                        } else {
+                          comptVal = []
+                        }
+                      }
+                      break
+                    case 'selectbox':
+                    case 'radiobutton':
+                      if (children[k].config.id === payload.configId && children[k].config.inDetailGroupIndex === payload.inDetailGroupIndex) {
+                        comptVal = payload.value
+                        children[k].config.fields[0].values = curVal
+                      } else {
+                        if (children[k].config.fields[0].values.length > 0) {
+                          comptVal = children[k].config.fields[0].values.map(function (item) {
+                            return item.val
+                          }).join(',')
+                        } else {
+                          comptVal = ''
+                        }
+                      }
+                      break
+                    case 'dateinput':
+                    case 'editinput':
+                    case 'edittextarea':
+                      if (children[k].config.fields[0].values.length > 0) {
+                        if (children[k].config.id === payload.configId && children[k].config.inDetailGroupIndex === payload.inDetailGroupIndex) {
+                          children[k].config.fields[0].values[0].val = payload.value
+                        }
+                        comptVal = children[k].config.fields[0].values[0].val
+                      } else {
+                        comptVal = ''
+                      }
+                      break
+                    case 'numberinput':
+                    case 'computeinput':
+                    case 'slider':
+                      if (curComptInfo.config.compt === 'computeinput' && context.state.isInit) {
+                        compts[k].config.fields[0] = context.state.widgets[compts[k].id].config.fields[0]
+                      }
+                      if (children[k].config.fields[0].values.length > 0) {
+                        if (children[k].config.id === payload.configId && children[k].config.inDetailGroupIndex === payload.inDetailGroupIndex) {
+                          var value = payload.value
+                          if (value !== '') {
+                            value = Number(payload.value)
+                          }
+                          children[k].config.fields[0].values[0].val = value
+                        }
+                        comptVal = Number(children[k].config.fields[0].values[0].val)
+                      } else {
+                        comptVal = ''
+                      }
+                      break
+                    case 'areamultiselect':
+                    case 'multipleselect':
+                      if (children[k].config.id === payload.configId && children[k].config.inDetailGroupIndex === payload.inDetailGroupIndex) {
+                        children[k].config.fields[0].values = payload.value
+                      }
+                      if (children[k].config.fields[0].values.length > 0) {
+                        comptVal = children[k].config.fields[0].values.map(function (item) {
+                          return item.val
+                        }).join(',')
+                      } else {
+                        comptVal = ''
+                      }
+                      break
+                    default:
+                      break
+                  }
+                  return comptVal
+                })
+              }
+              if (curValue) {
+                break
+              }
+            }
+          } else {
+            if (Number(formFormulaFieldObj.formulaComptIds[i]) === compts[j].config.id) {
+              curComptInfo = compts[j]
+              curValue = []
+              switch (curComptInfo.config.compt) {
+                case 'selectbox':
+                case 'radiobutton':
+                  if (compts[j].config.id === payload.configId) {
+                    compts[j].config.fields[0].values = payload.values
+                  }
+                  curValue.push(compts[j].config.fields[0].values.map(function (item) {
+                    return item.val
+                  }))
+                  break
+                case 'checklist':
+                case 'selectmultibox':
+                  if (compts[j].config.id === payload.configId) {
+                    compts[j].config.fields[0].values = payload.values
+                  }
+                  curValue.push(compts[j].config.fields[0].values.map(function (item) {
+                    return '\'' + item.val + '\''
+                  }))
+                  break
+                case 'contact':
+                  if (compts[j].config.id === payload.configId) {
+                    compts[j].config.fields[0].values = payload.value
+                  }
+                  curValue.push(compts[j].config.fields[0].values.map(function (item) {
+                    return item.uname
+                  }))
+                  break
+                case 'department':
+                  if (compts[j].config.id === payload.configId) {
+                    compts[j].config.fields[0].values = payload.value
+                  }
+                  curValue.push(compts[j].config.fields[0].values.map(function (item) {
+                    return item.departmentName
+                  }))
+                  break
+                case 'dateinput':
+                case 'editinput':
+                case 'edittextarea':
+                  if (compts[j].config.id === payload.configId) {
+                    compts[j].config.fields[0].values[0].val = payload.value
+                  }
+                  curValue.push(compts[j].config.fields[0].values[0].val)
+                  break
+                case 'numberinput':
+                case 'computeinput':
+                case 'slider':
+                  if (curComptInfo.config.compt === 'computeinput' && context.state.isInit) {
+                    compts[j].config.fields[0] = context.state.widgets[compts[j].id].config.fields[0]
+                  }
+                  if (compts[j].config.id === payload.configId) {
+                    compts[j].config.fields[0].values[0].val = payload.value
+                  }
+                  if (compts[j].config.fields[0].values[0].val === '') {
+                    curValue.push(NaN)
+                  } else {
+                    curValue.push(Number(compts[j].config.fields[0].values[0].val))
+                  }
+                  break
+                case 'areamultiselect':
+                case 'multipleselect':
+                  if (compts[j].config.id === payload.configId) {
+                    compts[j].config.fields[0].values = payload.value
+                  }
+                  if (compts[j].config.fields[0].values) {
+                    curValue.push(compts[j].config.fields[0].values.map(function (item) {
+                      return item.val
+                    }))
+                  }
+                  break
+                default:
+                  break
+              }
+            }
+          }
+          if (curComptInfo) {
+            if (curValue) {
+              vals[formFormulaFieldObj.formulaComptIds[i]] = valueFormart(curValue, curComptInfo, isSub, formFormulaFieldObj.pid)
+              hasComp = true
+            } else {
+              vals[formFormulaFieldObj.formulaComptIds[i]] = '\'\''
+            }
+            break
+          }
+        }
+      }
+      if (hasComp) {
+        var setDataArray = []
+        if (formFormulaFieldObj.pid > 0) {
+          for (var j = 0; j < compts.length; j++) {
+            if (formFormulaFieldObj.pid === compts[j].id) {
+              var subCompt = compts[j].children
+              for (var i = 0; i < subCompt.length; i++) {
+                var tcompt = subCompt[i].filter(function (item) {
+                  return item.config.id === formFormulaFieldObj.formulaFieldValueId
+                })[0]
+                // 子表单公式有主表字段做参数，setDataArray加入n个表单的该字段，子表单公式关联子表单做参数则只加该个子表单的该字段
+                if (tcompt && payload.inDetailGroupIndex > -1 && payload.inDetailGroupIndex !== tcompt.config.inDetailGroupIndex) {
+                  continue
+                }
+                setDataArray.push(tcompt)
+              }
+              break
+            }
+          }
+        } else {
+          setDataArray.push(compts[formFormulaFieldObj.comptIndex])
+        }
+        for (var i = 0; i < setDataArray.length; i++) {
+          var groupIndex = formFormulaFieldObj.pid > 0 ? payload.inDetailGroupIndex : -1
+          var targetCompt = setDataArray[i]
+          
+          var formulaStr = formulaUtil.toFormulaStr(formFormulaFieldObj.formulaFieldValue, vals, groupIndex)
+          var formulaValue = formulaUtil.parse(formulaStr)
+          if (!formulaValue && formulaValue !== 0 && formulaValue !== false) {
+            formulaValue = ''
+            delete context.state.currFormValueFieldVerify.formula[payload.configId]
+          }
+          // 有问题的日期
+          if (formulaValue instanceof Date && isNaN(formulaValue.getTime())) {
+            formulaValue = ''
+          }
+          if (targetCompt && targetCompt.config.compt === 'numberinput') {
+            var percentage = targetCompt.config.fields[0].percentage
+            var isInteger = targetCompt.config.fields[0].verify.realNumber.isInteger
+            var precisionLen = targetCompt.config.fields[0].verify.realNumber.precisionLen
+            formulaValue = Number(formulaValue)
+            if (percentage) {
+              formulaValue = formulaValue * 100
+            }
+            if (isInteger) {
+              formulaValue = parseInt(formulaValue)
+            }
+            if (precisionLen) {
+              formulaValue = Number(formulaValue.toFixed(precisionLen))
+            }
+          }
+          else if (targetCompt && targetCompt.config.compt === 'dateinput') {
+            if (targetCompt && formulaValue) {
+              formulaValue = publicUtils.convertDateToFormatStr(formulaValue, targetCompt.config.fields[0].fieldType.format)
+            }
+          } else {
+            formulaValue = formulaValue + ''
+          }
+          var queryResult = [{val: formulaValue}]
+          if (formFormulaFieldObj.pid > 0) {
+            if (targetCompt) {
+              formulaConfig.formulaFieldValue[formFormulaFieldObj.formulaFieldValueId + '_' + targetCompt.config.inDetailGroupIndex] = queryResult
+            }
+          } else {
+            formulaConfig.formulaFieldValue[formFormulaFieldObj.formulaFieldValueId] = queryResult
+          }
+          triggerFieldValuesAndLoading({
+            configId: formFormulaFieldObj.formulaFieldValueId,
+            inDetailGroupIndex: payload.inDetailGroupIndex,
+            dataType: payload.dataType
+          }, formulaConfig.formulaFieldValue, true, context, formFormulaFieldObj)
+        }
+        if (setDataArray.length > 0) {
+          formulaConfig.formulaFieldValueStatus = !formulaConfig.formulaFieldValueStatus
+        }
+      }
+      // 常用公式添加数据未加载完，禁止提交校验
+      setCommonSubmitVerify({
+        configId: formFormulaFieldObj.formulaFieldValueId,
+        inDetailGroupIndex: payload.inDetailGroupIndex
+      }, context, formFormulaFieldObj)
+      // 没有关联其他组件的公式，从空值计算后得到本公式的值之后就结束，本次的空值不再触发下个公式，更新的值会触发下次的计算
+      if (formFormulaFieldObj.formulaComptIds.length === 0) {
+        // 当没有其他组件的公式时，取消所有的公式编辑的校验信息
+        context.state.currFormValueFieldVerify.formula = {}
+        return
+      }
+      formFormulaFieldObj = formFormulaFields[++index]
+      if (formFormulaFieldObj) {
+        autoFillFormulaFieldValue(_this, formulaConfig, formFormulaFields, payload, index, context)
+      }
+    } else {
+      formulaConfig.formulaFieldType = 0
+      switch (formFormulaFieldObj.compt) {
+        case 'belonger':
+        case 'contact':
+        case 'department':
+        case 'selectbox':
+        case 'selectmultibox':
+          result = []
+          break
+        case 'dateinput':
+        case 'editinput':
+        case 'edittextarea':
+        case 'numberinput':
+          result = [{val: ''}]
+          break
+        case 'areamultiselect':
+          result = [{val: ''}, {val: ''}, {val: ''}, {val: ''}]
+          break
+        default:
+          break
+      }
+      formulaConfig.formulaFieldValue[formFormulaFieldObj.formulaFieldValueId] = result
+      triggerFieldValuesAndLoading({
+        configId: formFormulaFieldObj.formulaFieldValueId,
+        inDetailGroupIndex: payload.inDetailGroupIndex,
+        dataType: payload.dataType
+      }, formulaConfig.formulaFieldValue, true, context, formFormulaFieldObj)
+      formFormulaFieldObj = formFormulaFields[++index]
+      if (formFormulaFieldObj) {
+        autoFillFormulaFieldValue(_this, formFormulaFields, payload, index, context)
+      }
+    }
+  }
+  
+  // 参数字段是子表单 isSub 为ture，结果字段为子表单 pid > 0
+  function valueFormart(curValue, curComptInfo, isSub, pid) {
+    var values = ''
+    //date类型值要是时间戳或是标准时间格式
+    switch (curComptInfo.config.compt) {
+      case 'dateinput':
+        var formartStr = curComptInfo.config.fields[0].fieldType.format
+        var datetime = curValue.map(function (val) {
+          return publicUtils.convertStrToDate(val, formartStr).valueOf()
+        })
+        values = datetime
+        break
+      case 'numberinput':
+        values = curValue
+        break
+      case 'computeinput':
+      case 'slider':
+        values = isSub && pid === 0 ? curValue : curValue.map(function (val) {
+          return val
+        })
+        break
+      case 'checklist':
+      case 'selectmultibox':
+        values = isSub && pid === 0 ? curValue : curValue.map(function (val) {
+          if (pid > 0) {
+            val = JSON.stringify(val)
+          }
+          if (Array.isArray(val)) {
+            return '[' + val.join() + ']'
+          }
+          return '[' + val + ']'
+        })
+        break
+      case 'contact':
+      case 'department':
+        values = isSub && pid === 0 ? curValue : curValue.map(function (val) {
+          if (pid > 0) {
+            val = JSON.stringify(val)
+          }
+          if (Array.isArray(val)) {
+            return '[' + val.map(function (dcv) {
+              return '\'' + dcv + '\''
+            }).join() + ']'
+          }
+          return val
+        })
+        break
+      default:
+        values = isSub && pid === 0 ? curValue : curValue.map(function (val) {
+          return '\'' + val + '\''
+        })
+        break
+    }
+    return isSub ? pid > 0 ? values : JSON.stringify(values) : values.join()
+  }
+  
+  /**
+   * 数据联动提交未加载完，禁止提交校验数据新增
+   */
+  function valueFieldVerify(context, payload) {
+    var formulaFormFields = formulaConfig.formConditionFormulaFieldObj[payload.configId]
+    if (formulaFormFields && formulaFormFields.length > 0) {
+      for (var i = 0; i < formulaFormFields.length; i++) {
+        if (payload.inDetailGroupIndex > -1) {
+          if (formulaFormFields[i].hasOwnProperty('formulaComptIds') && formulaFormFields[i].formulaComptIds.length > 0) {
+            // 子表单列公式编辑
+            context.state.currFormValueFieldVerify.formula[formulaFormFields[i].formulaFieldValueId + "_" + payload.inDetailGroupIndex] = {
+              id: formulaFormFields[i].formulaFieldValueId + "_" + payload.inDetailGroupIndex,
+              type: 2,
+              inDetailGroupIndex: payload.inDetailGroupIndex
+            }
+          } else {
+            context.state.currFormValueFieldVerify.formula[formulaFormFields[i].formulaFieldValueId] = {
+              id: formulaFormFields[i].formulaFieldValueId + "_" + payload.inDetailGroupIndex,
+              type: 2,
+              inDetailGroupIndex: payload.inDetailGroupIndex
+            }
+          }
+        } else {
+          if (formulaFormFields[i].hasOwnProperty('formulaComptIds')
+              && formulaFormFields[i].formulaComptIds.length > 1) {
+            // 多条件公式编辑
+            for (var j = 0; j < formulaFormFields[i].formulaComptIds.length; j ++) {
+              context.state.currFormValueFieldVerify.formula[formulaFormFields[i].formulaFieldValueId + "_" + formulaFormFields[i].formulaComptIds[j]] = {
+                id: formulaFormFields[i].formulaFieldValueId + "_" + formulaFormFields[i].formulaComptIds[j],
+                type: 2,
+                inDetailGroupIndex: payload.inDetailGroupIndex
+              }
+            }
+          } else {
+            context.state.currFormValueFieldVerify.formula[formulaFormFields[i].formulaFieldValueId] = {
+              id: formulaFormFields[i].formulaFieldValueId,
+              type: 2,
+              inDetailGroupIndex: payload.inDetailGroupIndex
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  /**
+   *  常用公式，数据未加载完禁止提交校验
+   */
+  function setCommonSubmitVerify(payload, context, formFormulaFieldObj) {
+    setTimeout(function () {
+      // 常用公式添加数据未加载完，禁止提交校验
+      if (payload && payload.hasOwnProperty('configId') && payload.hasOwnProperty('inDetailGroupIndex') && context) {
+        delete context.state.currFormValueFieldVerify.formula[payload.configId]
+      }
+      // 子表单公式编辑校验
+      if (formFormulaFieldObj && formFormulaFieldObj.hasOwnProperty('formulaComptIds')) {
+        for (var i = 0; i < formFormulaFieldObj.formulaComptIds.length; i++) {
+          var filed = formFormulaFieldObj.formulaFieldValue
+          if (/\$(.*?)#/.test(filed)) {
+            var comptInfos = filed.replace('$', '').split('#')
+            if (comptInfos && comptInfos.length > 0) {
+              // 支持多个子表单列同时组成一个公式编辑计算未加载校验
+              for (var comptInfosIndex = 0; comptInfosIndex < comptInfos.length; comptInfosIndex++) {
+                var comptData = comptInfos[comptInfosIndex].split('_')
+                if (comptData && comptData.length > 0 && comptData[0].indexOf('detailcombox') !== -1) {
+                  var detailLength = getDetailLength(context, comptData[1], payload.inDetailGroupIndex)
+                  var length = detailLength === 0 ? comptData[2] : detailLength
+                  for (var ci = 0; ci < length; ci++) {
+                    delete context.state.currFormValueFieldVerify.formula[formFormulaFieldObj.formulaFieldValueId + "_" + ci]
+                  }
+                }
+              }
+            }
+          }
+          delete context.state.currFormValueFieldVerify.formula[formFormulaFieldObj.formulaFieldValueId + "_" + formFormulaFieldObj.formulaComptIds[i]]
+        }
+      }
+    }, 1000)
+  }
+  
+  
+  /**
+   * 根据comptID获取组件信息
+   */
+  function getComptWidgetByConfigId(context, cid, detailRowIndex) {
+    cid = parseInt(cid)
+    if (detailRowIndex === undefined) {
+      detailRowIndex = 0
+    }
+    var widgets = context.getters.rootWidgets
+    for (var i = 0; i < widgets.length ; i++) {
+      var widget = widgets[i]
+      if (widget.config.id === cid) {
+        return widget
+      }
+      if (widget.config.compt === 'detailcombox') {
+        if (detailRowIndex === -1 || detailRowIndex > (widget.children.length - 1)) {
+          continue
+        }
+        for (var j = 0; j < widget.children[detailRowIndex].length; j++ ) {
+          var subWidget = widget.children[detailRowIndex][j]
+          if (subWidget.config.id === cid) {
+            return subWidget
+          }
+        }
+      }
+    }
+    return null
+  }
+  
+  /**
+   * 获取子表单的列数
+   */
+  function getDetailLength(context, id, inDetailGroupIndex) {
+    var length = 50 // 默认移除前50列的标记
+    var compt = getComptWidgetByConfigId(context, id, inDetailGroupIndex)
+    if (compt && compt.hasOwnProperty('children') && compt.children.length > length) {
+      length = compt.children.length
+    }
+    return length
+  }
+  
+  function doRequest(url, data) {
+    return $.ajax({
+      url: url,
+      type: 'post',
+      data: data,
+      dataType: 'json'
+    })
+  }
+  function getFormulaFiledAuto(id) {
+    return formulaConfig.formulaFiledAuto.indexOf(id) !== -1
+  }
+  
+  return {
+    /**初始化数据联动配置信息*/
+    initFieldFormulaConfig: function (compts) {
+      currCompts = compts
+      acquireFormFieldFormula(compts)
+    },
+    /** 设置isInit */
+    setInit: function (isInit) {
+      formulaConfig.isInit = isInit
+    },
+    /** 设置formFid */
+    setFormFid: function (fid) {
+      formulaConfig.formFid = fid
+    },
+    /**初始化组装数据联动相关组件id-vueObj*/
+    createdFieldFormulaTrigger: function (context, payload) {
+      var objs = formulaConfig.formulaFieldIdAndVueObjs
+      var widget = payload.widget
+      if (!objs.hasOwnProperty(widget.config.id)) {
+        objs[widget.config.id] = {}
+      }
+      objs[widget.config.id][widget.config.inDetailGroupIndex] = {id: widget.id, vueObj: payload.vueObj}
+    },
+    /** 执行计算操作 */
+    operateFormulaFiledData: function (context, payload) {
+      //自动填充常用公式字段值
+      var formFormulaFields = formulaConfig.formConditionFormulaFieldObj[payload.configId]
+      if (formFormulaFields && formFormulaFields.length > 0) {
+        //初始化状态,没有值不触发计算
+        // if (formulaConfig.isInit && payload.value === '' && payload.otherValue === '' && payload.values.length === 0 && !getFormulaFiledAuto(payload.configId)) {
+        //   return
+        // }
+        // 数据未加载完禁止提交校验添加
+        valueFieldVerify(context, payload)
+        autoFillFormulaFieldValue(this, formulaConfig, formFormulaFields, payload, 0, context)
+      }
+      formulaConfig.formulaFieldCurrIndex = payload.inDetailGroupIndex
+    },
+    /** 获取是否自动执行 */
+    getFormulaFiledAuto: getFormulaFiledAuto,
+    getFormConditionFormulaFieldObj: function (id) {
+      return formulaConfig.formConditionFormulaFieldObj[id]
+    }
+  }
+})

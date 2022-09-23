@@ -1,0 +1,291 @@
+define(['jquery', 'popup', 'tipImgs', 'util'], function ($, popup, tipImgs, util) {
+  'use strict'
+
+  function initDomHeight(_this) {
+    var dom = $('#matrix-checkbox_' + _this.widget.id)
+    var theight = dom.find('.cont-body').find('.matrix-line').eq(0).height()
+    dom.find('.fixed-body').find('.matrix-line').eq(0).height(theight)
+  }
+
+  return function (widget) {
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{noClick:readonly, widget_error: errorTip}" v-show="isShow&&hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+            '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_forbid_edit form_forbid_nodata" v-if="readonly">',
+              '<p class="form_forbid_word">暂无数据</p>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<div class="matrix-detail" :id="\'matrix-checkbox_\' + widget.id">' ,
+                '<div class="matrix-body fixed-body" v-for="(groupCompt, groupIndex) in widget.children">',
+                  '<div class="matrix-line" v-for="(comptChild, index) in groupCompt" v-if="index===0">',
+                    '<div class="li matrix-title">',
+                      '<span>&nbsp;</span>' ,
+                    '</div>',
+                  '</div>',
+                  '<div class="matrix-line" v-for="(comptChild, index) in groupCompt">' ,
+                    '<div class="li matrix-title">' ,
+                      '<span>{{comptChild.config.fields[0].label}}</span>' ,
+                    '</div>' ,
+                  '</div>' ,
+                '</div>',
+                '<div class="matrix-body cont-body" v-for="(groupCompt, groupIndex) in widget.children">',
+                  '<div class="matrix-line" v-for="(comptChild, index) in groupCompt" v-if="index===0">',
+                    '<div class="li matrix-title">',
+                      '<span>&nbsp;</span>' ,
+                    '</div>',
+                    '<div class="li matrix-param" v-for="item in comptChild.config.fields[0].options" :class="{select:comptChild.config.checked}">',
+                      '<span v-if="index === 0">{{item.title}}</span>',
+                    '</div>',
+                  '</div>',
+                  '<div class="matrix-line" v-for="(comptChild, index) in groupCompt">' ,
+                    '<div class="li matrix-title">' ,
+                      '<span>{{comptChild.config.fields[0].label}}</span>' ,
+                    '</div>' ,
+                    '<div class="li matrix-param" v-for="(item, itemIndex) in comptChild.config.fields[0].options"' + ' :class="{select:comptChild.config.checked}">' ,
+                      '<span :class="item.checked ? \'matrix-check\': \'\'" @click="selectMatrixVal(comptChild, itemIndex)">' ,
+                        '<i class="icon-blank icon-checkbox" :class="{\'icon-checkboxcheck\':item.checked}"></i>' ,
+                      '</span>' ,
+                    '</div>' ,
+                  '</div>' ,
+                '</div>',
+              '</div>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorTip">',
+              '<p class="must_word">此项为必填项</p>',
+            '</div>',
+          '</div>',
+          '<div style="display: none">{{verifyFaultStatus}}</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          errorTip: false
+        }
+      },
+      methods: {
+        verified: function () {
+          if (!this.required) {
+            return true
+          }
+          var len = 0, selectedVals = []
+          for (var i = 0; i < this.widget.children.length; i++) {
+            var groupCompts = this.widget.children[i]
+            len = this.widget.children[i].length
+            for (var j = 0; j < groupCompts.length; j++) {
+              var compt = groupCompts[j]
+              if (compt.config.fields[0].values && compt.config.fields[0].values.length > 0) {
+                var val = compt.config.fields[0].values[0].val
+                if (val) {
+                  selectedVals.push(val)
+                }
+              }
+            }
+          }
+          return selectedVals.length === len && len > 0
+        },
+        selectMatrixVal: function (subCompt, index) {
+          if (this.readonly) {
+            return
+          }
+          var config = subCompt.config
+          var field = config.fields[0]
+          var options = field.options
+          for (var i = 0; i < options.length; i++) {
+            if (!options[i].checked && i === index) {
+              options[i].checked = true
+              break;
+            }
+            if (options[i].checked && i === index) {
+              options[i].checked = false
+              break;
+            }
+          }
+          var valuesArr = []
+          for (var i = 0; i < options.length; i++) {
+            if (options[i].checked) {
+              var valueObj = {val: options[i].title, isOther: false}
+              if (config.optionScoreShow) {
+                valueObj['score'] = options[i].score
+              }
+              valuesArr.push(valueObj)
+            }
+          }
+          field.values = valuesArr
+          this.$store.commit('watchValues', {
+            id: subCompt.id,
+            fvalues: [
+              {fidx: 0, values: subCompt.config.fields[0].values}
+            ],
+            configId: subCompt.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: true,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [],
+            verified: this.verified(),
+            errMsg: '',
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          this.$forceUpdate()
+        }
+      },
+      components: {'tip-imgs': tipImgs},
+      computed: {
+        title: function () {
+          return this.widget.config.label
+        },
+        verifyFaultStatus: function () {
+          this.errorTip = this.$store.state.verifieds[this.widget.id].errorTip
+          return this.$store.state.verifyFaultStatus
+        },
+        required: function () {
+          return this.widget.config.verify.required
+        },
+        visible: function () {
+          return this.widget.config.visible
+        },
+        editable: function () {
+          return this.widget.config.editable
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          if (this.$store.getters.getCurrentType) {
+            return this.$store.getters.getReadonlyStatus
+          }
+          return this.$store.getters.getReadonlyStatus || (!this.editable && !this.hasRoleId)
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.tip instanceof Object)) {
+            return ''
+          }
+          return this.widget.config.tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.tip.imgs
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+          
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+
+          if (showStatus) {
+            var _this = this
+            _this.$nextTick(function () {
+              setTimeout(function () {
+                initDomHeight(_this)
+              }, 500)
+            })
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [],
+            verified: this.verified(),
+            errMsg: '',
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        }
+      },
+      mounted: function () {
+        initDomHeight(this)
+        for (var i = 0; i < this.widget.children.length; i++) {
+          var groupCompts = this.widget.children[i]
+          for (var j = 0; j < groupCompts.length; j++) {
+            var compt = groupCompts[j]
+            if (compt.config.fields[0].values) {
+              if (compt.config.fields[0].values.length > 0) {
+                this.$store.commit('watchValues', {
+                  id: compt.id,
+                  fvalues: [
+                    {fidx: 0, values: compt.config.fields[0].values}
+                  ],
+                  configId: compt.config.id,
+                  verified: this.verified(),
+                  isShow: this.isShow,
+                  hasAuthority: this.hasAuthority
+                })
+                // 回显数据
+                var optionValues = compt.config.fields[0].values;
+                for (var x = 0; x < optionValues.length; x++) {
+                  var val = optionValues[x].val
+                  if (val) {
+                    for (var k = 0; k < compt.config.fields[0].options.length; k++) {
+                      var option = compt.config.fields[0].options[k]
+                      if (option.title === val) {
+                        option['checked'] = true
+                        break
+                      }
+                    }
+                  }
+                }
+              }
+            } else {
+              compt.config.fields[0]['values'] = []
+            }
+          }
+        }
+      }
+    }
+  }
+})

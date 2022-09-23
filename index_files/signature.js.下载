@@ -1,0 +1,271 @@
+define(['Vue', 'jquery', 'util', 'popup', 'tipImgs', 'VueUtils', 'formSignature'], function (Vue, $, util, popup, tipImgs, VueUtils, formSignature) {
+  'use strict'
+  return function (widget) {
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{noClick:readonly, widget_error: errorTip}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+           '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_forbid_edit" :class="{form_forbid_nodata: !value}" v-if="readonly">',
+             '<p class="form_forbid_word" v-if="!value&&readonly">暂无内容</p>',
+              '<div class="autograph noedit" v-if="value&&readonly">',
+                '<div class="agh_left">',
+                  '<img :src="value" alt="" class="agh_img">',
+                '</div>',
+              '</div>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<div class="temp_button"  @click.stop="$toSignToggle" v-if="!value&&!readonly" v-show="imgLoaded">',
+                '<span class="button_icon icon-signature"></span>添加签名',
+              '</div>',
+              '<div class="temp_button" v-show="!imgLoaded&&!value">',
+                '<img width="10px" height="10px" src="static/style/apps/forms/web/fore/images/loading.gif"/>',
+              '</div>',
+              '<!--手写签名-->',
+              '<div class="autograph" v-if="value&&!readonly">',
+                '<div class="agh_left">',
+                  '<img :src="value" alt="" class="agh_img">',
+                '</div>',
+                '<div class="agh_right">',
+                  '<img width="10px" height="10px" src="static/style/apps/forms/web/fore/images/loading.gif" v-show="!imgLoaded"/>',
+                  '<label class="agh_rewrite" @click.stop="doRewrite" v-show="imgLoaded"><span class="icon-edit"></span>重写</label>',
+                  '<label class="agh_del" @click.stop="removeSign"><span class="icon-del"></span>删除</label>',
+                '</div>',
+              '</div>',
+            '</div>',
+            '<div class="sign_iframe_wrap" v-show="signViewShow">',
+              '<form-signature ref="signRef" @getsignresult="getSignResult" @loadcomplete="loadComplete" :signature-param="signatureParam" :id="widget.id" :is-third="true"></form-signature>',
+              '<div class="sign_sure" @click.stop="doSignSure">确定</div>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorTip">',
+             '<p class="must_word">此项为必填项</p>',
+            '</div>',
+            '<div style="display: none;">{{relateFieldValueStatus}}</div>',
+          '</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: '',
+          imgLoaded: false,
+          lastRelateValue: '',
+          signViewShow: false,
+          signatureParam: {
+            uid: 0,
+            randomKey: util.createUUID()
+          }
+        }
+      },
+      components: {
+        'tip-imgs': tipImgs,
+        formSignature: formSignature
+      },
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value}]}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if (this.required) {
+            return this.value && this.value.length !== 0
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === this.widget.config.inDetailGroupIndex) || !obj.hasOwnProperty('inDetailIndex')) && !this.$store.getters.getReadonlyStatus && (!this.isPreview || !this.isInit)) {
+            var result = obj.fields[0].values && obj.fields[0].values.length > 0 && obj.fields[0].values[0].val !== '' ? obj.fields[0].values[0].val : ''
+            if (!result) {
+              this.value = ''
+              this.currentSignShow = false
+            }
+            if (result && this.lastRelateValue !== result) {
+              this.value = result
+              this.lastRelateValue = result
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value}]}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        }
+      },
+      methods: {
+        loadComplete: function () {
+          //子组件加载完通知改变
+          this.imgLoaded = true
+        },
+        $toSignToggle: function () {
+          this.signViewShow = !this.signViewShow
+          this.$store.commit('setSignViewShowStatus', this.signViewShow)
+        },
+        doSignSure: function () {
+          this.$refs.signRef.submit()
+        },
+        getSignResult: function (result) {
+          this.value = result.url
+          this.$toSignToggle()
+        },
+        removeSign: function () {
+          var _this = this
+          popup.confirm({
+            content: '确定要清除签名吗？',
+            btn2: function () {
+              _this.value = ''
+              _this.$refs.signRef.afreshSig()
+            }
+          })
+        },
+        doRewrite: function () {
+          this.value = ''
+          this.$refs.signRef.afreshSig()
+          this.$toSignToggle()
+        }
+      },
+      mounted: function () {},
+      created: function () {
+        var values = this.widget.config.fields[0].values
+        if (values && values[0] && values[0].val) {
+          var signArr = values[0].val.split(':')
+          this.value = signArr.length > 1 ? document.location.protocol + signArr[1] : values[0].val
+        } else {
+          this.value = ''
+        }
+      }
+    }
+  }
+})

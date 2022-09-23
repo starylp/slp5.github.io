@@ -1,0 +1,185 @@
+define(['jquery', 'publicUtils'], function ($, publicUtils) {
+  'use strict'
+  return function (widget) {
+    return {
+      id: widget.id,
+      template: [
+        '<div>',
+        '<div class="cell_cont" v-show="isShow && hasAuthority">',
+        '<span :class="{cell_text: value, cell_nodata: !value}">{{valShow}}</span>',
+        '</div>',
+        '<div style="display:none;">{{refreshResult}}{{calculableStatus}}</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: '',
+          micrometerValue: '',
+          chineseValue: '',
+          chineseName: '',
+          calculable: true
+        }
+      },
+      methods: {
+        $reloadValueFun: function (vueObj) {
+          //子表单横排时打开某行子组件后依次给对应子表彰表格显示字段赋值
+          this.value = vueObj.value
+          this.chineseName = vueObj.chineseName
+          return this.verified
+        }
+      },
+      components: {},
+      watch: {
+        value: function () {
+          // 千分符，中文格式化
+          publicUtils.numberFormat(this, this.value)
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value, chineseName: this.chineseName}]}
+            ],
+            errMsg: '',
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          });
+        }
+      },
+      computed: {
+        valShow: function () {
+          return this.value === ''? '': (this.value + (this.percentage ? ' %' : ''))
+        },
+        refreshResult: function () {
+          var computResultObj = this.$store.state.computResultObj
+          var result = computResultObj[this.widget.id];
+          if (result) {
+            if (this.isShow) {
+              this.value = result.value
+              if (parseInt(this.precisionLen) >= 0) {
+                var formatResult = this.percentage ? result.value * 100 : result.value
+                this.value = publicUtils.dealPrecisionLen(formatResult, this.precisionLen, -1)
+              } else {
+                this.value = publicUtils.convertToPercent(this, result.value)
+              }
+              this.chineseName = result.chineseName
+            }
+          }
+          return this.$store.state.refreshResult
+        },
+        calculableStatus: function () {
+          this.calculable = true
+          return this.$store.state.calculableStatus
+        },
+        title: function () {
+          return this.widget.config.fields[0].label;
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required;
+        },
+        verified: function () {
+          var verified = true;
+          if (this.required && $.trim(this.value) === '') {
+            verified = false;
+          }
+          return verified
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = false
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false;
+          var gatherMode = this.$store.getters.getGatherModel;
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus;
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields;
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus;
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类似web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false;
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true;
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow;
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id];
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value, chineseName: this.chineseName}]}
+            ],
+            errMsg: '',
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus;
+        },
+        capital: function () {
+          return this.widget.config.fields[0].capital
+        },
+        micrometer: function () {
+          return this.widget.config.fields[0].micrometer
+        },
+        precisionLen: function () {
+          return this.widget.config.fields[0].precisionLen
+        },
+        percentage: function () {
+          return this.widget.config.fields[0].percentage
+        }
+      },
+      created: function () {
+        var values = this.widget.config.fields[0].values;
+        var val = values ? (values[0] && values[0].val) || '' : '';
+        if (val !== '') {
+          val = parseFloat(val)
+          if (parseInt(this.precisionLen) >= 0) {
+            this.value = publicUtils.dealPrecisionLen(val, this.precisionLen, -1)
+          } else {
+            this.value = publicUtils.convertToPercent(this, val)
+          }
+        }
+      }
+    }
+  }
+})

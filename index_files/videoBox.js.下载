@@ -1,0 +1,553 @@
+define(['jquery', 'util', 'VueUtils', 'popup', 'tipImgs', 'publicUtils', 'publicUpload'], function ($, util, VueUtils, popup, tipImgs, publicUtils, publicUpload) {
+  'use strict'
+  
+  return function (widget) {
+    
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: $.trim(_this.value),
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+  
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{widget_error: errorTip || (errorInfo.show&&errorInfo.verifyMsg)}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+           '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_img_forbid" v-if="readonly">',
+              '<div class="form_forbid_edit form_forbid_nodata" v-if="value.length == 0">',
+                '<p class="form_forbid_word">暂无数据</p>',
+              '</div>',
+              '<ul class="form_upload_img" v-if="value.length > 0">',
+                '<li class="upload_img_per" v-for="(file, index) in value" @click.stop="scanFilesFun(index)" :style="{backgroundImage:\'url(\' + (file.objectId?panUrl + \'/thumbnail/60,80,100/\'+file.objectId:\'\') + \')\'}">',
+                  '<span class="upload_img_video icon-play" v-if="\'video\' === getType(file)"></span>',
+                '</li>',
+              '</ul>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<ul class="form_upload_img">',
+                '<li class="upload_img_per" v-for="(file, index) in value" @click.stop="scanFilesFun(index)" :style="{backgroundImage:\'url(\' + (file.objectId?panUrl + \'/thumbnail/60,80,100/\'+file.objectId:\'\') + \')\'}">',
+                  '<span class="upload_img_del icon-userdel" @click.stop="remove(file)"></span>',
+                  '<span class="upload_img_video icon-play" v-if="\'video\' === getType(file)"></span>',
+                '</li>',
+                '<li class="upload_img_add" >',
+                  '<span class="upload_add_icon icon-addimg"></span>',
+                  '<p class="upload_add_word">上传视频</p>',
+                  '<input class="upload_trigger_input" :multiple="!max||max>1" @click.stop="verifyLimitFileCount($event)"' +
+                  ' @change.stop="uploadFile($event)" accept="video/*" type="file" name="file" >',
+                '</li>',
+              '</ul>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorInfo.show&&errorInfo.verifyMsg">',
+             '<p class="must_word">{{errorInfo.verifyMsg}}</p>',
+            '</div>',
+            '<div class="widget_right_tip" v-if="!readonly && limitTextInfo">',
+              '<p class="tip_word">{{limitTextInfo}}</p>',
+            '</div>',
+            '<div style="display: none;">{{relateFieldValueStatus}}</div>',
+          '</div>',
+          '<field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+          '<detail-combox-field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="detailComboxLinkFieldValueStatus"></detail-combox-field-link-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          limitTextInfo: '',
+          errorInfo: {
+            verifyMsg: '',
+            show: false
+          },
+          lastLinkValue: [],
+          fieldLinkCheck: true // 数据联动、缓存等文件格式校验标识，防止在缓存、数据联动的时候重复验证
+        }
+      },
+      components: {
+        'tip-imgs': tipImgs,
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue'),
+        'detailComboxFieldLinkTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/detailcombox/detailComboxFieldLinkTrigger.vue')
+      },
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            errMsg: this.errorInfo.verifyMsg,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          // 检验文件分辨率、大小,...
+          publicUtils.verifyVideoDetail(this, this.value)
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if (!this.fieldLinkCheck || !publicUtils.getFileVerify(this, this.value.length)) {
+            return false
+          }
+          if (this.required && this.value && this.value.length === 0) {
+            this.errorInfo.verifyMsg = '此项为必填项'
+          }
+          if (this.required) {
+            return this.value.length !== 0
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            this.errorInfo.show = true
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        limitSize: function () {
+          return this.widget.config.fields[0].verify.limitSize
+        },
+        limitType: function () {
+          return this.widget.config.fields[0].verify.limitType
+        },
+        limitWidth: function () {
+          if (!this.widget.config.fields[0].verify.limitWidth) {
+            return ''
+          }
+          return parseInt(this.widget.config.fields[0].verify.limitWidth)
+        },
+        limitHeight: function () {
+          if (!this.widget.config.fields[0].verify.limitHeight) {
+            return ''
+          }
+          return parseInt(this.widget.config.fields[0].verify.limitHeight)
+        },
+        limitDurationMin: function () {
+          if (!this.widget.config.fields[0].verify.limitDurationMin) {
+            return ''
+          }
+          return parseInt(this.widget.config.fields[0].verify.limitDurationMin)
+        },
+        limitDurationMax: function () {
+          if (!this.widget.config.fields[0].verify.limitDurationMax) {
+            return ''
+          }
+          return parseInt(this.widget.config.fields[0].verify.limitDurationMax)
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === publicUtils.getCurrentDetailIndex(this)) || !obj.hasOwnProperty('inDetailIndex')) && !this.$store.getters.getReadonlyStatus && (!this.isPreview || !this.isInit)) {
+            this.value = obj.fields[0].values || []
+            if (this.isClearRelatedData) {
+              this.value = []
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        isClearRelatedData: function () {
+          return this.$store.getters.getIsClearRelatedData
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs
+        },
+        uploadModeData: function () {
+          return this.widget.config.uploadMode
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+          
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        temporary: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('temporary')){
+            return false
+          }
+          return this.widget.config.fields[0].temporary
+        },
+        min: function () {
+          var min = this.widget.config.fields[0].verify.minValue
+          if (!min) {
+            //老数据兼容
+            min = {'range': '', 'errMsg': '上传个数最小限制'}
+            min.range = this.widget.config.fields[0].verify.limitCount === 0 ? '' : 0
+          }
+          this.widget.config.fields[0].verify.minValue = min
+          return min.range
+        },
+        max: function () {
+          var max = this.widget.config.fields[0].verify.maxValue
+          if (!max) {
+            //老数据兼容
+            max = {'range': '', 'errMsg': '上传个数最大限制'}
+            max.range = this.widget.config.fields[0].verify.limitCount === 0 ? '' : this.widget.config.fields[0].verify.limitCount
+            this.widget.config.fields[0].verify.maxValue = max
+          }
+          return max.range
+        }
+      },
+      methods: {
+        getType: function (value) {
+          return publicUtils.getType(value)
+        },
+        scanFilesFun: function (index) {
+          publicUtils.filePreview(this.value, index, false)
+        },
+        uploadFile: function (e) {
+          var _this = this
+          if (_this.readonly) {
+            return
+          }
+          _this.errorInfo.show = false
+          if (_this.max > 1 && e.target.files.length + _this.value.length > _this.max) {
+            var msg = '上传视频个数范围限制' +  (_this.min !=='' ? _this.min + '-' : '') + _this.max + '个,请重新上传。'
+            popup.alert(msg)
+            _this.errorInfo.verifyMsg = msg
+            _this.errorInfo.show = true
+            return
+          }
+          var def = $.Deferred()//定义异步延时机制
+          var promise = def.promise()
+          var files = {}
+          for (var i = 0; i < e.target.files.length; i++) {
+            //校验时长分辨率
+            if ((_this.limitDurationMin > 0 || _this.limitDurationMax > 0) || (_this.limitWidth > 0 && _this.limitHeight > 0)) {
+              var videoSrc = URL.createObjectURL(e.target.files[i])
+              var videoObj = new Audio(videoSrc)
+              videoObj.muted = true
+              // 由于ios对audio和video的一系列限制，包括提前load和自动播放等，所以只有当audio的play触发事件，才可以监听到duration
+              videoObj.play().then(function () {
+                videoObj.pause()
+              })
+              var fileDetail = $.extend(true, {}, e.target.files[i])
+              videoObj.onloadedmetadata = function (evt) {
+                if (_this.limitDurationMin > 0 || _this.limitDurationMax > 0) {
+                  var duration = parseInt(this.duration) //视频时长
+                  fileDetail.duration = duration
+                  if ((_this.limitDurationMin > 0 && duration < parseInt(_this.limitDurationMin))
+                      || (_this.limitDurationMax > 0 && duration > parseInt(_this.limitDurationMax))) {
+                    def.reject('视频时长不符合要求')
+                    return
+                  }
+                }
+                if (_this.limitWidth > 0 && _this.limitHeight > 0) {
+                  var width = this.videoWidth //视频分辨率宽
+                  var height = this.videoHeight //视频分辨率长
+                  fileDetail.videoWidth = this.videoWidth
+                  fileDetail.videoHeight = this.videoHeight
+                  if (width !== parseInt(_this.limitWidth) || height !== parseInt(_this.limitHeight)) {
+                    def.reject('视频分辨率不符合要求')
+                  }
+                }
+              }
+            }
+            //校验类型
+            if (_this.limitType) {
+              var f = e.target.files[i].name.split('.')
+              var typeReg = '^(' + _this.limitType.replace(/\;/g, '|') + ')$'
+              var reg = new RegExp(typeReg, 'i')
+              if (f.length > 0 && !reg.test(f[f.length - 1])) {
+                def.reject('视频格式不符合要求')
+              }
+            }
+            //校验大小
+            if (2048 < e.target.files[i].size / 1024 / 1024) {
+              def.reject('视频大小超出最大限制2G')
+            }
+            if (_this.limitSize > 0 && _this.limitSize < e.target.files[i].size / 1024 / 1024) {
+              def.reject('视频大小不符合要求')
+            }
+            files[i] = fileDetail
+          }
+          setTimeout(function () {
+            publicUtils.setFileVerify(_this, _this.value.length + e.target.files.length)
+            def.resolve()
+          }, 500)
+          promise.done(function () {
+            //支持多文件上传
+            for (var i = 0; i < e.target.files.length; i++) {
+              _this.submitUpload(e.target.files[i], files[i])
+            }
+            e.target.value = ''
+          }).fail(function (error) {
+            popup.alert(error)
+            _this.errorInfo.verifyMsg = error
+            _this.errorInfo.show = true
+            e.target.value = ''
+            setTimeout(function () {
+              publicUtils.verifyVideoDetail(_this, _this.value)
+            }, 500)
+          })
+        },
+        submitUpload: function (e, fileDetail) {
+          var _this = this
+          var formData = new FormData()
+          formData.append('file', e)
+          publicUpload.commonUpload(_this, formData).then(function (response) {
+            publicUtils.getVideoDuration(response.data.objectId).then(function (res) {
+              if (res.success && res.data.fileInfo.data && res.data.fileInfo.data.length > 0) {
+                var fileData = res.data.fileInfo.data[0]
+                if (fileData.status && fileData.status === 'success') {
+                  response.data.duration = fileData.duration
+                }
+              }
+              response.data.videoWidth = fileDetail && fileDetail.hasOwnProperty('videoWidth') ? fileDetail.videoWidth : 0,
+              response.data.videoHeight = fileDetail && fileDetail.hasOwnProperty('videoHeight') ? fileDetail.videoHeight : 0
+              if (response.success && response.data) {
+                _this.value.splice(_this.value.length, 0, response.data)
+              } else {
+                var msg = response.msg || '上传失败'
+                popup.alert(msg)
+                _this.errorInfo.verifyMsg = msg
+                _this.errorInfo.show = true
+              }
+              publicUtils.verifyVideoDetail(_this, _this.value)
+            })
+          })
+        },
+        remove: function (img) {
+          var _this = this
+          if (this.readonly) {
+            return
+          }
+          popup.confirm({
+            content: '确定要删除吗？',
+            btn2: function () {
+              var valueIndex = _this.value.indexOf(img)
+              _this.value.splice(valueIndex, 1)
+              // 检验文件分辨率、大小,...
+              publicUtils.verifyVideoDetail(_this, _this.value)
+            }
+          })
+        },
+        verifyLimitFileCount: function (e) {
+          publicUtils.verifyLimitFileCount(this, e)
+        },
+        linkFieldValueStatus: function (result) {
+          if (this.isPreview && this.isInit) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+
+          if (hasNullCondVal) {
+            this.value = []
+            this.lastLinkValue = []
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          if (result && JSON.stringify(this.lastLinkValue) === JSON.stringify(result) && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+            this.value = []
+          }
+          if (result && JSON.stringify(this.lastLinkValue) !== JSON.stringify(result) && !this.$store.getters.getReadonlyStatus) {
+            this.value = result
+            this.lastLinkValue = result
+            if (this.value.length > 0) {
+              dataLoadInit(this)
+            }
+          }
+          // 检验文件分辨率、大小,...
+          publicUtils.verifyVideoDetail(this, this.value)
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        detailComboxLinkFieldValueStatus: function (result) {
+          if (this.isPreview && this.isInit) {
+            return
+          }
+          if (result && JSON.stringify(this.lastLinkValue) === JSON.stringify(result) && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+            this.value = []
+          }
+          if (result && JSON.stringify(this.lastLinkValue) !== JSON.stringify(result) && !this.$store.getters.getReadonlyStatus) {
+            this.value = result
+            this.lastLinkValue = result
+            if (this.value.length > 0) {
+              dataLoadInit(this)
+            }
+          }
+          // 检验文件分辨率、大小,...
+          publicUtils.verifyVideoDetail(this, this.value)
+        },
+        secondToMinute: function (seconds) {
+          if (!seconds) {
+            return '0秒'
+          }
+          seconds = parseInt(seconds)
+          var minute = parseInt(seconds / 60)
+          var second = seconds % 60
+          var content = ''
+          if (minute >= 10) {
+            content = content + minute + '分'
+          } else if (minute > 0 && minute < 10) {
+            content = content + '0' + minute + '分'
+          }
+          if (second >= 10) {
+            content = content + second + '秒'
+          } else if (second > 0 && second < 10) {
+            content = content + '0' + second + '秒'
+          }
+          if (seconds === 0) {
+            content = '0秒'
+          }
+          return content
+        }
+      },
+      mounted: function () {
+        var _this = this
+        //防止子组件中构造各组件实例未执行，导致默认值数据关联失效问题
+        _this.$nextTick(function () {
+          setTimeout(function () {
+            dataLoadInit(_this, _this.$store.getters.getComptDataType('init'))
+          }, 500)
+        })
+      },
+      created: function () {
+        // 去除不符合文件规则的文件
+        var _this = this
+        // 去除不符合文件规则的图片
+        var values = this.widget.config.fields[0].values
+        if (values) {
+          for (var i = 0; i < values.length; i++) {
+            if (values[i].objectId) {
+              this.value.push(values[i])
+            }
+          }
+        }
+        // 视频上传提示信息
+        publicUtils.setVideoNotice(this)
+      }
+    }
+  }
+})

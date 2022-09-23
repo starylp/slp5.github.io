@@ -1,0 +1,303 @@
+define(['jquery', 'util', 'popup', 'tipImgs', 'moment', 'commonUtils'], function ($, util, popup, tipImgs, moment, commonUtils) {
+  'use strict'
+  return function (widget) {
+  
+    /**
+     * 根据设置转换日期数据
+     */
+    function dateConvert(date, timeType, m) {
+      if (timeType == 3) {
+        return moment(date).format('YYYY-MM-DD HH:mm:ss')
+      }
+      date = moment(date).format('YYYY-MM-DD')
+      if (timeType == 1) {
+        return date
+      }
+      //半天
+      return date + (m ? ' 上午' : ' 下午')
+    }
+    
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{widget_error: errorTip}" v-show="isShow && hasAuthority">',
+        '<!--标题-->',
+        '<div class="form_widget_title">',
+        '<h2 class="widget_name"><!--<em class="option-star" v-if="required"></em>-->{{title}}</h2>',
+        '</div>',
+        '<!--标题描述-->',
+        '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+        '<!--填写区域-->',
+        '<div class="form_widget_data">',
+        '<div class="temp_button"  @click.stop="selectType" v-if="!readonly">',
+        '<span class="button_icon icon-selectdata"></span>{{name||\'点击选择请假审批单\'}}',
+        '</div>',
+        '</div>',
+        '<a v-if="readonly&&value.length" :href="detailUrl">进入详情</a>',
+        '<!--提示文本-->',
+        '<div class="form_widget_prompt">',
+        '<div class="widget_error_tip" v-show="errorTip">',
+        '<p class="must_word">此项为必填项</p>',
+        '</div>',
+        '</div><div style="display: none">{{setLeaveCancellationKitValue}}</div>',
+        '<div class="form_widget_data" v-if="value.length">',
+        '<div class="time_range_forbid">',
+        '<!--请假类型-->',
+        '<div class="time_forbid_start mt20">',
+        '<div class="form_widget_title">',
+        '<h2 class="widget_name"><em class="option-star" v-if="false"></em>请假类型</h2>',
+        '</div>',
+        '<div class="form_forbid_edit form_forbid_nodata">',
+        '<p class="form_forbid_word">{{leaveType}}</p>',
+        '</div>',
+        '</div>',
+        '<!--开始时间-->',
+        '<div class="time_forbid_start mt20">',
+        '<div class="form_widget_title">',
+        '<h2 class="widget_name"><em class="option-star" v-if="false"></em>开始时间</h2>',
+        '</div>',
+        '<div class="form_forbid_edit form_forbid_nodata">',
+        '<p class="form_forbid_word">{{sdate}}</p>',
+        '</div>',
+        '</div>',
+        '<!--结束时间-->',
+        '<div class="time_forbid_end mt20">',
+        '<div class="form_widget_title">',
+        '<h2 class="widget_name"><em class="option-star" v-if="false"></em>结束时间</h2>',
+        '</div>',
+        '<div class="form_forbid_edit form_forbid_nodata">',
+        '<p class="form_forbid_word">{{edate}}</p>',
+        '</div>',
+        '</div>',
+        '<!--时长-->',
+        '<div class="time_forbid_length mt20">',
+        '<div class="form_widget_title">',
+        '<h2 class="widget_name"><em class="option-star" v-if="false"></em>时长({{unit}})</h2>',
+        '</div>',
+        '<div class="form_forbid_edit form_forbid_nodata">',
+        '<p class="form_forbid_word">{{duration}}</p>',
+        '</div>',
+        '</div>',
+        '</div>',
+        '</div>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          detailUrl: '',
+          leaveType: '',
+          sdate: '',
+          edate: '',
+          unit: 0,
+          duration: 0
+        }
+      },
+      methods: {
+        selectType: function () {
+          if (this.readonly) {
+            return
+          }
+          //将组件的设置存入缓存
+          window.localStorage.setItem('leave_cancellation_list', JSON.stringify(this.widget.config.fields[0].approveTypeList))
+          this.$store.commit('setChoseUserData', {
+            id: this.widget.id,
+            show: true,
+            type: 7,
+            value: this.value
+          })
+        }
+      },
+      components: {'tip-imgs': tipImgs},
+      watch: {
+        value: function () {
+          if (!this.value || this.value.length <= 0) {
+            return
+          }
+          
+          this.$store.commit('clearChoseUserStrData')
+          this.detailUrl = this.widget.config.fields[0].values[0].val
+          this.leaveType = this.widget.config.fields[1].values[0].val
+          this.sdate = this.widget.config.fields[2].values[0].val
+          this.edate = this.widget.config.fields[3].values[0].val
+          this.unit = this.widget.config.fields[4].values[0].unit == 1 ? '小时' : '天'
+          this.duration = this.widget.config.fields[4].values[0].val
+        }
+      },
+      computed: {
+        required: function () {
+          return this.widget.config.verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if (this.required) {
+            return this.value.length !== 0
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          return this.$store.getters.getReadonlyStatus || (!this.editable && !this.hasRoleId)
+        },
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        name: function () {
+          return this.widget.config.fields[0].name
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+          
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          return showStatus
+        },
+        setLeaveCancellationKitValue: function () {
+          //检查是否当前组件提交数据,不是则退出,如果是取出数据填充到当前组件数据
+          var arr = []
+          if (this.$store.state.choseUserData.id === this.widget.id
+              && (this.$store.state.choseUserData.leaveCancellationKitStr && this.$store.state.choseUserData.leaveCancellationKitStr != '[]')) {
+            var data = JSON.parse(this.$store.state.choseUserData.leaveCancellationKitStr)
+            this.value = data.detailUrl
+            this.$store.commit('watchValues', {
+              id: this.widget.id,
+              fvalues: [
+                {fidx: 0, values: [{val: data.detailUrl}]},
+                {fidx: 1, values: [{val: data.leaveType}]},
+                {fidx: 2, values: [{val: dateConvert(data.sdate, data.timeType, data.am)}]},
+                {fidx: 3, values: [{val: dateConvert(data.edate, data.timeType, data.pm)}]},
+                {fidx: 4, values: [{val: data.duration, unit: data.unit}]}
+              ],
+              configId: this.widget.config.id,
+              inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+              verified: this.verified,
+              isShow: this.isShow,
+              hasAuthority: this.hasAuthority
+            })
+          }
+          return this.$store.state.choseUserData.leaveCancellationKitStr
+        }
+      },
+      created: function () {
+        var _this = this
+        this.value = this.widget.config.fields[0].values || []
+        if (this.widget.config.fields[0].hasOwnProperty('unchangeable')) {
+          this.widget.config.fields[0].editable = !this.widget.config.fields[0].unchangeable
+          delete this.widget.config.fields[0].unchangeable
+        }
+        var leaveId = window.localStorage.getItem('leaveId')
+        if (!leaveId && this.value.length) {
+          //尝试从缓存获取数据,给leaveId赋值
+          leaveId = commonUtils.getParam(this.value[0].val, 'id')
+        }
+        //如果是从详情页点击销假按钮跳转, 页面直接展示请假信息
+        setTimeout(function () {
+          if (leaveId) {
+            $.get('data/approve/apps/forms/fore/leavecancellation/unfinished/info', {formUserId: leaveId}).then(function (res) {
+              if (res.success && res.data.formsKitLeave) {
+                var data = res.data.formsKitLeave
+                _this.value = data.detailUrl
+                _this.$store.commit('watchValues', {
+                  id: _this.widget.id,
+                  fvalues: [
+                    {fidx: 0, values: [{val: data.detailUrl}]},
+                    {fidx: 1, values: [{val: data.leaveType}]},
+                    {fidx: 2, values: [{val: dateConvert(data.sdate, data.timeType, data.am)}]},
+                    {fidx: 3, values: [{val: dateConvert(data.edate, data.timeType, data.pm)}]},
+                    {fidx: 4, values: [{val: data.duration, unit: data.unit}]}
+                  ],
+                  configId: _this.widget.config.id,
+                  inDetailGroupIndex: _this.widget.config.inDetailGroupIndex,
+                  verified: _this.verified,
+                  isShow: _this.isShow,
+                  hasAuthority: _this.hasAuthority
+                })
+              }
+            })
+          }
+          window.localStorage.removeItem('leaveId')
+        }, 500)
+      }
+    }
+  }
+})

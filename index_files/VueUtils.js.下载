@@ -1,0 +1,27 @@
+define(['jquery', 'tipImgs', 'echarts', 'moment', 'util', 'publicUtils', 'iosSelectCmp'],
+    function ($, tipImgs, echarts, moment, Utils, publicUtils, IosSelectCmp) {
+      var caches = {}
+      
+      function loadComponent(url) {
+        url += '?v=20220913'
+        return function (resolve, reject) {
+          if (caches.hasOwnProperty(url)) {
+            resolve(caches[url])
+            return
+          }
+          
+          $.get(url, function (data) {
+            data = $(data)
+            var component = eval(data.filter('script').html())
+            component.template = data.filter('template').html()
+            $('head').append(data.filter('style'))
+            caches[url] = component
+            resolve(component)
+          })
+        }
+      }
+      
+      return {
+        loadComponent: loadComponent
+      }
+    })

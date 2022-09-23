@@ -1,0 +1,572 @@
+define(['jquery', 'tipImgs', 'moment', 'util', 'iosSelectCmp', 'publicUtils', 'VueUtils'], function ($, tipImgs, moment, util, IosSelectCmp, publicUtils, VueUtils) {
+  'use strict'
+  return function (widget) {
+    
+    function getMomentDate(value, format) {
+      if (format === 'HH:mm') {
+        if (value && value.indexOf('-') !== -1) {
+          //上一次缓存的值存在年月日值
+          value = '00:00'
+        }
+        return moment(value, 'HH:mm')
+      }
+      if (value && value.indexOf('-') === -1) {
+        if (format === 'YYYY') {
+          return moment(value, format)
+        }
+        //上一次缓存的值不存在年月日值
+        return moment()
+      }
+      return moment(value)
+    }
+
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: $.trim(_this.value),
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{widget_error: errorTip}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+           '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_forbid_edit" :class="{form_forbid_nodata: !tip}" v-if="readonly">',
+              '<p class="form_forbid_word">{{tip ? tip :\'暂无数据\'}}</p>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<div class="sub_loading" v-show="loadStatus"><span class="loading_icon"></span></div>',
+              '<div class="temp_icon_input" :class="{nodata: value == \'\'}" @click.stop="selectValideDateTime()">',
+               '<i class="input_icon icon-date"></i>{{tip}}',
+              '</div>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorTip">',
+              '<p class="must_word">此项为必填项</p>',
+            '</div>',
+            '<div style="display:none;">{{relateFieldValueStatus}}{{buttonFieldValue}}{{ocrFieldValue}}</div>',
+          '</div>',
+         '<field-formula-trigger :widget="widget" @set-loading-status="" @set-formula-field-value="formulaFieldValueStatus"></field-formula-trigger>',
+          '<field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+          '<event-trigger :widget="widget" :compose="\'col\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event="triggerValueEvent" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+        '<detail-combox-field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="detailComboxLinkFieldValueStatus"></detail-combox-field-link-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: '',
+          newFormat: '',
+          pickerType: '',
+          minDateTime: null,
+          maxDateTime: null,
+          formatShow: false,
+          isShowCalendar: false,
+          loadStatus: false
+        }
+      },
+      components: {
+        'tip-imgs': tipImgs,
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue'),
+        fieldFormulaTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldFormula/fieldFormulaTrigger.vue'),
+        'detailComboxFieldLinkTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/detailcombox/detailComboxFieldLinkTrigger.vue')
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEvent: function (val) {
+          if (val !== '') {
+            this.value = publicUtils.convertTimestampToFormatStr(val, this.format)
+            $('#dateInput' + this.widget.id).val(this.value)
+          }
+          this.loadStatus = false
+        },
+        triggerGetValueEvent: function (callback) {
+          callback([{val: this.value}])
+        },
+        selectValideDateTime: function () {
+          var _this = this
+          if (this.readonly) {
+            return
+          }
+          this.$store.commit('setInitStatus', false)
+          var date = moment(), formatter = _this.format
+          if (this.value && this.value !== '') {
+            if (formatter === 'HH:mm') {
+              date = moment(this.value, formatter)
+            } else {
+              date = moment(this.value);
+            }
+          }
+          var lv1 = parseInt(date.format('YYYY')),
+              lv2 = parseInt(date.format('MM')),
+              lv3 = parseInt(date.format('DD')),
+              lv4 = parseInt(date.format('HH')),
+              lv5 = parseInt(date.format('mm'))
+          var rangeDateTime = publicUtils.setValidDateRangeForMobile(_this)
+          if (formatter === 'HH:mm') {
+            IosSelectCmp.dateTimeHmRangePicker(rangeDateTime.minDateTime, rangeDateTime.maxDateTime, {
+              title: '',
+              oneLevelId: lv1,
+              twoLevelId: lv2,
+              threeLevelId: lv3,
+              fourLevelId: lv4,
+              fiveLevelId: lv5,
+              itemHeight: 35,
+              isNowStart: false,
+              format: formatter,
+              relation: [1, 1, 1, 0],
+              callback: function (selectOneObj, selectTwoObj, selectThreeObj, selectFourObj, selectFiveObj) {
+                var dateStr
+                switch (formatter) {
+                  case 'HH:mm':
+                    dateStr = selectOneObj.id + ':' + selectTwoObj.id
+                    break
+                }
+                _this.value = dateStr
+                _this.tip = dateStr
+              }
+            })
+          } else {
+            IosSelectCmp.dateTimeRangePicker(rangeDateTime.minDateTime, rangeDateTime.maxDateTime, {
+              title: '',
+              oneLevelId: lv1,
+              twoLevelId: lv2,
+              threeLevelId: lv3,
+              fourLevelId: lv4,
+              fiveLevelId: lv5,
+              itemHeight: 35,
+              isNowStart: false,
+              format: formatter,
+              relation: [1, 1, 1, 0],
+              callback: function (selectOneObj, selectTwoObj, selectThreeObj, selectFourObj, selectFiveObj) {
+                var dateStr
+                switch (formatter) {
+                  case 'yyyy':
+                    dateStr = selectOneObj.id
+                    break
+                  case 'yyyy-MM' :
+                    dateStr = selectOneObj.id + '-' + selectTwoObj.id
+                    break
+                  case 'yyyy-MM-dd' :
+                    dateStr = selectOneObj.id + '-' + selectTwoObj.id + '-' + selectThreeObj.id
+                    break
+                  case 'yyyy-MM-dd HH:mm' :
+                    dateStr = selectOneObj.id + '-' + selectTwoObj.id + '-' + selectThreeObj.id + ' ' + selectFourObj.id + ':' + selectFiveObj.id
+                    break
+                }
+                _this.value = dateStr
+                _this.tip = dateStr
+              }
+            })
+          }
+        },
+        linkFieldValueStatus: function (result) {
+          if (this.isPreview && this.isInit) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+
+          if (hasNullCondVal) {
+            this.value = ''
+            dataLoadInit(this)
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          if (result && result.length > 0 && !this.$store.getters.getReadonlyStatus) {
+            var dateStr = ''
+            if (result[0].val) {
+              dateStr = moment(parseInt(result[0].val)).format(util.reSetDateFormat(this.format))
+            }
+            this.value = dateStr
+            this.tip = dateStr
+            dataLoadInit(this)
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        detailComboxLinkFieldValueStatus: function (result) {
+          var dateObj = $('#dateInput' + this.widget.id)
+          var txt = dateObj.val()
+          if (this.isPreview && this.isInit) {
+            return
+          }
+          if (result && result.length > 0 && !this.manualSetValue) {
+            var dateStr = result[0].val
+            if ($.trim(txt) !== '' && $.trim(txt) === dateStr) {
+              return
+            }
+            this.value = dateStr
+            dataLoadInit(this)
+            dateObj.val(this.value)
+          }
+          this.manualSetValue = false
+        },
+        formulaFieldValueStatus: function (data) {
+          this.loadStatus = false
+          var refreshResult = data.result, formulaFieldType = data.type, formulaFieldCurrIndex = data.index
+          if (formulaFieldType === 0 && formulaFieldCurrIndex !== this.widget.config.inDetailGroupIndex && this.$store.state.formulaFieldCurrIndex > -1 && this.widget.config.inDetailGroupIndex > -1) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 2, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+          var key = (formulaFieldType > 0 && this.widget.pid > 0) ? this.widget.config.id + '_' + this.widget.config.inDetailGroupIndex : this.widget.config.id
+          var result = refreshResult[key]
+          if (result && result.length > 0) {
+            this.value = result[0].val
+            this.tip = result[0].val
+            if (formulaFieldType > 0) {
+              delete refreshResult[key]
+            }
+            dataLoadInit(this)
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 2, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        }
+      },
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value}]}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          if (this.readonly) {
+            dataLoadInit(this)
+            return
+          }
+          dataLoadInit(this)
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          if (this.required) {
+            return $.trim(this.value) !== ''
+          }
+          return true
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            status = true
+          }
+          return status
+        },
+        rangeType: function () {
+          if (!this.widget.config.fields[0].verify.hasOwnProperty('validateRange')) {
+            return 0
+          }
+          return this.widget.config.fields[0].verify.validateRange.rangeType
+        },
+        dynamicRangeStartValue: function () {
+          if (!this.widget.config.fields[0].verify.hasOwnProperty('validateRange')) {
+            return ''
+          }
+          return this.widget.config.fields[0].verify.validateRange.dynamicRangeStartValue
+        },
+        dynamicRangeEndValue: function () {
+          if (!this.widget.config.fields[0].verify.hasOwnProperty('validateRange')) {
+            return ''
+          }
+          return this.widget.config.fields[0].verify.validateRange.dynamicRangeEndValue
+        },
+        dynamicRangeStartType: function () {
+          if (!this.widget.config.fields[0].verify.hasOwnProperty('validateRange')) {
+            return 0
+          }
+          return this.widget.config.fields[0].verify.validateRange.dynamicRangeStartType
+        },
+        dynamicRangeEndType: function () {
+          if (!this.widget.config.fields[0].verify.hasOwnProperty('validateRange')) {
+            return 0
+          }
+          return this.widget.config.fields[0].verify.validateRange.dynamicRangeEndType
+        },
+        beginDate: function () {
+          if (!this.widget.config.fields[0].verify.hasOwnProperty('validateRange')) {
+            return ''
+          }
+          return this.widget.config.fields[0].verify.validateRange.beginDate
+        },
+        endDate: function () {
+          if (!this.widget.config.fields[0].verify.hasOwnProperty('validateRange')) {
+            return ''
+          }
+          return this.widget.config.fields[0].verify.validateRange.endDate
+        },
+        format: function () {
+          return this.widget.config.fields[0].fieldType.format
+        },
+        errMsg: function () {
+          if (!this.widget.config.fields[0].verify.hasOwnProperty('validateRange')) {
+            return '请输入合法的日期范围'
+          }
+          return this.widget.config.fields[0].verify.validateRange.errMsg
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          if(this.$store.getters.getCurrentType){
+            return this.$store.getters.getReadonlyStatus
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var relateStatus = this.$store.getters.getRelateFieldValueStatus
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (this.isPreview && this.isInit) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return relateStatus
+          }
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === publicUtils.getCurrentDetailIndex(this)) || !obj.hasOwnProperty('inDetailIndex')) && !this.$store.getters.getReadonlyStatus) {
+            var newValue = obj.fields[0].values && obj.fields[0].values.length > 0 && obj.fields[0].values[0].val !== '' ? obj.fields[0].values[0].val : ''
+            var dateStr = ''
+            if (newValue) {
+              var format = util.reSetDateFormat(this.format)
+              dateStr = getMomentDate(newValue, format).format(format)
+            }
+            var oldValue = this.value
+            this.value = dateStr
+            this.tip = dateStr
+            if (this.isClearRelatedData) {
+              this.value = ''
+              this.tip = ''
+            }
+            if (oldValue !== this.value){
+              dataLoadInit(this)
+            }
+          }
+          if (this.isClearRelatedData && $.isEmptyObject(obj)) {
+            this.value = ''
+            this.tip = ''
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return relateStatus
+        },
+        isClearRelatedData: function () {
+          return this.$store.getters.getIsClearRelatedData
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs
+        },
+        tip: {
+          get: function () {
+            if (this.value) {
+              return this.value
+            }
+            var _this = this;
+            switch (this.format) {
+              case 'yyyy':
+                return '年'
+              case 'yyyy-MM' :
+                return '年-月'
+              case 'yyyy-MM-dd' :
+                _this.newFormat = "YY-MM-DD"
+                _this.formatShow = true
+                _this.pickerType = "date"
+                return '年-月-日'
+              case 'yyyy-MM-dd HH:mm' :
+                _this.newFormat = "YY-MM-DD hh:mm"
+                _this.formatShow = true
+                _this.pickerType = "datetime"
+                return '年-月-日 时:分'
+              case 'HH:mm':
+                return '时:分'
+            }
+          },
+          set: function (val) {
+          }
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = this.$store.state.reloadValSubField
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            if (this.widget.pid > 0 && !this.$store.state.verifieds[this.widget.pid].isShow) {
+              //明细内子组件时 如果明细组件是隐藏状态时 当前子组件也要改成隐藏状态
+              showStatus = false
+            } else {
+              showStatus = true
+            }
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value}]}
+            ],
+            verified: this.verified,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        buttonFieldValue: function () {
+          var fieldValue = this.$store.getters.getButtonFieldValue(this.widget.config.alias)
+          if (fieldValue) {
+            this.value = fieldValue.val[0] || ''
+          }
+          return fieldValue
+        },
+        ocrFieldValue: function () {
+          var fieldValue = this.$store.getters.getOcrFieldValue(this.widget.config.inDetailGroupIndex + '_' + this.widget.config.alias)
+          if (fieldValue) {
+            this.value = fieldValue.val[0] || ''
+          }
+          return fieldValue
+        }
+      },
+      mounted: function () {
+        var _this = this
+        //防止子组件中构造各组件实例未执行，导致默认值数据关联失效问题
+        _this.$nextTick(function () {
+          setTimeout(function () {
+            dataLoadInit(_this, _this.$store.getters.getComptDataType('init'))
+          }, 500)
+        })
+      },
+      created: function () {
+        var values = this.widget.config.fields[0].values
+        this.value = values ? (values[0] && values[0].val) || '' : ''
+        if (this.widget.config.fields[0].hasOwnProperty('unchangeable')) {
+          this.widget.config.fields[0].editable = !this.widget.config.fields[0].unchangeable
+          delete this.widget.config.fields[0].unchangeable
+        }
+
+        // 新版本设置合法时间范围配置
+        switch (this.format) {
+          case 'yyyy-MM-dd' :
+          case 'yyyy-MM-dd HH:mm' :
+            var rangeDateTime = publicUtils.setValidDateRangeForMobile(this)
+            this.minDateTime = new Date(rangeDateTime.minDateTime)
+            this.maxDateTime = new Date(rangeDateTime.maxDateTime)
+            break
+          default:
+            break
+        }
+        if (this.widget.config.fields[0].appoint && !this.isPreview) {
+          var day = new Date()
+          day.setTime(day.getTime() + 24 * 60 * 60 * 1000 * parseInt(this.widget.config.fields[0].dayIndex))
+          this.value = moment(day.getTime()).format(util.reSetDateFormat(this.format))
+        }
+      }
+    }
+  }
+})

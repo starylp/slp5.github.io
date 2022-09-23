@@ -1,0 +1,541 @@
+define(['jquery', 'util', 'popup', 'VueUtils','tipImgs', 'cookies', 'publicUtils'], function ($, util, popup, VueUtils, tipImgs, Cookies, publicUtils) {
+  'use strict'
+
+  /**
+   *触发第三方设置Url
+   */
+  function doInsertUrlField(_this) {
+    var insertUrlFields = _this.$store.getters.getInsertFiledIdById(_this.widget.config.id)
+    if (insertUrlFields && insertUrlFields.length > 0) {
+      var valArr = []
+      for (var i = 0; i < _this.value.length; i++) {
+        valArr.push(_this.value[i].val)
+      }
+      //存在当前字段被做为第三方Url条件字段
+      _this.$store.commit('operateInsertFiledData', {
+        id: _this.widget.id,
+        compt: _this.widget.config.compt,
+        configId: _this.widget.config.id,
+        value: valArr.join(',')
+      })
+    }
+  }
+  
+  
+  /**
+   * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+   */
+  function dataLoadInit(_this, dataType) {
+    _this.$store.dispatch('dataLoadInit', {
+      widget: _this.widget,
+      value: $.trim(_this.value),
+      compose: 'col',
+      dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+    })
+  }
+
+  return function (widget) {
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{noClick:readonly, widget_error: errorTip || (errorInfo.show&&errorInfo.verifyMsg)}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+            '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_forbid_edit" :class="{form_forbid_nodata: !value}" v-if="readonly">',
+              '<p class="form_forbid_word" v-html="showValue||\'暂无数据\'" @click="openValue($event)"></p>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div :id="\'edittextarea\' + widget.id" class="form_widget_cont" v-if="!readonly">',
+              '<div class="sub_loading" v-show="loadStatus"><span class="loading_icon"></span></div>',
+              '<div ref="textInp" class="temp_multi_text" :class="{error: errorInfo.show&&errorInfo.verifyMsg}" :contenteditable="!readonly" ' +
+              '@blur="onBlur" :placeholder="placeholder" @input="changeValueFun($event)" @paste="pastePureText"></div>',
+              '<span class="mult_charlen_tip" v-if="charLimit && charLimit.open && charLimitType!==2">{{value.length}}/{{charLimit.maxSize}}</span>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorInfo.show&&errorInfo.verifyMsg">',
+             '<p class="must_word">{{errorInfo.verifyMsg}}</p>',
+            '</div>',
+            '<div style="display: none;">{{relateFieldValueStatus}}{{buttonFieldValue}}{{ocrFieldValue}}</div>',
+          '</div>',
+        '<event-trigger :widget="widget" :compose="\'col\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event="triggerValueEvent" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+        '<field-link-trigger :widget="widget" @set-loading-status="triggerLoadingEvent" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+        '<field-formula-trigger :widget="widget" @set-loading-status="triggerLoadingEvent" @set-formula-field-value="formulaFieldValueStatus"></field-formula-trigger>',
+        '<detail-combox-field-link-trigger :widget="widget" @set-loading-status="triggerLoadingEvent" @set-field-value="detailComboxLinkFieldValueStatus"></detail-combox-field-link-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: '',
+          errorInfo: {
+            verifyMsg: '',
+            show: false
+          },
+          loadStatus: false,
+          manualSetValue: false,
+          charLimitType: 1 //限定字符范围类型（1最多输入，2最少输入，3范围）
+        }
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEvent: function (val) {
+          this.value = val
+          this.loadStatus = false
+          $(this.$el).find('.temp_multi_text').text(val)
+        },
+        triggerGetValueEvent:function (callback) {
+          callback([{val: this.value}])
+        },
+        onBlur: function () {
+          dataLoadInit(this)
+          if (this.readonly && !this.fromManage) {
+            return
+          }
+          if (this.charLimitStatus) {
+            this.errorInfo.show = true
+            this.$store.commit('setDetailComptErrorTip', {
+              id: this.widget.id,
+              pid:this.widget.pid,
+              showTip: true,
+              verified: this.verified,
+              errMsg: this.errorInfo.verifyMsg
+            })
+            return
+          }
+          this.errorInfo.show = false
+          this.$store.commit('setDetailComptErrorTip', {
+            id: this.widget.id,
+            pid: this.widget.pid,
+            verified: this.verified,
+            showTip: false
+          })
+        },
+        changeValueFun: function (e) {
+          var _this = this
+          _this.value = e.target.innerText
+          _this.$store.commit('setInitStatus', false)
+          setTimeout(function () {
+            _this.manualSetValue = true
+            _this.errorInfo.show = true
+            doInsertUrlField(_this)
+          }, 1000)
+        },
+        pastePureText: function (e) {
+          //获取当前选区并记录
+          var sel = self.getSelection()
+          if(!sel) return
+          var range = sel.getRangeAt(0)
+          //获取剪切板数据
+          var clipboardData = e.clipboardData || window.clipboardData
+          var copydata = clipboardData.getData('text')
+          //在input元素的copy方法里处理剪切板数据
+          var inp = document.createElement('input')
+          document.body.appendChild(inp)
+          inp.select()
+          inp.addEventListener('copy', function (e) {
+            e.preventDefault()
+            clipboardData.setData('text', copydata)
+          })
+          document.execCommand("copy")
+          //粘贴
+          var el = document.createElement("span")
+          el.innerText = copydata
+          range.deleteContents()
+          range.insertNode(el)
+          this.value = this.$refs.textInp.innerText
+          //移除input
+          document.body.removeChild(inp)
+        },
+        linkFieldValueStatus: function (result) {
+          var txt = $(this.$el).find('.fsw-ul-edit').text()
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+
+          if (hasNullCondVal && !this.manualSetValue && !this.isInit) {
+            this.value = ''
+            $(this.$el).find('.temp_multi_text').text('')
+            this.manualSetValue = false
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          if (result && result.length > 0 && !this.manualSetValue && !this.$store.getters.getReadonlyStatus && (!this.isPreview || !this.isInit)) {
+            var newValue = result[0].val
+            if ($.trim(txt) !== '' && $.trim(txt) === newValue) {
+              this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+              return
+            }
+            this.value = newValue
+            $(this.$el).find('.temp_multi_text').text(this.value)
+          }
+          this.manualSetValue = false
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        detailComboxLinkFieldValueStatus: function (result) {
+          var txt = $(this.$el).find('.fsw-ul-edit').text()
+          if (result && result.length > 0 && (!this.isPreview || !this.isInit)) {
+            var newValue = result[0].val
+            if ($.trim(txt) !== '' && $.trim(txt) === newValue) {
+              return
+            }
+            this.value = newValue
+            $(this.$el).find('.fsw-ul-edit').text(this.value)
+          }
+        },
+        formulaFieldValueStatus: function (data) {
+          this.loadStatus = false
+          var refreshResult = data.result, formulaFieldType = data.type, formulaFieldCurrIndex = data.index
+          if (formulaFieldType === 0 && formulaFieldCurrIndex !== this.widget.config.inDetailGroupIndex && this.$store.state.formulaFieldCurrIndex > -1 && this.widget.config.inDetailGroupIndex > -1) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 2, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+          var key = (formulaFieldType > 0 && this.widget.pid > 0) ? this.widget.config.id + '_' + this.widget.config.inDetailGroupIndex : this.widget.config.id
+          var result = refreshResult[key]
+          if (result && result.length > 0) {
+            this.value = result[0].val
+            $(this.$el).find('.temp_multi_text').text(this.value)
+            if (formulaFieldType > 0) {
+              delete refreshResult[key]
+            }
+            dataLoadInit(this)
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 2, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        openValue: function (e) {
+          if($(e.target).is('a')){
+            e.preventDefault()
+            window.open(e.target.innerText)
+          }
+        }
+      },
+      components: {
+        'tip-imgs': tipImgs,
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+        'detailComboxFieldLinkTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/detailcombox/detailComboxFieldLinkTrigger.vue'),
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue'),
+        fieldFormulaTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldFormula/fieldFormulaTrigger.vue')
+      },
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value}]}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            errMsg: this.errorInfo.verifyMsg,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+        }
+      },
+      filters: {
+        calcuSize: function (value) {
+          if (value < 1024) {
+            return value + 'B'
+          }
+          var ks = value / 1024
+          if (ks < 1024) {
+            return (value / 1024).toFixed(2) + 'KB'
+          }
+          var ms = ks / 1024
+          if (ms < 1024) {
+            return (ks / 1024).toFixed(2) + 'MB'
+          }
+          return (ms / 1024).toFixed(2) + 'GB'
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        max: function () {
+          var verifyjn = this.widget.config.fields[0].verify
+          return verifyjn.maxLength ? verifyjn.maxLength.length : null
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        verified: function () {
+          var verified = true
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)){
+            return true
+          }
+          this.errorInfo.verifyMsg = ''
+          if (this.required && $.trim(this.value) === '') {
+            verified = false
+            this.errorInfo.verifyMsg = '此项为必填项'
+          }
+          if (this.charLimitStatus) {
+            verified = false
+          }
+          return verified
+        },
+        charLimitStatus: function () {
+          if (!this.value || !this.charLimit || !this.charLimit.open) {
+            return false
+          }
+          switch (this.charLimitType) {
+            case 1:
+              if ($.trim(this.value).length > parseInt(this.charLimit.maxSize)) {
+                this.errorInfo.verifyMsg = '超过字符限制'
+                return true
+              }
+              break
+            case 2:
+              if ($.trim(this.value).length < parseInt(this.charLimit.minSize)) {
+                this.errorInfo.verifyMsg = '最少输入' + this.charLimit.minSize + '个字符'
+                return true
+              }
+              break
+            case 3:
+              if ($.trim(this.value).length < parseInt(this.charLimit.minSize) || $.trim(this.value).length > parseInt(this.charLimit.maxSize)) {
+                this.errorInfo.verifyMsg = '限定字符个数' + this.charLimit.minSize + '-' + this.charLimit.maxSize
+                return true
+              }
+              break
+            default:
+              break
+          }
+          return false
+        },
+        charLimit: function () {
+          var charLimit = this.widget.config.fields[0].verify.charLimit
+          if (charLimit && charLimit.open && charLimit.size) {
+            charLimit.maxSize = charLimit.size
+            delete this.widget.config.fields[0].verify.charLimit.size
+          }
+          return charLimit
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            this.errorInfo.show = true
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true;
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          if(this.$store.getters.getCurrentType){
+            return this.$store.getters.getReadonlyStatus
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var relateStatus = this.$store.getters.getRelateFieldValueStatus
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var txt = $(this.$el).find('.temp_multi_text').text()
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === publicUtils.getCurrentDetailIndex(this)) || !obj.hasOwnProperty('inDetailIndex')) && !this.manualSetValue && !this.$store.getters.getReadonlyStatus && (!this.isPreview || !this.isInit)) {
+            var newValue = obj.fields[0].values && obj.fields[0].values.length > 0 && obj.fields[0].values[0].val !== '' ? obj.fields[0].values[0].val : ''
+            if (!newValue) {
+              newValue = ''
+            }
+            if ($.trim(txt) !== '' && $.trim(txt) === newValue) {
+              this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+              this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+              return relateStatus
+            }
+            var oldValue = this.value
+            this.value = newValue
+            if (this.isClearRelatedData) {
+              this.value = ''
+            }
+            if (oldValue !== this.value) {
+              dataLoadInit(this)
+            }
+            $(this.$el).find('.temp_multi_text').text(this.value)
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.manualSetValue = false
+          return relateStatus
+        },
+        isClearRelatedData: function () {
+          return this.$store.getters.getIsClearRelatedData
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs;
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel;
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel;
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus;
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = this.$store.state.reloadValSubField
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            if (this.widget.pid > 0 && !this.$store.state.verifieds[this.widget.pid].isShow) {
+              //明细内子组件时 如果明细组件是隐藏状态时 当前子组件也要改成隐藏状态
+              showStatus = false
+            } else {
+              showStatus = true
+            }
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: [{val: this.value}]}
+            ],
+            verified: this.verified,
+            errMsg: this.errorInfo.verifyMsg,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        showValue: function () {
+          return publicUtils.showTextValue(this.value)
+        },
+        buttonFieldValue: function () {
+          var fieldValue = this.$store.getters.getButtonFieldValue(this.widget.config.alias)
+          if (fieldValue) {
+            this.value = fieldValue.val[0] || ''
+          }
+          return fieldValue
+        },
+        ocrFieldValue: function () {
+          var fieldValue = this.$store.getters.getOcrFieldValue(this.widget.config.inDetailGroupIndex + '_' + this.widget.config.alias)
+          if (fieldValue) {
+            this.value = fieldValue.val[0] || ''
+          }
+          return fieldValue
+        },
+        placeholder: function () {
+          if (!this.charLimit || !this.charLimit.open) {
+            return ''
+          }
+          if (this.charLimit.maxSize && (!this.charLimit.minSize || parseInt(this.charLimit.minSize) === 0)) {
+            this.charLimitType = 1
+            return ''
+          }
+          if (this.charLimit.minSize && !this.charLimit.maxSize) {
+            this.charLimitType = 2
+            return '最少输入' + this.charLimit.minSize + '个字符'
+          }
+          if (this.charLimit.minSize && this.charLimit.maxSize) {
+            this.charLimitType = 3
+            return '限定字符个数' + this.charLimit.minSize + '-' + this.charLimit.maxSize
+          }
+          return ''
+        }
+      },
+      created: function () {
+        var values = this.widget.config.fields[0].values
+        this.value = values ? (values[0] && values[0].val) || '' : ''
+        if (this.widget.config.fields[0].hasOwnProperty('unchangeable')) {
+          this.widget.config.fields[0].editable = !this.widget.config.fields[0].unchangeable
+          delete this.widget.config.fields[0].unchangeable
+        }
+        var rev = this.$store.getters.getRelevance
+        if (rev != null && rev.hasOwnProperty(this.widget.config.id) && rev[this.widget.config.id]) {
+          this.value = rev[this.widget.config.id]
+        }
+      },
+      mounted: function () {
+        if (!this.readonly) {
+          $(this.$el).find('.temp_multi_text').text(this.value)
+        }
+        var _this = this
+        //防止子组件中构造各组件实例未执行，导致默认值数据关联失效问题
+        _this.$nextTick(function () {
+          setTimeout(function () {
+            dataLoadInit(_this, _this.$store.getters.getComptDataType('init'))
+          }, 500)
+        })
+      }
+    }
+  }
+})

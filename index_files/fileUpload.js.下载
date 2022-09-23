@@ -1,0 +1,641 @@
+define(['util', 'popup', 'tipImgs', 'cookies', 'publicUtils', 'VueUtils', 'publicUpload', 'viewer'], function (util, popup, tipImgs, Cookies, publicUtils, VueUtils, publicUpload, Viewer) {
+  'use strict'
+  return function (widget) {
+  
+    /**
+     * 设置数据优先级，前端事件，优先级大于默认值（自定义默认值、数据联动、公式编辑、常用公式，...）
+     */
+    function dataLoadInit(_this, dataType) {
+      _this.$store.dispatch('dataLoadInit', {
+        widget: _this.widget,
+        value: $.trim(_this.value),
+        compose: 'col',
+        dataType: dataType ? dataType : _this.$store.getters.getComptDataType('blurChange')
+      })
+    }
+
+    return {
+      id: widget.id,
+      template: [
+        '<div :class="{widget_error: errorTip || (errorInfo.show&&errorInfo.verifyMsg)}" v-show="isShow && hasAuthority">',
+          '<!--标题-->',
+          '<div class="form_widget_title">',
+            '<h2 class="widget_name"><em class="option-star" v-if="required"></em>{{title}}</h2>',
+          '</div>',
+          '<!--标题描述-->',
+          '<tip-imgs :tip-text="tipTextData" :tip-img-arr="tipImgsData" ></tip-imgs>',
+          '<!--填写区域-->',
+          '<div class="form_widget_data">',
+            '<!--禁止编辑-->',
+            '<div class="form_file_forbid" v-if="readonly">',
+              '<div class="form_forbid_edit form_forbid_nodata" v-if="value.length == 0">',
+               '<p class="form_forbid_word">暂无数据</p>',
+              '</div>',
+              '<ul class="form_upload_file" v-if="value.length > 0">',
+                '<li class="upload_file_per" v-for="(file, index) in value" @click.stop="scanFilesFun(index)">',
+                  '<div class="upload_file_type">',
+                    '<img class="upload_file_icon" onerror="javascript:src=\'static/style/apps/forms/mobile/fore/images/icons/common.png\'" :src="\'static/style/apps/forms/mobile/fore/images/icons/\'+file.suffix+\'.png\'"/>',
+                  '</div>',
+                  '<div class="upload_file_data">',
+                    '<!--文件信息-->',
+                    '<div class="upload_file_info">',
+                      '<h6 class="upload_file_name">{{file.name}}</h6>',
+                      '<p class="upload_file_size">{{file.size|sizeFormat}}</p>',
+                    '</div>',
+                  '</div>',
+                '</li>',
+              '</ul>',
+            '</div>',
+            '<!--可编辑-->',
+            '<div class="form_widget_cont" v-if="!readonly">',
+              '<ul class="form_upload_file">',
+                '<li class="upload_file_per" v-for="(file, index) in value" @click.stop="scanFilesFun(index)">',
+                  '<div class="upload_file_type">',
+                    '<img class="upload_file_icon" onerror="javascript:src=\'static/style/apps/forms/mobile/fore/images/icons/common.png\'" :src="\'static/style/apps/forms/mobile/fore/images/icons/\'+file.suffix+\'.png\'"/>',
+                    '<div class="grate" :style="{height: (file.progressNum / 100) + \'rem\'}"></div>',
+                  '</div>',
+                  '<div class="upload_file_data">',
+                    '<!--进度条-->',
+                    '<div class="upload_file_progress" v-if="file.isUpload">',
+                      '<p class="file_progress_type">{{file.progressTxt}}</p>',
+                      '<div class="file_progress_bar">',
+                        '<p class="file_progress_ratio" :style="{width: file.progressNum + \'%\'}"></p>',
+                      '</div>',
+                      '<span class="file_progress_num">{{file.progressNum}}%</span>',
+                    '</div>',
+                    '<!--文件信息-->',
+                    '<div class="upload_file_info" v-else>',
+                      '<h6 class="upload_file_name">{{file.name}}</h6>',
+                      '<p class="upload_file_size">{{file.size|sizeFormat}}</p>',
+                    '</div>',
+                  '</div>',
+                  '<span class="upload_file_del icon-del" v-if="deleteFileOpen" @click.stop="remove(index)"></span>',
+                '</li>',
+                '<li class="upload_file_add" v-if="addFileOpen" >',
+                  '<span class="file_add_icon icon-file"></span>上传附件',
+                  '<input class="upload_trigger_input" :multiple="!max||max>1" type="file" name="file"' +
+                  ' @click.stop="verifyLimitImgCount($event)" @change.stop="uploadFile($event)"/>',
+                '</li>',
+              '</ul>',
+            '</div>',
+          '</div>',
+          '<!--提示文本-->',
+          '<div class="form_widget_prompt">',
+            '<div class="widget_error_tip" v-show="errorInfo.show&&errorInfo.verifyMsg">',
+              '<p class="must_word">{{errorInfo.verifyMsg}}</p>',
+            '</div>',
+            '<div class="widget_right_tip" v-if="!readonly && limitTextInfo">',
+              '<p class="tip_word">{{limitTextInfo}}</p>',
+            '</div>',
+            '<div style="display: none;">{{relateFieldValueStatus}}</div>',
+          '</div>',
+          '<field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="linkFieldValueStatus"></field-link-trigger>',
+          '<event-trigger :widget="widget" :compose="\'col\'" @trigger-loading-event="triggerLoadingEvent" @trigger-value-event="triggerValueEvent" @trigger-get-value-event="triggerGetValueEvent"></event-trigger>',
+          '<detail-combox-field-link-trigger :widget="widget" @set-loading-status="" @set-field-value="detailComboxLinkFieldValueStatus"></detail-combox-field-link-trigger>',
+        '</div>'
+      ].join(''),
+      data: function () {
+        return {
+          widget: widget,
+          value: [],
+          limitTextInfo: '',
+          errorInfo: {
+            verifyMsg: '',
+            show: false
+          },
+          lastLinkValue: [],
+          xhr: '',
+          fileLocal: 0, // 当前上传的文件下标
+          uploadArr: [], // 待上传的文件
+          fieldLinkCheck: true // 数据联动、缓存等文件格式校验标识，防止在缓存、数据联动的时候重复验证
+        }
+      },
+      components: {
+        'tip-imgs': tipImgs,
+        'eventTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/web/fore/compts/config/component/eventTrigger.vue'),
+        'detailComboxFieldLinkTrigger': VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/detailcombox/detailComboxFieldLinkTrigger.vue'),
+        fieldLinkTrigger: VueUtils.loadComponent('static/js/src/front/forms/apps/common/component/fieldLink/fieldLinkTrigger.vue')
+      },
+      watch: {
+        value: function () {
+          this.$store.commit('watchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            configId: this.widget.config.id,
+            inDetailGroupIndex: this.widget.config.inDetailGroupIndex,
+            verified: this.verified,
+            errMsg: this.errorInfo.verifyMsg,
+            isShow: this.isShow,
+            hasAuthority: this.hasAuthority
+          })
+          // 检验文件分辨率、大小,...
+          publicUtils.verifyUploadDetail(this, this.value)
+        }
+      },
+      computed: {
+        title: function () {
+          return this.widget.config.fields[0].label
+        },
+        required: function () {
+          return this.widget.config.fields[0].verify.required
+        },
+        limitCount: function () {
+          return this.widget.config.fields[0].verify.limitCount
+        },
+        verified: function () {
+          if (!this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          if (!this.fieldLinkCheck || !publicUtils.getFileVerify(this, this.value.length)) {
+            return false
+          }
+          if (this.required && this.value && this.value.length === 0) {
+            this.errorInfo.verifyMsg = '此项为必填项'
+          }
+          if (this.required) {
+            return this.value.length !== 0
+          }
+          return true
+        },
+        min: function () {
+          var min = this.widget.config.fields[0].verify.minValue
+          if (!min) {
+            //老数据兼容
+            min = {'range': '', 'errMsg': '上传个数最小限制'}
+            min.range = this.widget.config.fields[0].verify.limitCount === 0 ? '' : 0
+          }
+          this.widget.config.fields[0].verify.minValue = min
+          return min.range
+        },
+        max: function () {
+          var max = this.widget.config.fields[0].verify.maxValue
+          if (!max) {
+            //老数据兼容
+            max = {'range': '', 'errMsg': '上传个数最大限制'}
+            max.range = this.widget.config.fields[0].verify.limitCount === 0 ? '' : this.widget.config.fields[0].verify.limitCount
+          }
+          this.widget.config.fields[0].verify.maxValue = max
+          return max.range
+        },
+        errorTip: function () {
+          var status = false
+          if (this.$store.state.verifieds[this.widget.id] && this.$store.state.verifieds[this.widget.id].errorTip) {
+            this.errorInfo.show = true
+            status = true
+          }
+          return status
+        },
+        isPreview: function () {
+          return this.$store.getters.getPreviewStatus
+        },
+        isInit: function () {
+          return this.$store.getters.getInitStatus
+        },
+        readonly: function () {
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !this.$store.getters.getFieldGatherReadOnlyStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldEditableStatus(this.widget.config.id, this.widget.config.compt)) {
+            return true
+          }
+          var rev = this.$store.getters.getRelevance
+          if (rev != null && rev.hasOwnProperty(this.widget.config.id)) {
+            return true
+          }
+          var readonlyStatus
+          var compt = this.$store.getters.getReadonlyOfComts[this.widget.id]
+          if (compt) {
+            readonlyStatus = true
+          } else {
+            readonlyStatus = !this.editable && !this.hasRoleId
+          }
+          return this.$store.getters.getReadonlyStatus || readonlyStatus
+        },
+        relateFieldValueStatus: function () {
+          var resultFields = this.$store.getters.getRelateFieldValue
+          var obj = resultFields[this.widget.config.id]
+          if (obj && obj.id === this.widget.config.id && obj.hasOwnProperty('fields') && ((obj.hasOwnProperty('inDetailIndex') && obj.inDetailIndex === publicUtils.getCurrentDetailIndex(this)) || !obj.hasOwnProperty('inDetailIndex')) && !this.$store.getters.getReadonlyStatus && (!this.isPreview || !this.isInit)) {
+            this.value = obj.fields[0].values
+            if (this.isClearRelatedData) {
+              this.value = []
+            }
+          }
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 3, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 6, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+          return this.$store.getters.getRelateFieldValueStatus
+        },
+        isClearRelatedData: function () {
+          return this.$store.getters.getIsClearRelatedData
+        },
+        tipTextData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return this.widget.config.fields[0].tip
+          }
+          return this.widget.config.fields[0].tip.text
+        },
+        tipImgsData: function () {
+          if (!(this.widget.config.fields[0].tip instanceof Object)) {
+            return []
+          }
+          return this.widget.config.fields[0].tip.imgs
+        },
+        visible: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('visible')) {
+            this.widget.config.fields[0].visible = true
+          }
+          return this.widget.config.fields[0].visible
+        },
+        editable: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('editable')) {
+            this.widget.config.fields[0].editable = true
+          }
+          return this.widget.config.fields[0].editable
+        },
+        formType: function () {
+          return this.$store.getters.getFormType
+        },
+        addFileOpen: function () {
+          if (this.formType === 'approveForm') {
+            var extEditAuthority = this.$store.getters.getApproveExtEditAuthority(this.widget.config.id, this.widget.config.compt)
+            if (extEditAuthority) {
+              return extEditAuthority.add
+            }
+            return false
+          }
+  
+          if (this.widget.config.hasOwnProperty('addFile')) {
+            return this.widget.config.addFile.open
+          }
+          return true
+        },
+        editFileOpen: function () {
+          if (this.formType === 'approveForm') {
+            var extEditAuthority = this.$store.getters.getApproveExtEditAuthority(this.widget.config.id, this.widget.config.compt)
+            if (extEditAuthority) {
+              return extEditAuthority.edit
+            }
+            return false
+          }
+  
+          if (this.widget.config.hasOwnProperty('editFile')) {
+            return this.widget.config.editFile.open
+          }
+          return true
+        },
+        deleteFileOpen: function () {
+          if (this.formType === 'approveForm') {
+            var extEditAuthority = this.$store.getters.getApproveExtEditAuthority(this.widget.config.id, this.widget.config.compt)
+            if (extEditAuthority) {
+              return extEditAuthority.delete
+            }
+            return false
+          }
+  
+          if (this.widget.config.hasOwnProperty('deleteFile')) {
+            return this.widget.config.deleteFile.open
+          }
+          return true
+        },
+        hasAuthority: function () {
+          var showStatus = false
+          var gatherMode = this.$store.getters.getGatherModel
+          if (gatherMode) {
+            return !!this.$store.getters.getFieldGatherShowStatusById(this.widget.config.id)
+          }
+          var approveModel = this.$store.getters.getApproveModel
+          if (approveModel && !this.$store.getters.getApproveFieldShowStatus(this.widget.config.id, this.widget.config.compt)) {
+            return showStatus
+          }
+          var permissionSetHideFields = this.$store.getters.getPermissionSetHideFields
+          if (permissionSetHideFields && permissionSetHideFields.indexOf(this.widget.config.id) !== -1) {
+            showStatus = false
+            return showStatus
+          }
+          
+          if (!this.visible && !this.hasRoleId) {
+            return showStatus
+          }
+          return true
+        },
+        hasRoleId: function () {
+          return this.$store.getters.getHasRoleId //是否有roleId，有roleId则按后台字段权限设置，类型web端的fromManage
+        },
+        isShow: function () {
+          var showStatus = false
+          if (this.$store.state.foreverShow[this.widget.config.id]) {
+            showStatus = true
+          } else if (!!this.widget.config.fromDetail
+              && this.widget.config.inDetailGroupIndex > -1
+              && this.$store.state.currOptionSel.inDetailGroupIndex !== this.widget.config.inDetailGroupIndex) {
+            if (this.$store.state.currFieldShowStatus[this.widget.id]) {
+              showStatus = !!this.$store.state.currFieldShowStatus[this.widget.id].isShow
+            }
+          } else {
+            showStatus = !!this.$store.state.currOptionSel[this.widget.config.id]
+          }
+          this.$store.commit('isShowWatchValues', {
+            id: this.widget.id,
+            fvalues: [
+              {fidx: 0, values: this.value}
+            ],
+            verified: this.verified,
+            errMsg: this.errorInfo.verifyMsg,
+            isShow: showStatus,
+            hasAuthority: this.hasAuthority
+          })
+          return showStatus
+        },
+        temporary: function () {
+          if (!this.widget.config.fields[0].hasOwnProperty('temporary')){
+            return false
+          }
+          return this.widget.config.fields[0].temporary
+        },
+        viewerObj: function () {
+          return this.$store.state.viewerObj
+        }
+      },
+      methods: {
+        triggerLoadingEvent: function (isLoading) {
+          this.loadStatus = isLoading
+        },
+        triggerValueEvent: function (val) {
+          this.loadStatus = false
+        },
+        triggerGetValueEvent:function (callback) {
+          callback(this.value)
+        },
+        scanFilesFun: function (index) {
+          var _this = this
+          if (this.value[index].hasOwnProperty('isUpload') && this.value[index].isUpload) { // 上传中的文件不支持预览
+            return
+          }
+          if(publicUtils.getType(this.value[index]) === 'image'){
+            this.$store.commit('triggerPreview',{value:this.value, index:index})
+          }else{
+            publicUtils.filePreview(this.value, index, this.editFileOpen)
+          }
+        },
+        uploadFile: function (e) {
+          var _this = this
+          if (_this.readonly) {
+            return
+          }
+          if (_this.max > 1 && e.target.files.length + _this.value.length > _this.max) {
+            var msg = '上传图片个数范围限制' +  (_this.min !=='' ? _this.min + '-' : '') + _this.max + '个,请重新上传。'
+            popup.alert(msg)
+            _this.errorInfo.verifyMsg = msg
+            _this.errorInfo.show = true
+            e.target.value = ''
+            return
+          }
+          var limitSize = _this.widget.config.fields[0].verify.limitSize
+          var limitType = _this.widget.config.fields[0].verify.limitType
+          //校验类型
+          for (var i = 0; i < e.target.files.length; i++) {
+            if (limitType) {
+              var type = e.target.files[i].name.substr(e.target.files[i].name.lastIndexOf('.') + 1)
+              var typeReg = '^(' + limitType.replace(/\;/g, '|') + ')$'
+              var reg = new RegExp(typeReg, 'i')
+              if (!reg.test(type)) {
+                var msg = '文件格式不符合要求'
+                popup.alert(msg)
+                _this.errorInfo.verifyMsg = msg
+                _this.errorInfo.show = true
+                e.target.value = ''
+                return
+              }
+            }
+            //校验大小
+            if (2048 < e.target.files[i].size / 1024 / 1024) {
+              popup.alert('文件大小超出最大限制2G')
+              e.target.value = ''
+              return
+            }
+            if (limitSize > 0 && limitSize < e.target.files[i].size / 1024 / 1024) {
+              var msg = '文件大小不符合要求'
+              popup.alert(msg)
+              _this.errorInfo.verifyMsg = msg
+              _this.errorInfo.show = true
+              e.target.value = ''
+              return
+            }
+            var fileDate = {
+              modifyDate: '',
+              name: e.target.files[i].name,
+              objectId: "",
+              size: '',
+              suffix: 'common',
+              thumbnail: "",
+              isUpload: true,
+              progressNum: 0,
+              progressTxt: '等待上传'
+            }
+            _this.value.push(fileDate)
+            _this.uploadArr.push(e.target.files[i])
+            _this.$forceUpdate()
+            if (i === (e.target.files.length - 1)) {
+              e.target.value = ''
+              if (!_this.xhr) {
+                _this.doUpload(_this.uploadArr[_this.fileLocal])
+              }
+            }
+          }
+        },
+        doUpload: function (upData) {
+          var _this = this;
+          if(!upData){
+            return;
+          }
+          _this.$store.commit('setCurrFormValueFieldVerify', {id: _this.widget.config.id + '_'  + _this.fileLocal, type: 7, inDetailGroupIndex: _this.widget.config.inDetailGroupIndex})
+          var formData = new FormData()
+          formData.append('file', upData)
+          publicUpload.progressUpload(_this, formData)
+          publicUtils.verifyUploadDetail(_this, _this.value)
+        },
+        uploadProgress: function (evt) {
+          var _this = this, percentComplete = 0
+          if (evt.lengthComputable) {
+            percentComplete = Math.round(evt.loaded * 100 / evt.total)
+            if (percentComplete === 100) {
+              percentComplete = 99
+            }
+            _this.value[_this.fileLocal]['progressNum'] = percentComplete
+            _this.value[_this.fileLocal]['progressTxt'] = '正在上传中...'
+          } else {
+            if (percentComplete < 100) {
+              _this.value[_this.fileLocal]['progressTxt'] = 'unable to compute'
+            } else {
+              _this.value[_this.fileLocal]['progressNum'] = 0
+              _this.value[_this.fileLocal]['isUpload'] = false
+            }
+          }
+          _this.$forceUpdate()
+        },
+        uploadComplete: function (evt) {
+          var _this = this
+          _this.$store.commit('removeCurrFormValueFieldVerify', {id: _this.widget.config.id + '_' + _this.fileLocal, type: 7, inDetailGroupIndex: _this.widget.config.inDetailGroupIndex})
+          var response = JSON.parse(evt.target.response);
+          if (response.result && response.data) {
+            var file = response.data
+            var result_data = {
+              'objectId': file.objectId,
+              'fileUrl': file.thumbnail,
+              'name': file.name,
+              'suffix': file.suffix,
+              'size': publicUpload.sizeFormat(file.size.toString()),
+              'puid': file.puid,
+              'resid': file.residstr,//返回结果中有resids和residstr两参数，wps接口需要使用residstr
+              'byteSize': file.size,//文件原始字节数（暂时存入库，防止后期使用到）
+              'isUpload': false,
+              'progressNum': 0
+            }
+            if (_this.max == 1) {
+              _this.value = $.extend(true, [], [result_data])//替换
+            } else {
+              _this.value.splice(_this.fileLocal, 1, result_data)
+            }
+            _this.fileLocal ++
+            _this.xhr = ''
+            setTimeout(function () {
+              if (_this.fileLocal < _this.uploadArr.length) {
+                _this.doUpload(_this.uploadArr[_this.fileLocal])
+              }
+              if (_this.fileLocal === _this.uploadArr.length) {
+                dataLoadInit(_this)
+              }
+            }, 500)
+          } else {
+            var msg = response.msg || '上传失败'
+            popup.alert(msg)
+            _this.errorInfo.verifyMsg = msg
+            _this.errorInfo.show = true
+            _this.xhr = ''
+          }
+          publicUtils.verifyUploadDetail(_this, _this.value)
+        },
+        uploadFailed: function (evt) {
+          this.xhr = ''
+        },
+        uploadCanceled: function (evt) {
+          this.xhr = ''
+        },
+        remove: function (valueIndex) {
+          var _this = this
+          if (this.readonly) {
+            return
+          }
+          popup.confirm({
+            content: '确定要删除吗？',
+            btn2: function () {
+              if (valueIndex != _this.fileLocal) {
+                if (valueIndex < _this.fileLocal && _this.fileLocal > 0) { // 已上传好的文件
+                  _this.fileLocal --
+                }
+                _this.value.splice(valueIndex, 1)
+                _this.uploadArr.splice(valueIndex, 1)
+                _this.$forceUpdate()
+              } else { // 上传中的文件
+                if (_this.xhr) {
+                  _this.xhr.abort()
+                  if (!_this.value[_this.fileLocal].isUpload && _this.fileLocal > 0) { // “确定”的时候刚好上传好
+                    _this.fileLocal --
+                  }
+                }
+                _this.value.splice(valueIndex, 1)
+                _this.uploadArr.splice(valueIndex, 1)
+                _this.$forceUpdate()
+                if (_this.fileLocal < _this.uploadArr.length) {
+                  _this.doUpload(_this.uploadArr[_this.fileLocal])
+                }
+              }
+              // 检验文件分辨率、大小,...
+              publicUtils.verifyUploadDetail(_this, _this.value)
+              dataLoadInit(_this)
+            }
+          })
+        },
+        verifyLimitFileCount: function (e) {
+          publicUtils.verifyLimitFileCount(this, e)
+        },
+        linkFieldValueStatus: function (result) {
+          if (this.isPreview && this.isInit) {
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          var arr = this.$store.getters.getLinkResultFieldCondArrByFieldId(this.widget.config.id), hasNullCondVal
+          for (var i = 0; i < arr.length; i++) {
+            var ele = arr[i]
+            if (!ele.val) {
+              hasNullCondVal = true
+              break
+            }
+          }
+
+          if (hasNullCondVal) {
+            this.value = []
+            this.lastLinkValue = []
+            this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+            return
+          }
+
+          if (result && JSON.stringify(this.lastLinkValue) === JSON.stringify(result) && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+            this.value = []
+          }
+          if (result && JSON.stringify(this.lastLinkValue) !== JSON.stringify(result) && !this.$store.getters.getReadonlyStatus) {
+            this.value = result
+            this.lastLinkValue = result
+            if (this.value.length > 0) {
+              dataLoadInit(this)
+            }
+          }
+          // 检验文件分辨率、大小,...
+          publicUtils.verifyUploadDetail(this, this.value)
+          this.$store.commit('removeCurrFormValueFieldVerify', {id: this.widget.config.id, type: 1, inDetailGroupIndex: this.widget.config.inDetailGroupIndex})
+        },
+        detailComboxLinkFieldValueStatus: function (result) {
+          if (this.isPreview && this.isInit) {
+            return
+          }
+          if (result && JSON.stringify(this.lastLinkValue) === JSON.stringify(result) && (JSON.stringify(result) === '[]' || JSON.stringify(result) === '[{}]')) {
+            this.value = []
+          }
+          if (result && JSON.stringify(this.lastLinkValue) !== JSON.stringify(result) && !this.$store.getters.getReadonlyStatus) {
+            this.value = result
+            this.lastLinkValue = result
+            if (this.value.length > 0) {
+              dataLoadInit(this)
+            }
+          }
+          // 检验文件分辨率、大小,...
+          publicUtils.verifyUploadDetail(this, this.value)
+        }
+      },
+      filters: {
+        sizeFormat: function (size) {
+          return publicUpload.sizeFormat(size)
+        }
+      },
+      created: function () {
+        // 去除不符合文件规则的文件
+        var _this = this
+        if (_this.widget.config.fields[0].values) {
+          for (var i = 0; i < _this.widget.config.fields[0].values.length; i++) {
+            if (_this.widget.config.fields[0].values[i].objectId) {
+              _this.value.push(_this.widget.config.fields[0].values[i])
+            }
+          }
+          _this.fileLocal = _this.value.length
+          _this.uploadArr.length = _this.value.length
+        }
+        // 文件上传提示信息
+        publicUtils.setUploadFileNotice(this)
+      }
+    }
+  }
+})

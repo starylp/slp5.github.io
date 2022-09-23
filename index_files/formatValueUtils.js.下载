@@ -1,0 +1,17 @@
+define(['jquery'], function ($) {
+  
+  function showTextValue(value) {
+    if (Array.isArray(value)) {
+      value = value.join()
+    }
+    if (value && typeof value === 'string') {
+      value = value.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      value = value.replace(/(http:\/\/|https:\/\/)([^\u4e00-\u9fa5\,\。\，\ \n\r]+)/g, '<a>$1$2</a>')
+    }
+    return value
+  }
+  
+  return {
+    showTextValue: showTextValue
+  }
+})

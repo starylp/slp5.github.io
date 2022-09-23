@@ -1,0 +1,1422 @@
+define(['jquery', 'big', 'chevrotain'], function ($, Big) {
+  
+  /**
+   * 函数功能定义
+   */
+  var Formula = {
+    // 数学函数
+    /**
+     * @return {number}
+     */
+    ABS: function (number) {
+      return isNumber(number) ? Math.abs(number) : 0
+    },
+    /**
+     * @return {number}
+     */
+    AVERAGE: function () {
+      var flattenArgs = []
+      flatten(arguments, flattenArgs)
+      var numbers = getValidateNumbers(flattenArgs)
+      
+      var sum = 0
+      for (var j = 0; j < numbers.length; j++) {
+        sum += parseNumber(numbers[j])
+      }
+      return sum / numbers.length
+    },
+    /**
+     * @return {number}
+     */
+    COUNT: function () {
+      var flattenArgs = []
+      flatten(arguments, flattenArgs)
+      return flattenArgs.length
+    },
+    /**
+     * @return {number}
+     */
+    COUNTIF: function () {
+      var length = arguments.length
+      var criteria = arguments[length - 1]
+      
+      if (!(/[<>=!]/.test(criteria))) {
+        criteria = '=="' + criteria + '"'
+      }
+      // 获取所有参数
+      var args = []
+      for (var i = 0; i < arguments.length - 1; i++) {
+        args.push(arguments[i])
+      }
+      // 获取所有参数并转换成一维数组
+      var flattenArgs = []
+      flatten(args, flattenArgs)
+      // 计算并记录匹配数量
+      var matches = 0
+      for (var j = 0; j < flattenArgs.length; j++) {
+        var arg = flattenArgs[j]
+        if (isString(arg)) {
+          if (eval('"' + arg + '"' + criteria)) {
+            matches++
+          }
+        } else {
+          if (eval(arg + criteria)) {
+            matches++
+          }
+        }
+      }
+      return matches
+    },
+    
+    /**
+     * @return {String}
+     * 限制8位
+     */
+    FIXED: function (number, limit) {
+      if (!limit) {
+        limit = 0
+      }
+      if (isNumber(limit) && limit > -1) {
+        if (limit > 8) {
+          limit = 8
+        }
+        limit = limit.toFixed(0)
+        return isNumber(number) ? parseNumber(number) ? parseNumber(number).toFixed(limit) : '' : ''
+      } else {
+        return isNumber(number) ? "" + number : ""
+      }
+    },
+  
+    /**
+     * @return {number}
+     */
+    INT: function (number) {
+      return isNumber(number) ? Math.floor(number) : 0
+    },
+    /**
+     * @return {number}
+     */
+    MAX: function () {
+      var flattenArgs = []
+      flatten(arguments, flattenArgs)
+      var numbers = getValidateNumbers(flattenArgs)
+      if (numbers.length === 0) {
+        return 0
+      }
+      return Math.max.apply(null, numbers)
+    },
+    /**
+     * @return {number}
+     */
+    MIN: function () {
+      var flattenArgs = []
+      flatten(arguments, flattenArgs)
+      var numbers = getValidateNumbers(flattenArgs)
+      if (numbers.length === 0) {
+        return 0
+      }
+      return Math.min.apply(null, numbers)
+    },
+    /**
+     * @return {number}
+     */
+    MOD: function (number, divisor) {
+      var result = 0
+      if (!isNumber(number) || !isNumber(divisor) || 0 === divisor) {
+        return result
+      }
+      result = Math.abs(number % divisor)
+      return divisor > 0 ? result : -result
+    },
+    /**
+     * @return {number}
+     */
+    SUM: function () {
+      var flattenArgs = []
+      flatten(arguments, flattenArgs)
+      var numbers = getValidateNumbers(flattenArgs)
+      var result = 0
+      for (var j = 0; j < numbers.length; j++) {
+        result += parseNumber(numbers[j])
+      }
+      return result
+    },
+    ROUND: function(number, limit) {
+      if (!limit) {
+        limit = 0
+      }
+      if (isNumber(limit) && limit > -1) {
+        if (limit > 8) {
+          limit = 8
+        }
+        limit = limit.toFixed(0)
+        if (isNumber(number) && parseNumber(number)) {
+          number = Math.round(parseNumber(number) * Math.pow(10, limit)) / Math.pow(10, limit)
+          return number
+        }
+      }
+      return null
+    },
+    // 文本函数
+    /**
+     * @return {string}
+     */
+    CONCATENATE: function () {
+      var flattenArgs = []
+      flatten(arguments, flattenArgs)
+      var falseIdx = flattenArgs.indexOf(false)
+      if (falseIdx !== -1) {
+        flattenArgs[falseIdx] = 'FALSE'
+      }
+      var trueIdx = flattenArgs.indexOf(true)
+      if (trueIdx !== -1) {
+        flattenArgs[trueIdx] = 'TRUE'
+      }
+      return flattenArgs.join('')
+    },
+    /**
+     * @return {boolean}
+     */
+    EXACT: function () {
+      var flattenArgs = []
+      flatten(arguments, flattenArgs)
+      if (flattenArgs.length === 0) {
+        return true
+      }
+      if (flattenArgs.length === 1) {
+        return false
+      }
+      var argumentArr = objectValues(flattenArgs)
+      var uniqArr = arrayUniq(argumentArr)
+      return argumentArr.length > uniqArr.length
+    },
+    EXACTALL: function () {
+      var flattenArgs = []
+      flatten(arguments, flattenArgs)
+      if (flattenArgs.length === 0) {
+        return true
+      }
+      if (flattenArgs.length === 1) {
+        return false
+      }
+      var argumentArr = objectValues(flattenArgs)
+      for (var i = 1; i < argumentArr.length; i++) {
+        if(argumentArr[0] !== argumentArr[i]) {
+          return false
+        }
+      }
+      return true
+    },
+    /**
+     * @return {boolean}
+     */
+    ISEMPTY: function (o) {
+      if (o == null) {
+        return true
+      }
+      if (o.length > 0) {
+        return false
+      }
+      if (o.length <= 0) {
+        return true
+      }
+      if (o instanceof Object) {
+        return $.isEmptyObject(o)
+      }
+      return isNaN(o)
+    },
+    /**
+     * @return {string}
+     */
+    LEFT: function (text, num) {
+      if (text && isString(text) && isNumber(num)) {
+        return num > 0 ? text.substring(0, num) : text
+      } else {
+        return null
+      }
+    },
+    /**
+     * @return {number}
+     */
+    LEN: function (text) {
+      return text && isString(text) ? text.length : 0
+    },
+    /**
+     * @return {string}
+     */
+    LOWER: function (text) {
+      return text && isString(text) ? text.toLowerCase() : ''
+    },
+    /**
+     * @return {string}
+     */
+    MID: function (text, startNum, charsCount) {
+      if (text && isString(text)) {
+        if (isNumber(startNum) && isNumber(charsCount)) {
+          if (startNum < 1) {
+            startNum = 1
+          }
+          return text.substr(startNum - 1, charsCount)
+        }
+        return text
+      }
+      return ''
+    },
+    SPLIT: function (text, splitStr) {
+      if (text && isString(text) && splitStr && isString(splitStr)) {
+        return text.split(splitStr)
+      }
+      return text
+    },
+    /**
+     * @return {string}
+     */
+    REPLACE: function (oldText, startNum, charsCount, newText) {
+      if (oldText && isString(oldText)) {
+        if (isNumber(startNum) && isNumber(charsCount)) {
+          if (newText && isString(newText)) {
+            return oldText.substr(0, startNum - 1) + newText + oldText.substr(startNum - 1 + charsCount)
+          }
+          return oldText
+        }
+        return oldText
+      }
+      return ''
+    },
+    /**
+     * @return {string}
+     */
+    RIGHT: function (text, num) {
+      return text && isString(text) ? text.substring(text.length - num) : ''
+    },
+    /**
+     * @return {number}
+     */
+    SEARCH: function (searchText, originText, startNum) {
+      if (!searchText || !isString(searchText)) {
+        return 0
+      }
+      if (!originText || !isString(originText)) {
+        return 0
+      }
+      if (startNum && !isNumber(startNum)) {
+        return 0
+      }
+      
+      var _startNum = 0
+      if (startNum) {
+        _startNum = startNum < 1 ? 1 : startNum
+      } else {
+        _startNum = 1
+      }
+      return originText.toLowerCase().indexOf(searchText.toLowerCase(), _startNum - 1) + 1
+    },
+    /**
+     * @return {string}
+     */
+    TRIM: function (text) {
+      return text && isString(text) ? text.replace(/ +/g, ' ').trim() : ''
+    },
+    /**
+     * @return {string}
+     */
+    UPPER: function (text) {
+      return text && isString(text) ? text.toUpperCase() : ''
+    },
+    /**
+     * @return {array}
+     */
+    UNION: function () {
+      var flattenArgs = []
+      flatten(arguments, flattenArgs)
+      flattenArgs = flattenArgs.filter(function (item) {
+        // 去除空串
+        return item !== ''
+      })
+      if (flattenArgs.length === 0) {
+        return []
+      }
+      if (flattenArgs.length === 1) {
+        return flattenArgs[0]
+      }
+      return arrayUniq(objectValues(flattenArgs))
+    },
+    // 日期函数
+    DATE: function () {
+      return 6 === arguments.length ? new Date(parseInt(arguments[0], 10), parseInt(arguments[1], 10) - 1, parseInt(arguments[2], 10), parseInt(arguments[3], 10), parseInt(arguments[4], 10), parseInt(arguments[5], 10)) : 3 === arguments.length ? new Date(parseInt(arguments[0], 10), parseInt(arguments[1], 10) - 1, parseInt(arguments[2], 10)) : 0 === arguments.length ? new Date : new Date(arguments[0])
+    },
+    DATEDELTA: function (time, deltaDays) {
+      var date = parseDate(time)
+      if (date) {
+        deltaDays = isNumber(deltaDays) ? deltaDays : 0
+        return new Date(date.getTime() + (deltaDays * 24 * 60 * 60 * 1000))
+      }
+      return null
+    },
+    /**
+     * @return {number}
+     */
+    DATEDIF: function (startTime, endTime, unit) {
+      var startDate = parseDate(startTime)
+      var endDate = parseDate(endTime)
+      unit = unit ? unit : 'd'
+      
+      if (!startDate || !endDate) {
+        return null
+      }
+      
+      var _startTime = startDate.getTime()
+      var _endTime = endDate.getTime()
+      if (_startTime > _endTime) {
+        return null
+      }
+      
+      var deltas = 1000
+      var deltam = 60 * deltas // 分钟
+      var deltah = 60 * deltam
+      var deltad = 24 * deltah
+      var deltaM = 30 * deltad // 月
+      var deltay = 365 * deltad
+      
+      var result = 0
+      switch (unit) {
+        case 'y':
+          result = (_endTime - _startTime) / deltay
+          break
+        case 'M':
+          result = (_endTime - _startTime) / deltaM
+          break
+        case 'd':
+          result = (_endTime - _startTime) / deltad
+          break
+        case 'h':
+          result = (_endTime - _startTime) / deltah
+          break
+        case 'm':
+          result = (_endTime - _startTime) / deltam
+          break
+        case 's':
+          result = (_endTime - _startTime) / deltas
+          break
+        default:
+          break
+      }
+      return parseFloat(result.toFixed(6))
+    },
+    DAY: function (time) {
+      var date = parseDate(time)
+      return date ? date.getDate() : null
+    },
+    HOUR: function (time) {
+      var date = parseDate(time)
+      return date ? date.getHours() : null
+    },
+    MINUTE: function (time) {
+      var date = parseDate(time)
+      return date ? date.getMinutes() : null
+    },
+    MONTH: function (time) {
+      var date = parseDate(time)
+      return date ? date.getMonth() + 1 : null
+    },
+    WEEKDAY: function (time, type) {
+      var date = parseDate(time)
+      if(!date) {
+        return null
+      }
+      var day = date.getDay()
+      //周日返回0，这里转换为7
+      if (day === 0){
+        day = 7
+      }
+      // 默认的为1，1和17 结果一致
+      if ((!type && type !== 0) || type === 1) {
+        type = 17
+      }
+      // 2和11 结果一致
+      if (type === 2) {
+        type = 11
+      }
+      // 3 返回的是0到6 数字 0（星期一）到 6（星期日）。
+      if (type === 3) {
+        return day - 1
+      }
+      if (type === 11 || type === 12 || type === 13 || type === 14 || type === 15 || type === 16 || type === 17) {
+        day = day - type + 11
+        return day < 1 ? day + 7 : day
+      }
+      return null
+    },
+    WEEKNUM: function (time, type) {
+      var date = parseDate(time)
+      if (!date) {
+        return null
+      }
+      var fday = new Date(date.getFullYear(), 0, 1)
+      var resMap = {
+        1: 0,
+        2: 1,
+        11: 1,
+        12: 2,
+        13: 3,
+        14: 4,
+        15: 5,
+        16: 6,
+        17: 0
+      }
+      var fweekDay = type == null ? 0 : resMap[type]
+      if (fweekDay != null) {
+        var i = (fweekDay + 7 - fday.getDay()) % 7
+        var a = 0 < i ? 1 : 0
+        var e = fday.getTime() + i * 864e5
+        return Math.floor((date.getTime() - e) / 864e5 / 7 + 1) + a
+      }
+      return null
+    },
+    NOW: function () {
+      return new Date
+    },
+    YEAR: function (time) {
+      var date = parseDate(time)
+      return date ? date.getFullYear() : null
+    },
+    NETWORKDAYS: function (start, end, holidays) {
+      var startDate = parseDate(start)
+      var endDate = parseDate(end)
+      if (!startDate || !endDate) {
+        return null
+      }
+      var days = 0
+      if (!isBeforeDate(startDate, endDate)) {
+        return isSameDate(startDate, endDate) && isWorkDay(startDate, holidays) ? 1 : 0
+      }
+      var sdate = startDate
+      while (!isBeforeDate(endDate, sdate)) {
+        if (isWorkDay(sdate, holidays)) {
+          days = days + 1
+        }
+        sdate = new Date(sdate.getTime() + 864e5)
+      }
+      return days
+    },
+    // 逻辑函数
+    /**
+     * @return {boolean}
+     */
+    AND: function () {
+      var flattenArgs = []
+      flatten(arguments, flattenArgs)
+      for (var i = 0; i < flattenArgs.length; i++) {
+        if (!(flattenArgs[i])) {
+          return false
+        }
+      }
+      return true
+    },
+    IF: function (logical, trueValue, falseValue) {
+      return (logical) ? trueValue : falseValue
+    },
+    IFS: function () {
+      for (var i = 0; i < arguments.length; i += 2) {
+        if (arguments[i]) {
+          return arguments[i + 1]
+        }
+      }
+    },
+    /**
+     * @return {boolean}
+     */
+    NOT: function (logical) {
+      return !(logical)
+    },
+    /**
+     * @return {boolean}
+     */
+    OR: function () {
+      var flattenArgs = []
+      flatten(arguments, flattenArgs)
+      for (var i = 0; i < flattenArgs.length; i++) {
+        if (flattenArgs[i]) {
+          return true
+        }
+      }
+      return false
+    },
+    /**
+     * @return {boolean}
+     */
+    XOR: function () {
+      var flattenArgs = []
+      flatten(arguments, flattenArgs)
+      var result = ''
+      for (var i = 0; i < flattenArgs.length; i++) {
+        result += (flattenArgs[i] ? '1' : '0')
+      }
+      return result.indexOf('1') !== -1 && result.indexOf('0') !== -1
+    },
+  
+    // 高级函数
+    
+    GETFORMNAME: function () {
+      return window.formulaFormInfo.name ? window.formulaFormInfo.name + '' : ''
+    },
+    GETFORMID: function () {
+      return window.formulaFormInfo.id ? window.formulaFormInfo.id : ''
+    },
+    GETAPIID: function () {
+      return window.formulaFormInfo.appName ? window.formulaFormInfo.appName : ''
+    },
+    GETFID: function () {
+      return window.formulaFormInfo.fid ? window.formulaFormInfo.fid + '' : ''
+    }
+  }
+  
+  /**
+   * 定义公式tokens
+   */
+  function getFormulaTokenObj() {
+    var createToken = chevrotain.createToken
+    var lexer = chevrotain.Lexer
+    
+    var unary = createToken({name: 'Unary', pattern: lexer.NA})
+    var addition = createToken({name: 'Addition', pattern: lexer.NA})
+    var multiplication = createToken({name: 'Multiplication', pattern: lexer.NA})
+    var equal = createToken({name: 'Equal', pattern: lexer.NA})
+    var compare = createToken({name: 'Compare', pattern: lexer.NA})
+    
+    return {
+      WhiteSpace: createToken({name: 'WhiteSpace', pattern: /\s+/, group: lexer.SKIPPED}),
+      String: createToken({name: 'String', pattern: /("(\\\\|\\"|[^"])*"|'(\\\\|\\'|[^'])*')/}),
+      Number: createToken({name: 'Number', pattern: /[0-9]+(\.[0-9]+)?(e[+-]?[0-9]+)?/}),
+      Boolean: createToken({name: 'Boolean', pattern: /(true|false)/}),
+      Empty: createToken({name: 'Empty', pattern: /(null|undefined)/}),
+      NaN: createToken({name: 'NaN', pattern: /NaN/}),
+      Comma: createToken({name: 'Comma', pattern: /,/}),
+      Func: createToken({name: 'Func', pattern: /[A-Z0-9]+/}),
+      LParen: createToken({name: 'LParen', pattern: /\(/}),
+      RParen: createToken({name: 'RParen', pattern: /\)/}),
+      LSquare: createToken({name: 'LSquare', pattern: /\[/}),
+      RSquare: createToken({name: 'RSquare', pattern: /]/}),
+      Plus: createToken({name: 'Plus', pattern: /\+(?!\+)/, categories: [unary, addition]}),
+      Minus: createToken({name: 'Minus', pattern: /-(?!-)/, categories: [unary, addition]}),
+      Unary: unary,
+      Addition: addition,
+      Multi: createToken({name: 'Multi', pattern: /\*/, categories: [multiplication]}),
+      Div: createToken({name: 'Div', pattern: /\//, categories: [multiplication]}),
+      Multiplication: multiplication,
+      LessOrEqual: createToken({name: 'LessOrEqual', pattern: /<=/, categories: [compare]}),
+      GreaterOrEqual: createToken({name: 'GreaterOrEqual', pattern: />=/, categories: [compare]}),
+      Less: createToken({name: 'Less', pattern: /</, categories: [compare]}),
+      Greater: createToken({name: 'Greater', pattern: />/, categories: [compare]}),
+      Compare: compare,
+      EqualStrict: createToken({name: 'EqualStrict', pattern: /===/, categories: [equal]}),
+      NotEqualStrict: createToken({name: 'NotEqualStrict', pattern: /!==/, categories: [equal]}),
+      EqualLoose: createToken({name: 'EqualLoose', pattern: /==/, categories: [equal]}),
+      NotEqualLoose: createToken({name: 'NotEqualLoose', pattern: /!=/, categories: [equal]}),
+      Equal: equal,
+      LogicNot: createToken({name: 'LogicNot', pattern: /!/, categories: [unary]}),
+      LogicAnd: createToken({name: 'LogicAnd', pattern: /&&/}),
+      LogicOr: createToken({name: 'LogicOr', pattern: /\|\|/}),
+      BitAnd: createToken({name: 'BitAnd', pattern: /&/}),
+      BitOr: createToken({name: 'BitOr', pattern: /\|/})
+    }
+  }
+  
+  var tokenObj = getFormulaTokenObj()
+  
+  function getFormulaTokens() {
+    return [
+      tokenObj.WhiteSpace,
+      tokenObj.String,
+      tokenObj.Number,
+      tokenObj.Boolean,
+      tokenObj.Empty,
+      tokenObj.NaN,
+      tokenObj.Comma,
+      tokenObj.Func,
+      tokenObj.LParen,
+      tokenObj.RParen,
+      tokenObj.LSquare,
+      tokenObj.RSquare,
+      tokenObj.Plus,
+      tokenObj.Minus,
+      tokenObj.Unary,
+      tokenObj.Addition,
+      tokenObj.Multi,
+      tokenObj.Div,
+      tokenObj.Multiplication,
+      tokenObj.LessOrEqual,
+      tokenObj.GreaterOrEqual,
+      tokenObj.Less,
+      tokenObj.Greater,
+      tokenObj.Compare,
+      tokenObj.EqualStrict,
+      tokenObj.NotEqualStrict,
+      tokenObj.EqualLoose,
+      tokenObj.NotEqualLoose,
+      tokenObj.Equal,
+      tokenObj.LogicNot,
+      tokenObj.LogicAnd,
+      tokenObj.LogicOr,
+      tokenObj.BitAnd,
+      tokenObj.BitOr
+    ]
+  }
+  
+  var allTokens = getFormulaTokens()
+  var lexer = getFormulaLexer()
+  
+  /**
+   * 公式词法分析器
+   * @returns {*}
+   */
+  function getFormulaLexer() {
+    return new chevrotain.Lexer(allTokens, {
+      ensureOptimizations: true
+    })
+  }
+  
+  var parser = getFormulaParser()
+  
+  /**
+   * 公式解析器
+   * @returns {FormulaParser}
+   */
+  function getFormulaParser() {
+    var parser = chevrotain.CstParser
+    
+    function FormulaParser() {
+      parser.call(this, allTokens)
+      
+      var _this = this
+      _this.RULE('expr', function () {
+        _this.SUBRULE(_this.commaExpression)
+      })
+      
+      _this.RULE('commaExpression', function () {
+        _this.SUBRULE(_this.binaryExpression)
+        _this.MANY(function () {
+          _this.CONSUME(tokenObj.Comma)
+          _this.SUBRULE2(_this.binaryExpression)
+        })
+      })
+      
+      _this.RULE('binaryExpression', function () {
+        _this.SUBRULE(_this.unaryExpression)
+        _this.MANY(function () {
+          _this.OR(_this.c1 || (
+              _this.c1 = [
+                {
+                  ALT: function () {
+                    _this.CONSUME(tokenObj.LogicOr)
+                  }
+                },
+                {
+                  ALT: function () {
+                    _this.CONSUME(tokenObj.LogicAnd)
+                  }
+                },
+                {
+                  ALT: function () {
+                    _this.CONSUME(tokenObj.BitOr)
+                  }
+                },
+                {
+                  ALT: function () {
+                    _this.CONSUME(tokenObj.BitAnd)
+                  }
+                },
+                {
+                  ALT: function () {
+                    _this.CONSUME(tokenObj.Equal)
+                  }
+                },
+                {
+                  ALT: function () {
+                    _this.CONSUME(tokenObj.Compare)
+                  }
+                },
+                {
+                  ALT: function () {
+                    _this.CONSUME(tokenObj.Addition)
+                  }
+                },
+                {
+                  ALT: function () {
+                    _this.CONSUME(tokenObj.Multiplication)
+                  }
+                }
+              ]
+          ))
+          _this.SUBRULE2(_this.unaryExpression)
+        })
+      })
+      
+      _this.RULE('unaryExpression', function () {
+        _this.MANY(function () {
+          _this.CONSUME(tokenObj.Unary)  // 代表一元符号 +，-，!
+        })
+        _this.SUBRULE(_this.atomicExpression)
+      })
+      
+      _this.RULE('atomicExpression', function () {
+        _this.OR(_this.c2 ||
+            (_this.c2 = [
+                  {
+                    ALT: function () {
+                      _this.SUBRULE(_this.array)
+                    }
+                  },
+                  {
+                    ALT: function () {
+                      _this.SUBRULE(_this.func)
+                    }
+                  },
+                  {
+                    ALT: function () {
+                      _this.SUBRULE(_this.group)
+                    }
+                  },
+                  {
+                    ALT: function () {
+                      _this.SUBRULE(_this.base)
+                    }
+                  }
+                ]
+            ))
+        
+        _this.MANY(function () {
+          _this.CONSUME(tokenObj.LSquare)
+          _this.SUBRULE(_this.expr)
+          _this.CONSUME(tokenObj.RSquare)
+        })
+      })
+      
+      _this.RULE('array', function () {
+        _this.CONSUME(tokenObj.LSquare)
+        _this.MANY_SEP({
+          SEP: tokenObj.Comma,
+          DEF: function () {
+            _this.SUBRULE(_this.binaryExpression)
+          }
+        })
+        _this.CONSUME(tokenObj.RSquare)
+      })
+      
+      _this.RULE('func', function () {
+        _this.CONSUME(tokenObj.Func)
+        _this.CONSUME(tokenObj.LParen)
+        _this.OPTION(function () {
+          _this.SUBRULE(_this.binaryExpression)
+          _this.MANY(function () {
+            _this.CONSUME(tokenObj.Comma)
+            _this.SUBRULE2(_this.binaryExpression)
+          })
+          _this.OPTION2(function () {
+            _this.CONSUME2(tokenObj.Comma)
+          })
+        })
+        _this.CONSUME(tokenObj.RParen)
+      })
+      
+      _this.RULE('group', function () {
+        _this.CONSUME(tokenObj.LParen)
+        _this.AT_LEAST_ONE_SEP({
+          SEP: tokenObj.Comma,
+          DEF: function () {
+            _this.SUBRULE(_this.expr)
+          }
+        })
+        _this.CONSUME(tokenObj.RParen)
+      })
+      
+      _this.RULE('base', function () {
+        _this.OR(_this.c3 ||
+            (_this.c3 = [
+                  {
+                    ALT: function () {
+                      _this.CONSUME(tokenObj.String)
+                    }
+                  },
+                  {
+                    ALT: function () {
+                      _this.CONSUME(tokenObj.Number)
+                    }
+                  },
+                  {
+                    ALT: function () {
+                      _this.CONSUME(tokenObj.Boolean)
+                    }
+                  },
+                  {
+                    ALT: function () {
+                      _this.CONSUME(tokenObj.Empty)
+                    }
+                  },
+                  {
+                    ALT: function () {
+                      _this.CONSUME(tokenObj.NaN)
+                    }
+                  }
+                ]
+            ))
+      })
+      
+      _this.performSelfAnalysis()
+    }
+    
+    return new ((FormulaParser.prototype = Object.create(parser.prototype)).constructor = FormulaParser)
+  }
+  
+  function consumeBinaryToken(sortedBinaryTokens, unaryValueArr, currToken, tokenMatcher) {
+    var currIndex = -1
+    for (var i = 0; i < sortedBinaryTokens.length; i++) {
+      if (sortedBinaryTokens[i].image === currToken.image) {
+        currIndex = i
+        break
+      }
+    }
+    
+    if (currIndex <= -1) {
+      return null
+    }
+    var leftRightUnaryValueArr = unaryValueArr.length > 2 ? unaryValueArr.slice().splice(currIndex, 2) : unaryValueArr.slice()
+    var leftUnaryValue = isNaN(leftRightUnaryValueArr[0]) ? 0 : leftRightUnaryValueArr[0]
+    var rightUnaryValue = isNaN(leftRightUnaryValueArr[1]) ? 0 : leftRightUnaryValueArr[1]
+    
+    var calcResult = null
+    // +, -, *, / 运算
+    if (tokenMatcher(currToken, tokenObj.Addition) || tokenMatcher(currToken, tokenObj.Multiplication)) {
+      calcResult = evalExpression(currToken.image, leftUnaryValue, rightUnaryValue)
+    }
+    // <=, >=, <, > 运算
+    if (tokenMatcher(currToken, tokenObj.Compare)) {
+      if (tokenMatcher(currToken, tokenObj.LessOrEqual)) {
+        calcResult = leftUnaryValue <= rightUnaryValue
+      }
+      if (tokenMatcher(currToken, tokenObj.GreaterOrEqual)) {
+        calcResult = leftUnaryValue >= rightUnaryValue
+      }
+      if (tokenMatcher(currToken, tokenObj.Less)) {
+        calcResult = leftUnaryValue < rightUnaryValue
+      }
+      if (tokenMatcher(currToken, tokenObj.Greater)) {
+        calcResult = leftUnaryValue > rightUnaryValue
+      }
+    }
+    // ===, !==, ==, != 运算
+    if (tokenMatcher(currToken, tokenObj.Equal)) {
+      if (tokenMatcher(currToken, tokenObj.EqualStrict)) {
+        calcResult = leftUnaryValue === rightUnaryValue
+      }
+      if (tokenMatcher(currToken, tokenObj.NotEqualStrict)) {
+        calcResult = leftUnaryValue !== rightUnaryValue
+      }
+      if (tokenMatcher(currToken, tokenObj.EqualLoose)) {
+        calcResult = leftUnaryValue == rightUnaryValue
+      }
+      if (tokenMatcher(currToken, tokenObj.NotEqualLoose)) {
+        calcResult = leftUnaryValue != rightUnaryValue
+      }
+    }
+    // & 运算
+    if (tokenMatcher(currToken, tokenObj.BitAnd)) {
+      calcResult = leftUnaryValue & rightUnaryValue
+    }
+    // | 运算
+    if (tokenMatcher(currToken, tokenObj.BitOr)) {
+      calcResult = leftUnaryValue | rightUnaryValue
+    }
+    // && 运算
+    if (tokenMatcher(currToken, tokenObj.LogicAnd)) {
+      calcResult = leftUnaryValue && rightUnaryValue
+    }
+    // || 运算
+    if (tokenMatcher(currToken, tokenObj.LogicOr)) {
+      calcResult = leftUnaryValue || rightUnaryValue
+    }
+    
+    sortedBinaryTokens.splice(currIndex, 1)
+    unaryValueArr.splice(currIndex, 2, calcResult)
+  }
+  
+  function evalExpressionOld(operator, left, right) {
+    var operatorArr = ['+', '-', '*', '/']
+    if (operatorArr.indexOf(operator) === -1) {
+      return null
+    }
+    if (operator === '+') {
+      return left + right
+    }
+    if (!isNumberValidate(left) || !isNumberValidate(right)) {
+      return null
+    }
+    if (operator === '-') {
+      return left - right
+    }
+    if (operator === '*') {
+      return left * right
+    }
+    if (operator === '/') {
+      if (right === 0) {
+        return null
+      }
+      return left / right
+    }
+    return null
+  }
+  
+  /**
+   * 使用big.js 计算，避免原生js计算中的小数精度问题
+   * @param operator
+   * @param left
+   * @param right
+   * @returns {null|*|number}
+   */
+  function evalExpression(operator, left, right) {
+    var operatorArr = ['+', '-', '*', '/'], result
+    if (operatorArr.indexOf(operator) === -1) {
+      return null
+    }
+    if (!isNumberValidate(left) || !isNumberValidate(right)) {
+      return operator === '+' ?  left + right : null
+    }
+    if (isNumberValidate(left) && isNumberValidate(right)) {
+      switch (operator) {
+        case '+':
+          result = new Big(left).plus(right)
+          break
+        case '-':
+          result = new Big(left).minus(right)
+          break
+        case '*':
+          result = new Big(left).times(right)
+          break
+        case '/':
+          result = 0 === right ? '' : new Big(left).div(right)
+      }
+      return '' === result ? null : Number(result.toString())
+    }
+    return null
+  }
+  
+  var interpreter = getFormulaInterpreter()
+  
+  /**
+   * 公式翻译并生成结果
+   * @returns {jQuery}
+   */
+  function getFormulaInterpreter() {
+    var cstVisitor = parser.getBaseCstVisitorConstructor()
+    var tokenMatcher = chevrotain.tokenMatcher
+    
+    function FormulaVisitor() {
+      cstVisitor.apply(this, arguments)
+      this.validateVisitor()
+    }
+    
+    (FormulaVisitor.prototype = Object.create(cstVisitor.prototype)).constructor = FormulaVisitor
+    
+    return $.extend(FormulaVisitor.prototype, {
+      expr: function (ctx) {
+        return this.visit(ctx.commaExpression)
+      },
+      commaExpression: function (ctx) {
+        ctx = ctx.binaryExpression.slice(-1)[0]
+        return this.visit(ctx)
+      },
+      binaryExpression: function (ctx) {
+        // !!! allBinaryTokens中的token定义顺序必须按照计算的优先级来确定
+        var allBinaryTokens = [ // 数组中的某些token可能为空，因为一个公式可能不包含Multiplication等操作符
+          ctx.Multiplication,
+          ctx.Addition,
+          ctx.Compare,
+          ctx.Equal,
+          ctx.BitAnd,
+          ctx.BitOr,
+          ctx.LogicAnd,
+          ctx.LogicOr
+        ]
+        
+        var binaryTokens = [] // 按优先级排列的token
+        for (var i = 0; i < allBinaryTokens.length; i++) {
+          var token = allBinaryTokens[i]
+          if (token) {
+            flatten(token, binaryTokens)
+          }
+        }
+        
+        var sortedBinaryTokens = []  // 正常的公式的顺序token
+        if (binaryTokens) {
+          for (var j = 0; j < binaryTokens.length; j++) {
+            sortedBinaryTokens.push(binaryTokens[j])
+          }
+          sortedBinaryTokens = sortedBinaryTokens.sort(function (a, b) {
+            return a.startOffset - b.startOffset
+          })
+        }
+        
+        var unaryValueArr = [] // 一元计算结果数组
+        for (var k = 0; k < ctx.unaryExpression.length; k++) {
+          unaryValueArr.push(this.visit(ctx.unaryExpression[k]))
+        }
+        
+        // 进行二元运算
+        for (var t = 0; t < binaryTokens.length; t++) {
+          consumeBinaryToken(sortedBinaryTokens, unaryValueArr, binaryTokens[t], tokenMatcher)
+        }
+        
+        return unaryValueArr[0]
+      },
+      unaryExpression: function (ctx) {
+        var result = this.visit(ctx.atomicExpression)
+        if (!ctx.Unary) {
+          return result
+        }
+        
+        ctx = ctx.Unary.slice().reverse()
+        for (var i = 0; i < ctx.length; i++) {
+          if (tokenMatcher(ctx[i], tokenObj.Minus)) {
+            result = -result
+          } else if (tokenMatcher(ctx[i], tokenObj.Plus)) {
+            result = +result
+          } else {
+            result = !result
+          }
+        }
+        return result
+      },
+      atomicExpression: function (ctx) {
+        if (ctx.base) {
+          return this.visit(ctx.base)
+        }
+        if (ctx.array) {
+          return this.visit(ctx.array)
+        }
+        if (ctx.group) {
+          return this.visit(ctx.group)
+        }
+        if (ctx.func) {
+          return this.visit(ctx.func)
+        }
+        if (ctx.expr.length > 0) {
+          return this.visit(ctx.expr[ctx.expr.length - 1])
+        }
+        return null
+      },
+      array: function (ctx) {
+        var result = []
+        if (ctx.binaryExpression && ctx.binaryExpression.length) {
+          for (var i = 0; i < ctx.binaryExpression.length; i++) {
+            result.push(this.visit(ctx.binaryExpression[i]))
+          }
+        }
+        return result
+      },
+      func: function (ctx) {
+        var func = ctx.Func[0].image
+        var params = []
+        if (ctx.binaryExpression && ctx.binaryExpression.length) {
+          for (var i = 0; i < ctx.binaryExpression.length; i++) {
+            params.push(this.visit(ctx.binaryExpression[i]))
+          }
+        }
+        // 执行函数，返回结果
+        if (func) {
+          return Formula[func].apply(this, params)
+        }
+      },
+      group: function (ctx) {
+        return this.visit(ctx.expr)
+      },
+      base: function (ctx) {
+        if (ctx.String) {
+          var str = ctx.String[0].image
+          if (str && str.length > 1) {
+            return str.substring(1, str.length - 1)
+          }
+          return str
+        }
+        if (ctx.Number) {
+          return Number(ctx.Number[0].image)
+        }
+        if (ctx.Boolean) {
+          return ctx.Boolean[0].image === 'true'
+        }
+        if (ctx.Empty) {
+          return null
+        }
+        if (ctx.NaN) {
+          return Number.NaN
+        }
+        return 0
+      }
+    })
+  }
+  
+  function isNumber(number) {
+    return $.isNumeric(number)
+  }
+  
+  function isNumberValidate(number) {
+    return ((typeof number === 'number') && !isNaN(number) && isFinite(number)) || /^[-]?[\.\d]+$/.test(number)
+  }
+  
+  function parseNumber(number) {
+    var result = parseFloat(number)
+    return isNumberValidate(result) ? result : null
+  }
+  
+  function getValidateNumbers(args) {
+    var numbers = []
+    for (var i = 0; i < args.length; i++) {
+      if (isNumberValidate(args[i])) {
+        numbers.push(args[i])
+      }
+    }
+    return numbers
+  }
+  
+  function isString(str) {
+    return typeof str === 'string'
+  }
+  
+  function isDate(date) {
+    return date instanceof Date
+  }
+  
+  function getValidateDate(date) {
+    return date && isDate(date) && !isNaN(date.getTime()) ? date : null
+  }
+  
+  function isNull(data) {
+    return null == data
+  }
+  
+  /**
+   * 获取对象中值的集合
+   */
+  function objectValues(obj) {
+    if (!Object.values) {
+      return Object.keys(obj).map(function (key) {
+        return obj[key]
+      })
+    }
+    return Object.values(obj)
+  }
+  
+  /**
+   * 数组元素去重
+   */
+  function arrayUniq(arr) {
+    return arr.filter(function (value, index, self) {
+      return self.indexOf(value) === index
+    })
+  }
+  
+  /**
+   * 是否为同一天
+   * @param date
+   * @param antherDate
+   * @returns {boolean}
+   */
+  function isSameDate(date, antherDate) {
+    return (isDate(date) && isDate(antherDate)) && (date.getFullYear() === antherDate.getFullYear() && date.getMonth() === antherDate.getMonth() && date.getDate() === antherDate.getDate())
+  }
+  
+  /**
+   * date 是否在 antherDate 在这一天前
+   * @param date
+   * @param antherDate
+   * @returns {boolean}
+   */
+  function isBeforeDate(date, antherDate) {
+    return isDate(date) && isDate(antherDate) && (date.getTime() < antherDate.getTime()) && !isSameDate()
+  }
+  
+  /**
+   * 判断是否为周末
+   * @param date
+   * @returns {boolean}
+   */
+  function isWeekEnd(date) {
+    if (!isDate(date)) {
+      return false
+    }
+    var t = date.getDay()
+    return 0 === t || 6 === t
+  }
+  
+  /**
+   * 判断是否为工作日，如果是周末则不是（和实际不符合），如果 holidays 有 date 则也不是工作日
+   * @param date
+   * @param holidays
+   * @returns {boolean}
+   */
+  function isWorkDay(date, holidays) {
+    if (date = parseDate(date), isNull(date)) {
+      return false;
+    }
+    if (isWeekEnd(date)) {
+      return false
+    }
+    if ($.isEmptyObject(holidays)) {
+      return true
+    }
+    var dateArr = holidays.filter(function (itemDate) {
+      return !!itemDate && isSameDate(date, parseDate(itemDate))
+    })
+    return dateArr.length === 0
+  }
+  
+  /**
+   * 解析日期
+   * @param date
+   * @returns {null|*|null|Date}
+   */
+  function parseDate(date) {
+    if (!date) {
+      return null
+    }
+    
+    if (isNumber(date)) {
+      return getValidateDate(new Date(date))
+    }
+    
+    if (isString(date)) {
+      if (date.match(/^[\d-]+T[\d:.]+Z$/)) {
+        return getValidateDate(new Date(date))
+      }
+      
+      var _date = date.trim().split(' ')
+      if (_date) {
+        var ymd = _date[0]
+        if (ymd) {
+          var ymdArr = ymd.split('-')
+          var year = ymdArr[0]
+          var month = ymdArr[1]
+          var day = ymdArr[2]
+          
+          if (isNumber(year)) {
+            return null
+          }
+          
+          month = isNumber(month) ? month - 1 : 0
+          day = isNumber(day) ? day : 1
+          
+          var hms = _date[1]
+          if (hms) {
+            var hmsArr = hms.split(':')
+            var hour = hmsArr[0]
+            var minute = hmsArr[1]
+            var second = hmsArr[2]
+            var milliSecond = 0
+            hour = isNumber(hour) ? hour : 0
+            minute = isNumber(minute) ? minute : 0
+            second = isNumber(second) ? second : 0
+            
+            if (/\./.test(second)) {
+              var secondArr = second.split('.')
+              second = isNumber(secondArr[0]) ? secondArr[0] : 0
+              milliSecond = isNumber(secondArr[1]) ? secondArr[1] : 0
+            }
+            return new Date(year, month, day, hour, minute, second, milliSecond)
+          }
+          return new Date(year, month, day)
+        }
+      }
+      return null
+    }
+    return getValidateDate(new Date(date))
+  }
+  
+  /**
+   * 将多维数组 || 一维数组 转换为 一维数组
+   * @param params
+   * @param result
+   * @returns {*|Array}
+   */
+  function flatten(params, result) {
+    result = result || []
+    for (var i = 0; i < params.length; i++) {
+      var param = params[i]
+      if (param instanceof Array) {
+        flatten(param, result)
+      } else {
+        result.push(param)
+      }
+    }
+    return result
+  }
+  
+  /**
+   * 解析公式并计算结果
+   * @param formula
+   * @returns {null|*|void}
+   */
+  function parse(formula) {
+    var lexingResult = lexer.tokenize(formula)
+    if (lexingResult.errors.length > 0) {
+      console.log('formula Lexer errors: ', lexingResult.errors)
+      return null
+    }
+    
+    parser.input = lexingResult.tokens
+    var parseResult = parser.expr()
+    if (parser.errors.length > 0) {
+      console.log('formula Parser errors: ', parser.errors)
+      return null
+    }
+    
+    try {
+      return interpreter.visit(parseResult)
+    } catch (e) {
+      console.log('formula Visit errors: ', e)
+      return null
+    }
+  }
+  
+  /**
+   * 将公式参数换成变量值
+   */
+  function toFormulaStr(formula, vals, index) {
+    if (formula !== '') {
+      var e = []
+      var lines = formula.split('\n')
+      for (var l = 0; l < lines.length; l++) {
+        var lineStr = ''
+        if (lines[l].length === 0) {
+          continue
+        }
+        var fields = lines[l].split(new RegExp('(\\$[0-9a-zA-Z._#@]+)', 'g'))
+        for (var i = 0; i < fields.length; i++) {
+          var field = fields[i]
+          if (/\$(.*?)#/.test(field)) {
+            var comptInfos = field.replace('$', '').split('#')
+            var comptDatas = comptInfos[0].split('_')
+            var comptId = comptDatas[1]
+            if (comptDatas[0] === 'detailcombox') {
+              comptId = comptDatas[2]
+            }
+            if (comptId) {
+              var comptLabel = (index > -1 && comptDatas[0] === 'detailcombox') ? vals[comptId][index] : vals[comptId]
+              lineStr += comptLabel
+            } else {
+              lineStr += field
+            }
+          } else {
+            lineStr += field
+          }
+        }
+        e.push(lineStr)
+      }
+      return e.join('\n')
+    }
+    return ''
+  }
+  
+  return {
+    parse: parse,
+    toFormulaStr: toFormulaStr
+  }
+})

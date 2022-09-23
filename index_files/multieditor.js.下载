@@ -1,0 +1,452 @@
+var MultiEditor = {
+	puid:'',
+	yunToken:'',
+	prdid : '442',//产品号，云盘那边给我们分配的，区分数据是那个团队传过去的
+	isPhone: false, //是否是移动端
+	idList:[],//编辑器id列表，防止重复调用initEditor
+	hasLoadAttachListener:false, //是否加载了附件监听js
+	noteDomain:'//noteyd.chaoxing.com',//默认的js前缀
+	init: function(){}, //加载配置文件
+	initEditor: function(json, callback, changecallback) {}, //编辑页初始化编辑器
+	loadJSFile: function(src, cb) {},
+	getRichText: function(editorid) {}, // 获取富文本内容
+	renderRichtext: function (editorId,content,ua) {}, //详情页渲染富文本内容
+	getUploadConfig: function (editorId) {}, //获取上传信息
+	unescapeHTML: function(content) {}, //还原html脚本
+	randomUUID:function(){}, //生成随机id
+	getEditor:function(){},//获取编辑器对象
+	focus:function(){},//光标定到编辑器
+	hasLoadEditFile:false, //是否已经加载过编辑页配置文件
+	hasLoadDetailFile:false, //是否已经加载过详情页配置文件
+	hasLoadRichTextUitl:false, //是否已经加载过Richtextutil文件
+}
+
+/*加载配置文件
+*type: edit 或者 detail
+* ua: 指定是app还是pc
+*  */
+MultiEditor.init = function(type,ua){
+	var uaInfor = navigator.userAgent.toLowerCase();
+	if(/Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent)) {
+		MultiEditor.isPhone = true;
+	}else if(ua == 'app'){
+		MultiEditor.isPhone = true;
+	}
+	//如果已经加载过，不再加载配置文件
+	if (type == 'edit') {
+		if(MultiEditor.hasLoadEditFile){
+			return;
+		}
+		MultiEditor.hasLoadEditFile = true;
+	} else if (type == 'detail') {
+		if(MultiEditor.hasLoadDetailFile){
+			return;
+		}
+		MultiEditor.hasLoadDetailFile = true;
+	}
+	if(MultiEditor.currentDomain && MultiEditor.currentDomain.indexOf('bistatic-') > -1){
+		MultiEditor.noteDomain = '//bistatic-' + MultiEditor.noteDomain.substring(2,MultiEditor.noteDomain.length);
+	}
+	if(MultiEditor.isPhone) { //移动端
+		if(ua == 'xxt' && uaInfor.indexOf("chaoxingstudy")!=-1 ){
+			MultiEditor.loadJSFile(MultiEditor.convertUrl(MultiEditor.noteDomain + '/res/plugin/meditor/js/mrich.text.util.js?_t='+new Date().getTime()),function () {
+				if (type == 'edit') {
+					MrichTextUitl.loadEditorProfile2();
+				} else if (type == 'detail') {
+					MrichTextUitl.loadDetailPageProfile2();
+				}
+			});
+		}else{
+			//防止attachment_listener加载多次
+			if(MultiEditor.hasLoadAttachListener == false && typeof AttachmentListener == 'undefined' ){
+				MultiEditor.loadJSFile(MultiEditor.convertUrl(MultiEditor.noteDomain + '/res/pc/js/noteRichtext/attachment_listener.js?_t='+new Date().getTime()))
+				AttachmentListener = {};
+				MultiEditor.hasLoadAttachListener = true;
+			}
+			if (type == 'edit') {
+				MultiEditor.loadJSFile(MultiEditor.convertUrl(MultiEditor.noteDomain + '/res/plugin/meditor/js/mrich.text.util.js?_t=' + new Date().getTime()), function () {
+					MrichTextUitl.loadMoreEditorProfile();
+				});
+			} else if (type == 'detail') {
+				MultiEditor.loadJSFile(MultiEditor.convertUrl(MultiEditor.noteDomain + '/res/plugin/ueditor4thirdparty/rich.text.util.js'), function () {
+					RichTextUitl.ismultiEditor = true;
+					RichTextUitl.loadDetailPageProfile(true, true, false, false, true);
+				})
+			}
+		}
+	} else { //PC
+		if(typeof RichTextUitl == 'undefined'){
+			if(MultiEditor.hasLoadRichTextUitl){
+				//防止两次调用期间js还没加载完成
+				var timer = setInterval(function () {
+					if(typeof RichTextUitl != 'undefined'){
+						clearInterval(timer)
+						RichTextUitl.ismultiEditor = true;
+						if (type == 'edit') {
+							RichTextUitl.loadEditorProfile(true, true)
+						} else if (type == 'detail') {
+							RichTextUitl.loadDetailPageProfile(true, true,false,false,true);
+						}
+					}
+				},500);
+			}else{
+				MultiEditor.hasLoadRichTextUitl = true;
+				MultiEditor.loadJSFile(MultiEditor.convertUrl(MultiEditor.noteDomain + '/res/plugin/ueditor4thirdparty/rich.text.util.js'), function () {
+					RichTextUitl.ismultiEditor = true;
+					if (type == 'edit') {
+						RichTextUitl.loadEditorProfile(true, true)
+					} else if (type == 'detail') {
+						RichTextUitl.loadDetailPageProfile(true, true,false,false,true);
+					}
+				})
+			}
+		}else{
+			RichTextUitl.ismultiEditor = true;
+			if (type == 'edit') {
+				RichTextUitl.loadEditorProfile(true, true)
+			} else if (type == 'detail') {
+				RichTextUitl.loadDetailPageProfile(true, true,false,false,true);
+			}
+		}
+
+	}
+}
+/*
+ * param editorid: 编辑器id、
+ * param content: 富文本内容、
+ * param editorheight: 初始高度
+ * param callback:回调方法（编辑器加载完成后的回调）
+ * param changecallback: 监听内容改变的时候回调
+ */
+MultiEditor.initEditor = function(json, callback, changecallback) {
+	var editorid = json.editorid;
+
+	if(/Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent)) {
+		MultiEditor.isPhone = true;
+	}
+	if(MultiEditor.isPhone) { //移动端
+		var loadfiletimer = setInterval(function(){
+			if(typeof (zss_editor) != 'undefined' && $('body').length > 0){
+				clearInterval(loadfiletimer);
+				MrichTextUitl.initMoreEditor(json, callback, changecallback);
+				if (typeof callback == 'function') {
+					callback();
+				}
+			}
+		},500)
+	} else { //PC
+		//不允许同一个id多次初始化
+		if(MultiEditor.idList.indexOf(editorid)>-1){
+			return;
+		}
+		MultiEditor.idList.push(editorid);
+		// if (document.getElementById(editorid) && document.getElementById(editorid).querySelector('.edui-editor')) {
+		// 	//已经初始化过的，不再初始化
+		// 	return;
+		// }
+		document.getElementById(editorid).innerHTML = '<script id="multi' + editorid + '" name="content" type="text/plain"><\/script>';
+		var loadfiletimer = setInterval(function () {
+			if (typeof (RichTextUitl) != 'undefined' && typeof (UE) != "undefined" && typeof (UE.getEditor) != "undefined") {
+				clearInterval(loadfiletimer);
+				RichTextUitl.initMoreUEditor(json, callback, changecallback);
+			}
+		}, 500)
+	}
+}
+//编辑页插入编辑器内容
+MultiEditor.setRichText = function(editorid,content) {
+	if(MultiEditor.isPhone) { //移动端
+		content = MrichTextUitl.beforeSetRtfContent(content);
+		MrichTextUitl.setRichtext({'content':content},editorid);
+	} else { //PC
+		if (typeof (UE) == 'undefined') {
+			var loadfiletimer = setInterval(function () {
+				if (typeof (UE) != 'undefined') {
+					clearInterval(loadfiletimer);
+					MultiEditor.setPCContent(editorid,content)
+				}
+			}, 500)
+		}else{
+			MultiEditor.setPCContent(editorid,content)
+		}
+	}
+}
+//辅助方法，不可直接调用
+MultiEditor.setPCContent = function(editorid,content){
+	content = RichTextUitl.beforeSetRtfContent(content);
+	var editor = UE.getEditor('multi' + editorid);
+	if (typeof (editor.body) == 'undefined') {
+		var loadfiletimer = setInterval(function () {
+			if (typeof (editor.body) != 'undefined') {
+				clearInterval(loadfiletimer);
+				editor.setContent(content);
+			}
+		}, 500)
+	} else {
+		editor.setContent(content);
+	}
+}
+
+//编辑页获取编辑器内容
+MultiEditor.getRichText = function(editorid) {
+	if(MultiEditor.isPhone) { //移动端
+		return MrichTextUitl.getRichtextObj(editorid)
+	} else { //PC
+		if (typeof (UE) == 'undefined' || typeof UE.getEditor('multi' + editorid).body == "undefined") {
+			console.log('编辑器未加载完成，请稍后再获取数据')
+			return null;
+		} else {
+			var richtext = RichTextUitl.getRichText(function () {}, 'multi' + editorid);
+			if (!richtext) {
+				richtext = {attachment: "", content: "", content_imgs: "", rtf_content: ""}
+			}
+			return richtext;
+		}
+	}
+}
+
+/**详情页渲染富文本内容
+ * param richtextId 文本容器的id
+ * param content  文本内容
+ */
+MultiEditor.renderRichtext = function (richtextId,content,ua) {
+	if(/Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent)) {
+		MultiEditor.isPhone = true;
+	}
+	// if(MultiEditor.isPhone) { //移动端
+	//
+	// } else { //PC
+	var uaInfor = navigator.userAgent.toLowerCase();
+	if(ua == 'xxt' && uaInfor.indexOf("chaoxingstudy")!=-1 ){
+		if(typeof (MrichTextUitl) == 'undefined'){
+			var loadfiletimer = setInterval(function(){
+				if(typeof (MrichTextUitl) != 'undefined'){
+					clearInterval(loadfiletimer);
+					zss_editor.changeClientType();
+					zss_editor.init();
+					//渲染富文本内容
+					MrichTextUitl.insertDetailContent(content);
+				}
+			},500)
+		}else {
+			zss_editor.changeClientType();
+			zss_editor.init();
+			//渲染富文本内容
+			MrichTextUitl.insertDetailContent(content);
+		}
+	}else{
+		if(typeof (RichTextUitl) == 'undefined'){
+			var loadfiletimer = setInterval(function(){
+				if(typeof (RichTextUitl) != 'undefined'){
+					clearInterval(loadfiletimer);
+					<!-- 富文本内容渲染到页面之前进行的操作-->
+					content = RichTextUitl.beforeSetRtfContent(content);
+					document.getElementById(richtextId).innerHTML = content;
+					<!-- 富文本内容渲染到页面之后进行的操作-->
+					RichTextUitl.afterPageRendered(document.getElementById(richtextId));
+				}
+			},500)
+		}else {
+			<!-- 富文本内容渲染到页面之前进行的操作-->
+			content = RichTextUitl.beforeSetRtfContent(content);
+			document.getElementById(richtextId).innerHTML = content;
+			<!-- 富文本内容渲染到页面之后进行的操作-->
+			RichTextUitl.afterPageRendered(document.getElementById(richtextId));
+		}
+	}
+	// }
+
+}
+
+//获取编辑器对象，编辑器加载完成后调用
+MultiEditor.getEditor = function(richtextId){
+	var editor;
+	if(MultiEditor.isPhone){
+
+	}else {
+		if (typeof (UE) == 'undefined') {
+			var loadfiletimer = setInterval(function () {
+				if (typeof (UE) != 'undefined') {
+					clearInterval(loadfiletimer);
+					editor = UE.getEditor('multi' + richtextId);
+				}
+			}, 500)
+		} else {
+			editor = UE.getEditor('multi' + richtextId);
+		}
+	}
+	return editor;
+}
+//获取编辑器对象，编辑器加载完成后调用
+MultiEditor.focus = function(richtextId,toEnd) {
+	var editor = MultiEditor.getEditor(richtextId);
+	editor.focus(toEnd);
+}
+//加载外部js
+MultiEditor.loadJSFile = function(src, cb) {
+	var head = document.head || document.getElementsByTagName('head')[0]
+	var script = document.createElement('script')
+	cb = cb || function() {}
+	script.type = 'text/javascript'
+	script.src = src
+	if(!('onload' in script)) {
+		script.onreadystatechange = function() {
+			if(this.readyState !== 'complete' && this.readyState !== 'loaded') return
+			this.onreadystatechange = null
+			cb(script)
+		}
+	}
+	script.onload = function() {
+		this.onload = null
+		cb(script)
+	}
+	head.appendChild(script)
+}
+
+MultiEditor.getUploadConfig = function(sync) {
+	if(MultiEditor.puid && MultiEditor.yunToken){
+		return;
+	}
+	if (typeof jQuery != 'undefined') {
+		var json = {
+			url : MultiEditor.convertUrl(MultiEditor.noteDomain + "/pc/files/getUploadConfig"),
+			type : "get",
+			xhrFields: {
+				withCredentials: true
+			},
+			data : {},
+			dataType : "json",
+			success : function(resultData) {
+				if (resultData && resultData.result == 1) {
+					MultiEditor.puid = resultData.msg.puid;
+					MultiEditor.yunToken = resultData.msg.token || '';
+				}
+			},
+			error : function() {
+			}
+		}
+		if (sync) {
+			// 同步调用
+			json.async = false;
+		}
+		$.ajax(json);
+	}
+}
+//获取js当前路径
+MultiEditor.currentDomain = function () {
+	var jsPath = document.currentScript && document.currentScript.src ? document.currentScript.src : function () {
+		var js = document.scripts
+			, last = js.length - 1
+			, src;
+		for (var i = last; i > 0; i--) {
+			if (js[i].readyState === 'interactive') {
+				src = js[i].src;
+				break;
+			}
+			if (js[i].src.indexOf('rich.text.util.js') > -1) {
+				src = js[i].src;
+				break;
+			}
+		}
+		return src || js[last].src;
+	}();
+	jsPath = jsPath.substring(jsPath.indexOf('//') + 2, jsPath.lastIndexOf('/') + 1);
+	// jsPath = jsPath.substring(0, jsPath.indexOf('/'));
+	return jsPath;
+}();
+MultiEditor.convertUrl = function(url) {
+	try {
+		var protocol = window.location.protocol;
+		// 获取当前域名，有一些单位定制了域名，需求请求对应的定制笔记域名
+		// 例如: http://groupyd2.ecourse.ucas.ac.cn/pc/activity/activityList
+		var domain = window.location.host;
+		//处理统一域名+路径访问模式，域名转换为xxxx.com/noteyd/xxx
+		if(MultiEditor.currentDomain && MultiEditor.currentDomain.indexOf('/noteyd/') > -1 && url.indexOf('yd.') > -1){
+			url = url.substring(url.indexOf('//')+2,url.length);
+			urlDomain = url.substring(0,url.indexOf('/'));
+			var service = '';
+			if(urlDomain.substring(0,urlDomain.indexOf('.')).indexOf('yd') > -1){
+				service = '/' + urlDomain.substring(0,urlDomain.indexOf('.'));
+			}
+			url = url.replace(urlDomain,domain + service);
+			return '//' + url;
+		} else if(MultiEditor.currentDomain && MultiEditor.currentDomain.indexOf('bistatic-') > -1 && url.indexOf('chaoxing.com') > -1){
+			//超星域名换成ipv6域名bistatic-xx.chaoxing.com,例noteyd.chaoxing.com换成bistatic-noteyd.chaoxing.com
+			url = url.substring(url.indexOf('//')+2,url.length);
+			return '//bistatic-' + url;
+		}
+		if (domain.indexOf('chaoxing.com') > -1) {
+			// 超星域名
+			if (protocol == 'http:') {
+				// 当前协议是http的，之前http页面可以调用https的接口，现在新版的chrome浏览器上面不行了，这里做下域名适配
+				url = url.replace('https://', 'http://');
+			}else if(protocol == 'https:'){
+				// 当前协议是http的，之前http页面可以调用https的接口，现在新版的chrome浏览器上面不行了，这里做下域名适配
+				if (url.indexOf('http://note.yd.chaoxing.com') > -1) {
+					// 如果请求的笔记地址，替换成笔记的http域名，笔记http和https的域名不同
+					url = url.replace('http://note.yd.chaoxing.com', 'https://noteyd.chaoxing.com');
+				} else {
+					// 其他服务，直接替换协议
+					url = url.replace('http://', 'https://');
+				}
+			}
+			return url;
+		}
+		// 截取域名
+		domain = domain.substring(domain.indexOf('.'))
+		// 笔记服务和小组，有http页面是两级的，note.yd.chaoxing.com , group.yd.chaoxing.com，去掉yd
+		domain = domain.replace('.yd.', '.');
+
+		if (protocol == 'http:' && url.indexOf('https://noteyd.chaoxing.com') > -1) {
+			// 当前页面是http协议的，使用的接口地址是笔记的https域名，需要改成笔记http域名，大多定制单位都是配置http的定制域名，没有配https的
+			var prefix = 'http://note.yd';
+			// 丽水学院 特殊判断
+			if (url.indexOf('lsu.edu.cn') > -1) {
+				prefix = 'http://noteyd';
+			}
+			//当前js地址是非超星域名，noteyd,替换为noteyd,否则还是note.yd
+			if(MultiEditor.currentDomain.indexOf('noteyd') > -1 && MultiEditor.currentDomain.indexOf('chaoxing.com') == -1){
+				url = url.replace('https://noteyd.chaoxing.com', 'http://noteyd' + domain)
+			}else{
+				url = url.replace('https://noteyd.chaoxing.com', prefix + domain)
+			}
+		} else {
+			if (url.indexOf('mooc1-2.chaoxing.com') > -1) {
+				// 目前看一个定制域名的单位（国科大），慕课域名是用的mooc1，mooc1.ecourse.ucas.ac.cn
+				url = url.replace('mooc1-2.chaoxing.com', 'mooc1.chaoxing.com')
+			}
+			url = url.replace('.chaoxing.com', domain);
+		}
+		if (protocol == 'http:' && url.indexOf('https://')>-1) {
+			// 当前页面是http的，请求的地址是https的换，换成http
+			url = url.replace('https://', 'http://')
+		}
+	} catch (e) {
+
+	}
+	return url;
+}
+
+/**
+ * 还原html脚本 < > & " '
+ */
+MultiEditor.unescapeHTML = function(content) {
+	if(content) {
+		return content.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+	}
+	return "";
+}
+
+MultiEditor.randomUUID = function() {
+	var s = [];
+	var hexDigits = "0123456789abcdef";
+	for (var i = 0; i < 36; i++) {
+		s[i] = hexDigits.substr(Math.floor(Math.random() * 0x10), 1);
+	}
+	s[14] = "4";  // bits 12-15 of the time_hi_and_version field to 0010
+	s[19] = hexDigits.substr((s[19] & 0x3) | 0x8, 1);  // bits 6-7 of the clock_seq_hi_and_reserved to 01
+	s[8] = s[13] = s[18] = s[23] = "-";
+
+	var uuid = s.join("");
+	return uuid;
+}
